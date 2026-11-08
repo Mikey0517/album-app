@@ -1,7 +1,7 @@
 name: album_app
 description: A warm, calm LAN family album.
 publish_to: "none"
-version: 1.2.66+70
+version: 1.2.67+71
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   dio: ^5.7.0
+  url_launcher: ^6.3.0
   shared_preferences: ^2.3.2
   cached_network_image: ^3.4.1
   # 直接用 CacheManager/Config 给图片缓存配上限；版本与 cached_network_image 的传递依赖一致。

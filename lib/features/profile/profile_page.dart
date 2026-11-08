@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../api/auth_api.dart';
 import '../../api/storage_api.dart';
@@ -22,6 +24,7 @@ import '../../widgets/app_card.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
 import '../update/force_update_dialog.dart';
+import '../update/ios_update_service.dart';
 import '../update/update_service.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -342,6 +345,16 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     if (_checkingUpdate) return;
     setState(() => _checkingUpdate = true);
     try {
+      if (Platform.isIOS) {
+        final iosRelease = await IosUpdateService.check();
+        if (!mounted) return;
+        if (iosRelease != null) {
+          await _showIosUpdateDialog(iosRelease);
+        } else {
+          _snack('已是最新版本');
+        }
+        return;
+      }
       final release = await UpdateService.check();
       if (!mounted) return;
       if (release != null) {
@@ -372,6 +385,42 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     } finally {
       if (mounted) setState(() => _checkingUpdate = false);
     }
+  }
+
+  /// iPad 上不能自装 IPA：发现新版本后跳浏览器（TestFlight / 下载页）。
+  Future<void> _showIosUpdateDialog(IosReleaseInfo release) async {
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          release.versionName.isEmpty
+              ? '发现新版本'
+              : '发现新版本 ${release.versionName}',
+          style: AppText.titleMedium,
+        ),
+        content: const Text(
+          'iPad 上需要通过 App Store / TestFlight 更新，点「去更新」会用浏览器打开下载页。',
+          style: AppText.bodySmall,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textSecondary,
+            ),
+            child: const Text('稍后'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('去更新'),
+          ),
+        ],
+      ),
+    );
+    if (open != true) return;
+    final uri = Uri.tryParse(release.url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Future<void> _logout() async {
