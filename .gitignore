@@ -1,0 +1,42 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+
+# Android
+android/.gradle/
+android/local.properties
+android/.gradle
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/key.properties
+*.jks
+*.keystore
+captures/
+.externalNativeBuild/
+.cxx/
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# 临时
+*.tmp
+*.bak
+
+# Flutter 生成的 Android 插件注册文件
+android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java

@@ -1,0 +1,4 @@
+storePassword=替换为你的 keystore 密码
+keyPassword=替换为你的 key 密码
+keyAlias=album
+storeFile=../key.jks

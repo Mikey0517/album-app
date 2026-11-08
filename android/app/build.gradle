@@ -1,0 +1,67 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace = "com.example.album_app"
+    compileSdk = 35
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    defaultConfig {
+        applicationId = "com.example.album_app"
+        minSdk = 21
+        targetSdk = 34
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"]
+                keyPassword = keystoreProperties["keyPassword"]
+                storeFile = file(keystoreProperties["storeFile"])
+                storePassword = keystoreProperties["storePassword"]
+            } else {
+                // 无 key.properties 时允许 CI 通过环境变量提供同一套签名。
+                keyAlias = System.getenv("KEY_ALIAS") ?: "album"
+                keyPassword = System.getenv("KEY_PASSWORD")
+                storeFile = file("../key.jks")
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // App 内更新必须保持同一签名，禁止回退到 debug 签名。
+            signingConfig = signingConfigs.release
+        }
+    }
+}
+
+dependencies {
+    // FileProvider 用于把下载的 APK 安全地交给系统安装器。
+    implementation "androidx.core:core:1.13.1"
+}
+
+flutter {
+    source = "../.."
+}
