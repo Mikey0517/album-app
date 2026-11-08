@@ -60,17 +60,30 @@ class MainActivity : FlutterFragmentActivity() {
 
     // 删除原图需要用户在系统弹窗里确认（Android 11+）。
     private var pendingDeleteResult: MethodChannel.Result? = null
-    private var pendingDeleteCount = 0
+    // 这一次交给系统的张数，以及这批图片视频总共要删的张数。
+    private var pendingDeleteRequested = 0
+    private var pendingDeleteTotal = 0
+    // 留着给 Dart 侧显示，方便没有 adb 时也能知道系统为什么拒绝。
+    private var lastDeleteError: String? = null
     private val deleteLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
         val callback = pendingDeleteResult
-        val total = pendingDeleteCount
+        val requested = pendingDeleteRequested
+        val total = pendingDeleteTotal
         pendingDeleteResult = null
-        pendingDeleteCount = 0
+        pendingDeleteRequested = 0
+        pendingDeleteTotal = 0
         if (callback == null) return@registerForActivityResult
-        val deleted = if (result.resultCode == Activity.RESULT_OK) total else 0
-        callback.success(mapOf("deleted" to deleted, "failed" to total - deleted))
+        val approved = result.resultCode == Activity.RESULT_OK
+        val deleted = if (approved) requested else 0
+        callback.success(
+            mapOf(
+                "deleted" to deleted,
+                "failed" to total - deleted,
+                "error" to if (approved) null else "用户取消了系统确认"
+            )
+        )
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -218,38 +231,81 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(mapOf("deleted" to 0, "failed" to 0))
             return
         }
-        val uris = items.mapNotNull { item ->
-            val raw = item["uri"] as? String ?: return@mapNotNull null
-            val isVideo = item["video"] == true
-            val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return@mapNotNull null
-            resolveDeletableUri(uri, isVideo)
+        lastDeleteError = null
+        val picked = ArrayList<Pair<Uri, Boolean>>()
+        for (item in items) {
+            val raw = item["uri"] as? String ?: continue
+            val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: continue
+            picked.add(uri to (item["video"] == true))
         }
-        if (uris.isEmpty()) {
-            result.success(mapOf("deleted" to 0, "failed" to items.size))
+        if (picked.isEmpty()) {
+            result.success(
+                mapOf("deleted" to 0, "failed" to items.size, "error" to "无法识别相册地址")
+            )
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            try {
-                val pendingIntent = MediaStore.createDeleteRequest(contentResolver, uris)
+            // 不同厂商对 picker URI 的支持差别很大（小米尤其严格），
+            // 按“转换后的批量 / 原始批量 / 逐条”依次尝试，哪一档能被系统接住就用哪一档。
+            val converted = picked.mapNotNull { (uri, isVideo) ->
+                runCatching { resolveDeletableUri(uri, isVideo) }.getOrNull()
+                    ?.takeIf { it != uri }
+            }
+            val originals = picked.map { it.first }
+            val batches = ArrayList<List<Uri>>()
+            if (converted.isNotEmpty()) batches.add(converted)
+            batches.add(originals)
+            for (uri in converted.distinct()) batches.add(listOf(uri))
+            for (uri in originals.distinct()) batches.add(listOf(uri))
+            val tried = HashSet<String>()
+            for (batch in batches) {
+                if (batch.isEmpty()) continue
+                if (!tried.add(batch.joinToString("|") { it.toString() })) continue
+                val sender = try {
+                    MediaStore.createDeleteRequest(contentResolver, batch).intentSender
+                } catch (e: Exception) {
+                    recordDeleteError(e)
+                    Log.w("AlbumMediaStore", "createDeleteRequest 被拒（${batch.size} 项）", e)
+                    continue
+                }
                 pendingDeleteResult = result
-                pendingDeleteCount = uris.size
-                deleteLauncher.launch(
-                    IntentSenderRequest.Builder(pendingIntent.intentSender).build()
-                )
-                return
-            } catch (e: Exception) {
-                Log.w("AlbumMediaStore", "createDeleteRequest 失败，改为直接删除", e)
+                pendingDeleteRequested = batch.size
+                pendingDeleteTotal = originals.size
+                try {
+                    deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                    return
+                } catch (e: Exception) {
+                    pendingDeleteResult = null
+                    pendingDeleteRequested = 0
+                    pendingDeleteTotal = 0
+                    recordDeleteError(e)
+                    Log.w("AlbumMediaStore", "无法弹出系统删除确认框", e)
+                }
             }
         }
         var deleted = 0
-        for (uri in uris) {
+        for ((uri, _) in picked) {
             try {
                 if (contentResolver.delete(uri, null, null) > 0) deleted++
             } catch (e: Exception) {
+                recordDeleteError(e)
                 Log.w("AlbumMediaStore", "删除失败: $uri", e)
             }
         }
-        result.success(mapOf("deleted" to deleted, "failed" to uris.size - deleted))
+        result.success(
+            mapOf(
+                "deleted" to deleted,
+                "failed" to picked.size - deleted,
+                "error" to lastDeleteError
+            )
+        )
+    }
+
+    private fun recordDeleteError(e: Exception) {
+        if (lastDeleteError != null) return
+        val message = e.message?.take(120)
+        lastDeleteError = if (message.isNullOrBlank()) e.javaClass.simpleName
+        else "${e.javaClass.simpleName}: $message"
     }
 
     /**

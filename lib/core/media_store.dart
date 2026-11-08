@@ -5,7 +5,14 @@ class SourceDeleteResult {
   final int deleted;
   final int failed;
 
-  const SourceDeleteResult({required this.deleted, required this.failed});
+  /// 系统拒绝删除时的原因，用来在 UI 上说明为什么没删掉。
+  final String? error;
+
+  const SourceDeleteResult({
+    required this.deleted,
+    required this.failed,
+    this.error,
+  });
 
   bool get isSuccess => deleted > 0;
   bool get isPartial => deleted > 0 && failed > 0;
@@ -37,9 +44,10 @@ class MediaStore {
       return SourceDeleteResult(
         deleted: (result?['deleted'] as num?)?.toInt() ?? 0,
         failed: (result?['failed'] as num?)?.toInt() ?? 0,
+        error: result?['error'] as String?,
       );
-    } catch (_) {
-      return SourceDeleteResult(deleted: 0, failed: targets.length);
+    } catch (e) {
+      return SourceDeleteResult(deleted: 0, failed: targets.length, error: '$e');
     }
   }
 }

@@ -161,7 +161,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     final result = await MediaStore.deleteSources(targets);
     if (!mounted) return;
     if (result.deleted == 0) {
-      _snack('没能删除，请稍后在系统相册里手动删除');
+      final reason = result.error;
+      _snack(
+        reason == null || reason.isEmpty
+            ? '没能删除，请稍后在系统相册里手动删除'
+            : '没能删除（$reason），请到系统相册里手动删除',
+      );
     } else if (result.isPartial) {
       _snack('已删除 ${result.deleted} 张，${result.failed} 张未能删除');
     } else {
