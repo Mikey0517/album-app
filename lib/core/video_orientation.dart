@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
@@ -5,6 +7,10 @@ import '../models/media.dart';
 
 /// 全屏浏览时当前的屏幕方向。
 enum ViewerOrientation { portrait, landscape }
+
+/// iOS 侧在 AppDelegate 里还有一道方向收口：iPad 上光靠 SystemChrome
+/// 拦不住旋转，必须由原生返回 supportedInterfaceOrientations。
+const MethodChannel _iosOrientationChannel = MethodChannel('album/orientation');
 
 /// 主界面以竖屏为主；视频页允许用户手动旋转到横屏，但不再按视频比例
 /// 自动切换方向。
@@ -23,26 +29,43 @@ const List<DeviceOrientation> _videoOrientations = [
   DeviceOrientation.landscapeRight,
 ];
 
-Future<void> lockAppPortrait() {
-  return SystemChrome.setPreferredOrientations(_portraitOrientations);
+Future<void> _setIosMask(String mask) async {
+  if (!Platform.isIOS) return;
+  try {
+    await _iosOrientationChannel.invokeMethod<void>('setMask', mask);
+  } catch (_) {
+    // 原生通道不可用时退化到 SystemChrome 的行为。
+  }
+}
+
+Future<void> lockAppPortrait() async {
+  await _setIosMask('portrait');
+  await SystemChrome.setPreferredOrientations(_portraitOrientations);
 }
 
 /// 视频播放时允许手动横屏；是否真的旋转由用户和系统自动旋转开关决定。
-Future<void> allowVideoRotation() {
-  return SystemChrome.setPreferredOrientations(_videoOrientations);
+Future<void> allowVideoRotation() async {
+  if (Platform.isIOS) {
+    await _setIosMask('all');
+  }
+  await SystemChrome.setPreferredOrientations(_videoOrientations);
 }
 
 /// 强制横屏（播放横屏视频、或用户点旋转按钮）。
-Future<void> forceLandscape() {
-  return SystemChrome.setPreferredOrientations(const [
+Future<void> forceLandscape() async {
+  if (Platform.isIOS) {
+    await _setIosMask('landscape');
+  }
+  await SystemChrome.setPreferredOrientations(const [
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
 }
 
 /// 强制竖屏。
-Future<void> forcePortrait() {
-  return SystemChrome.setPreferredOrientations(_portraitOrientations);
+Future<void> forcePortrait() async {
+  await _setIosMask('portrait');
+  await SystemChrome.setPreferredOrientations(_portraitOrientations);
 }
 
 /// 视频是不是横屏：优先用服务端返回的宽高，拿不到时按横屏处理。
