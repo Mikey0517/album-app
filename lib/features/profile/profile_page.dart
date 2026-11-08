@@ -624,11 +624,30 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                     size: 22,
                   ),
                   title: const Text('服务器状态', style: AppText.body),
-                  subtitle: Text(
-                    '${_serverMode.isEmpty ? '未连接' : _serverMode} · $_server',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppText.caption,
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '${_serverMode.isEmpty ? '未连接' : _serverMode} · $_server',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.caption,
+                      ),
+                      // iOS 只有拿到「本地网络」权限才能连 192.168.x.x，
+                      // 否则会一路走公网，速度明显比手机慢。
+                      if (Platform.isIOS && _serverMode == '互联网')
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            '同一 Wi-Fi 下仍走外网？到「设置 → 家庭相册 → 本地网络」允许访问后重试',
+                            maxLines: 2,
+                            style: AppText.caption.copyWith(
+                              color: AppColors.danger,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   trailing: Icon(
                     Icons.chevron_right,

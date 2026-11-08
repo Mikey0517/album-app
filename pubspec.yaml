@@ -1,7 +1,7 @@
 name: album_app
 description: A warm, calm LAN family album.
 publish_to: "none"
-version: 1.2.68+72
+version: 1.2.69+73
 
 environment:
   sdk: ">=3.5.0 <4.0.0"

@@ -54,6 +54,10 @@
 	<string>需要使用相机拍摄照片和视频</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>需要在录制视频时使用麦克风</string>
+	<!-- iOS 14+ 访问 192.168.x.x 这类局域网地址必须声明用途，否则系统直接拒绝连接，
+	     会导致 App 落回公网地址、所有图片视频都绕一圈外网，明显变慢。 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于在家庭 Wi-Fi 内直接连接相册服务器，照片和视频不必绕外网，加载更快</string>
 	<!-- 局域网后端是 HTTP，iOS 默认 ATS 会拦截；正式上架建议改成 NSExceptionDomains 白名单。 -->
 	<key>NSAppTransportSecurity</key>
 	<dict>

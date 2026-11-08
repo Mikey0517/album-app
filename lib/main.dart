@@ -113,6 +113,11 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
 
   Future<void> _onResumed() async {
     await NetworkMonitor.refresh();
+    // 用户可能是去「设置」里刚打开了本地网络权限才回来的，此时网络没变、
+    // refresh() 会直接返回；这里补一次探测，能回局域网就立刻切回来。
+    if (!ServerConfig.isUsingLan) {
+      unawaited(ServerConfig.detectActive());
+    }
     await _runUpdateCheck();
   }
 
