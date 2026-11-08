@@ -7,6 +7,7 @@ import 'design/radius.dart';
 import 'design/shadow.dart';
 import 'design/spacing.dart';
 import 'design/text_styles.dart';
+import 'network_diagnostics_dialog.dart';
 import 'server_config.dart';
 
 /// 服务器地址固定只读；这里只展示地址、测试连通性并重新检测当前线路。
@@ -231,18 +232,40 @@ class _ServerSettingsDialogState extends State<_ServerSettingsDialog> {
                       active: ServerConfig.activeUrl == wan,
                     ),
                     const SizedBox(height: AppSpacing.md),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: _testing ? null : _test,
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(0, 46),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppRadius.md),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _testing ? null : _test,
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 46),
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md),
+                              ),
+                            ),
+                            child: Text(_testing ? '测试中…' : '测试连接'),
                           ),
                         ),
-                        child: Text(_testing ? '测试中…' : '测试连接'),
-                      ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => showNetworkDiagnostics(context),
+                            icon: const Icon(
+                              Icons.monitor_heart_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('网络诊断'),
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 46),
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
