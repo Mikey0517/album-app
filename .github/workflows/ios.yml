@@ -11,7 +11,7 @@ jobs:
     name: Analyze & test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.24.5"
@@ -23,17 +23,22 @@ jobs:
 
   ios-build:
     name: Build iOS (unsigned)
-    # macos-13 已下线，macos-14/15 默认是 arm64（仅公共库或 Team 计划）；
-    # 私有库免费额度只能用 Intel 版镜像。
+    # macos-13 已下线；macos-14/15 默认 arm64（公共库可用），私有库免费额度只能 Intel 镜像。
     runs-on: macos-15-intel
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.24.5"
           channel: stable
           cache: true
+      - name: Toolchain info
+        run: |
+          flutter --version
+          xcodebuild -version
+          xcode-select -p
+          ls /Applications | grep -i xcode || true
       - name: Flutter pub get
         run: flutter pub get
       - name: CocoaPods
@@ -41,7 +46,21 @@ jobs:
           cd ios
           pod install --repo-update
       - name: Build (no codesign)
-        run: flutter build ios --release --no-codesign
+        run: |
+          set -o pipefail
+          flutter build ios --release --no-codesign 2>&1 | tee "${RUNNER_TEMP}/build.log"
+      - name: Report build log on failure
+        if: failure()
+        run: |
+          LOG="${RUNNER_TEMP}/build.log"
+          [ -f "$LOG" ] || exit 0
+          { echo "### iOS build failed"; echo '```'; tail -c 6000 "$LOG"; echo '```'; } >> "$GITHUB_STEP_SUMMARY" || true
+          python3 - "$LOG" <<'PY'
+          import sys
+          data = open(sys.argv[1], "rb").read()[-5000:].decode("utf-8", "replace")
+          esc = data.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print("::error::" + esc)
+          PY
       - name: Package unsigned IPA
         run: |
           cd build/ios/iphoneos
