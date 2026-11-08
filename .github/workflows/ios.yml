@@ -26,6 +26,8 @@ jobs:
     # macos-13 已下线；macos-14/15 默认 arm64（公共库可用），私有库免费额度只能 Intel 镜像。
     runs-on: macos-15-intel
     timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v5
       - uses: subosito/flutter-action@v2
@@ -64,11 +66,31 @@ jobs:
       - name: Package unsigned IPA
         run: |
           cd build/ios/iphoneos
+          rm -rf Payload AlbumApp.ipa
           mkdir -p Payload
           cp -R Runner.app Payload/
-          zip -r AlbumApp-unsigned.ipa Payload
+          zip -qry AlbumApp.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
           name: AlbumApp-unsigned-ipa
-          path: build/ios/iphoneos/AlbumApp-unsigned.ipa
+          path: build/ios/iphoneos/AlbumApp.ipa
           if-no-files-found: error
+      - name: Read app version
+        id: ver
+        run: |
+          V=$(grep '^version:' pubspec.yaml | sed 's/version: *//')
+          echo "name=${V%%+*}" >> "$GITHUB_OUTPUT"
+          echo "code=${V##*+}" >> "$GITHUB_OUTPUT"
+      # 每次构建都把 IPA 挂到 GitHub Release，iPad 上可直接下载：
+      # https://github.com/Mikey0517/album-app/releases/latest/download/AlbumApp.ipa
+      - name: Publish unsigned IPA as release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ios-${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.code }}
+          name: iOS ${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }})
+          make_latest: true
+          body: |
+            未签名 IPA（CI 构建，${{ steps.ver.outputs.name }}+${{ steps.ver.outputs.code }}）。
+            安装方式：iPad 浏览器下载 → 文件 App → 分享到 SideStore 签名安装。
+          files: build/ios/iphoneos/AlbumApp.ipa
+
