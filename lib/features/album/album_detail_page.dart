@@ -1007,11 +1007,27 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       final rows = (section.items.length + columns - 1) ~/ columns;
       for (var i = 0; i < section.items.length; i++) {
         offsets.add(y + (i ~/ columns) * rowHeight);
-        labels.add(section.header ?? '');
+        // 平铺模式没有分组头，退回按拍摄月份显示，气泡才不会空着。
+        final header = section.header;
+        labels.add(
+          header != null && header.isNotEmpty
+              ? header
+              : _monthLabel(
+                  albumSortDate(
+                    section.items[i],
+                    AlbumViewSettings.sort.value,
+                  ),
+                ),
+        );
       }
       y += rows * rowHeight;
     }
     return (offsets: offsets, labels: labels);
+  }
+
+  String _monthLabel(DateTime time) {
+    final local = time.toLocal();
+    return '${local.year}年${local.month}月';
   }
 }
 
