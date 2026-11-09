@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../api/album_api.dart';
 import '../../core/album_view_settings.dart';
@@ -13,6 +14,7 @@ import '../../core/design/shadow.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/media_picker.dart';
 import '../../core/responsive.dart';
+import 'photo_timeline_scrubber.dart';
 import '../../core/media_store.dart';
 import '../../core/upload_manager.dart';
 import '../../models/album.dart';
@@ -54,6 +56,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   bool _deduping = false;
   final Set<int> _selected = {};
   int? _coverSelectedId;
+  final ScrollController _gridScroll = ScrollController();
+  // 用来量一次日期分组头的高度：分组头样式一致，量到一个就能算出整条时间轴的偏移。
+  final GlobalKey _firstHeaderKey = GlobalKey();
 
   static const int _uploadLimit = 500;
 
@@ -77,6 +82,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     AlbumViewSettings.sort.removeListener(_onViewChanged);
     AlbumViewSettings.group.removeListener(_onViewChanged);
     AppEvents.albumContentRevision.removeListener(_onAlbumContentChanged);
+    _gridScroll.dispose();
     super.dispose();
   }
 
@@ -821,6 +827,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         slivers.add(
           SliverToBoxAdapter(
             child: DateHeader(
+              key: identical(section, sections.first) ? _firstHeaderKey : null,
               text: section.header!,
               height: null,
               padding: const EdgeInsets.fromLTRB(16, 20, 8, 8),
@@ -925,14 +932,86 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       );
     }
     slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 100)));
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () => _load(silent: true),
-      child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: slivers,
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = responsiveColumns(context, 4);
+        final metrics = _timelineMetrics(
+          sections,
+          constraints.maxWidth,
+          columns,
+        );
+        final showScrubber =
+            !_selecting && !widget.coverPickMode && displayItems.length > 12;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: () => _load(silent: true),
+              child: CustomScrollView(
+                controller: _gridScroll,
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: slivers,
+              ),
+            ),
+            if (showScrubber)
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 30,
+                child: PhotoTimelineScrubber(
+                  controller: _gridScroll,
+                  itemCount: displayItems.length,
+                  itemOffsets: metrics.offsets,
+                  labels: metrics.labels,
+                ),
+              ),
+          ],
+        );
+      },
     );
+  }
+
+  /// 算出每一张图在滚动内容里的起始偏移，以及它属于哪个月份分组。
+  /// 分组头的实际滚动位置从首次渲染的 key 里量，避免顶部还有别的 sliver 时整体错位。
+  ({List<double> offsets, List<String> labels}) _timelineMetrics(
+    List<AlbumSection> sections,
+    double width,
+    int columns,
+  ) {
+    final offsets = <double>[];
+    final labels = <String>[];
+    const spacing = 2.0;
+    final tileWidth = (width - spacing * (columns - 1)) / columns;
+    final rowHeight = tileWidth + spacing;
+    final headerHeight = _firstHeaderKey.currentContext?.size?.height ?? 48.0;
+
+    var base = 0.0;
+    final headerRender = _firstHeaderKey.currentContext?.findRenderObject();
+    if (headerRender is RenderBox && headerRender.attached) {
+      try {
+        base = RenderAbstractViewport.of(headerRender)
+            .getOffsetToReveal(headerRender, 0.0)
+            .offset;
+      } catch (_) {
+        base = 0.0;
+      }
+    }
+
+    var y = base;
+    for (final section in sections) {
+      if (section.header != null) {
+        y += headerHeight;
+      }
+      final rows = (section.items.length + columns - 1) ~/ columns;
+      for (var i = 0; i < section.items.length; i++) {
+        offsets.add(y + (i ~/ columns) * rowHeight);
+        labels.add(section.header ?? '');
+      }
+      y += rows * rowHeight;
+    }
+    return (offsets: offsets, labels: labels);
   }
 }
 
