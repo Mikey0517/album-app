@@ -336,7 +336,7 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
             EmptyState(
               icon: Icons.photo_camera_back_outlined,
               title: '还没有照片',
-              subtitle: '发布一条带照片或视频的动态后，这里会显示照片',
+              subtitle: '发一条带照片或视频的动态，这里就会出现',
             ),
           ],
         ),
