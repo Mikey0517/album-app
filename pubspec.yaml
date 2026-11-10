@@ -1,7 +1,7 @@
 name: album_app
 description: A warm, calm LAN family album.
 publish_to: "none"
-version: 1.2.72+76
+version: 1.2.73+77
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -28,6 +28,10 @@ dependencies:
   path_provider: ^2.1.4
   gal: 2.2.3
   crypto: ^3.0.5
+  # Dart 层热更新（自托管补丁）。仓库内 vendor 了 0.1.4 并适配了 Flutter 3.24 的
+  # FlutterJNI 签名（上游 0.1.4 的 LoaderHook 用了 3.29+ 才有的 engineId 参数）。
+  flutter_patcher:
+    path: third_party/flutter_patcher
   open_filex: ^4.5.0
   video_thumbnail: ^0.5.3
 

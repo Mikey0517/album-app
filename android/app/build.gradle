@@ -12,8 +12,9 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.example.album_app"
-    compileSdk = 35
-    ndkVersion = flutter.ndkVersion
+    compileSdk = 36
+    // flutter_patcher 的 loader hook 要求 NDK 27 及以上
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -26,7 +27,12 @@ android {
 
     defaultConfig {
         applicationId = "com.example.album_app"
-        minSdk = 21
+        minSdk = 24
+        // flutter_patcher 的插件会声明 x86_64，那是模拟器用的；真机只需要这两套，
+        // 不加这行 APK 会从 26MB 涨到 55MB。
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a'
+        }
         targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName

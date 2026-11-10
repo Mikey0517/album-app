@@ -1,9 +1,66 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
+import '../../core/album_view_settings.dart';
 import '../../core/design/colors.dart';
+import '../../models/media.dart';
+
+/// 每一张图在滚动内容里的起始偏移，以及它属于哪个时间分组。
+typedef TimelineMetrics = ({List<double> offsets, List<String> labels});
+
+/// 算时间轴映射：按实际行高 + 分组头高度 + 视口基准偏移推导，
+/// 这样拖到「2024年8月」就真的落在 8 月那一行，不会随距离累积误差。
+TimelineMetrics buildTimelineMetrics(
+  List<AlbumSection> sections, {
+  required double width,
+  required int columns,
+  required double headerHeight,
+  double base = 0,
+  String Function(Media media)? fallbackLabel,
+}) {
+  final offsets = <double>[];
+  final labels = <String>[];
+  const spacing = 2.0;
+  final tileWidth = (width - spacing * (columns - 1)) / columns;
+  final rowHeight = tileWidth + spacing;
+  var y = base;
+  for (final section in sections) {
+    if (section.header != null) {
+      y += headerHeight;
+    }
+    final rows = (section.items.length + columns - 1) ~/ columns;
+    for (var i = 0; i < section.items.length; i++) {
+      offsets.add(y + (i ~/ columns) * rowHeight);
+      final header = section.header;
+      labels.add(
+        header != null && header.isNotEmpty
+            ? header
+            : (fallbackLabel?.call(section.items[i]) ?? ''),
+      );
+    }
+    y += rows * rowHeight;
+  }
+  return (offsets: offsets, labels: labels);
+}
+
+/// 第一个分组头在滚动内容里的偏移。顶部还有别的 sliver 时靠它对齐，
+/// 量不到就返回 0。
+double timelineBaseOffset(GlobalKey key) {
+  final render = key.currentContext?.findRenderObject();
+  if (render is RenderBox && render.attached) {
+    try {
+      return RenderAbstractViewport.of(render)
+          .getOffsetToReveal(render, 0.0)
+          .offset;
+    } catch (_) {
+      return 0;
+    }
+  }
+  return 0;
+}
 
 /// 相册右侧的时间轴快速拖拽条，交互对齐小米相册：
 /// 按住上下滑，列表跟手跳到对应的月份，同时浮出当前月份。

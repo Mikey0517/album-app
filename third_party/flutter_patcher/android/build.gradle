@@ -1,0 +1,116 @@
+group = "com.flutter_patcher.flutter_patcher"
+version = "1.0-SNAPSHOT"
+
+buildscript {
+    ext.kotlin_version = "2.2.20"
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.11.1")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: "com.android.library"
+
+// AGP 9 compiles Kotlin itself ("built-in Kotlin") and rejects the
+// kotlin-android plugin. AGP 9 hosts that opt out via
+// `android.builtInKotlin=false` -- which is what the Flutter 3.44 template
+// generates -- still need us to bring our own KGP, exactly like AGP 8 hosts.
+// So the switch is built-in Kotlin, not the AGP major on its own.
+def agpMajor = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION.tokenize('.')[0] as int
+def builtInKotlinFlag = project.findProperty("android.builtInKotlin")
+def builtInKotlin = agpMajor >= 9 &&
+    (builtInKotlinFlag == null || Boolean.parseBoolean(builtInKotlinFlag.toString()))
+
+// Keep this as a literal `apply plugin:` at line start even though it is
+// guarded. The Flutter Gradle Plugin regex-matches this file's text to decide
+// whether a subproject brings its own KGP; when it finds none it applies
+// kotlin-android to us itself, which hard-fails under built-in Kotlin. The cost
+// is that FGP prints its "plugin applies KGP" warning on AGP 9 even when this
+// branch never runs.
+if (!builtInKotlin) {
+    apply plugin: "kotlin-android"
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    // Kotlin incremental cache path relativization can fail on Windows when a
+    // Flutter plugin is compiled from Pub Cache on C: into an app on another
+    // drive. Keep this library compile non-incremental; app modules are
+    // unaffected.
+    incremental = false
+}
+
+android {
+    namespace = "com.flutter_patcher.flutter_patcher"
+
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    if (!builtInKotlin) {
+        // Contributed by KGP, not by AGP -- only exists where KGP was applied.
+        kotlinOptions {
+            jvmTarget = JavaVersion.VERSION_17
+        }
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+        test.java.srcDirs += "src/test/kotlin"
+    }
+
+    defaultConfig {
+        minSdk = 24
+
+        // ABI 白名单：覆盖主流 Android 设备。Flutter 默认只出 arm64-v8a，
+        // 但插件要兼容 32 位旧机型和 x86_64 模拟器。
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86_64'
+        }
+
+        // 让 AGP 把本插件的 consumer R8 规则合并到宿主 release build
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+
+    dependencies {
+        testImplementation("org.jetbrains.kotlin:kotlin-test")
+        testImplementation("org.json:json:20240303")
+        testImplementation("org.mockito:mockito-core:5.0.0")
+    }
+
+    testOptions {
+        unitTests.all {
+            useJUnitPlatform()
+            jvmArgs "-Dnet.bytebuddy.experimental=true"
+
+            testLogging {
+               events "passed", "skipped", "failed", "standardOut", "standardError"
+               outputs.upToDateWhen {false}
+               showStandardStreams = true
+            }
+        }
+    }
+}
+
+if (builtInKotlin) {
+    kotlin {
+        compilerOptions {
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        }
+    }
+}

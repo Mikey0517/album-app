@@ -40,3 +40,8 @@ Thumbs.db
 
 # Flutter 生成的 Android 插件注册文件
 android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+
+# 热更新补丁产物与签名私钥（私钥泄露 = 所有设备可被投毒）
+dist/
+patch_private.key
+patch_public.key

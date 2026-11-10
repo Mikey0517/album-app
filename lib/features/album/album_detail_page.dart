@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 
 import '../../api/album_api.dart';
 import '../../core/album_view_settings.dart';
@@ -974,55 +973,22 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   }
 
   /// 算出每一张图在滚动内容里的起始偏移，以及它属于哪个月份分组。
-  /// 分组头的实际滚动位置从首次渲染的 key 里量，避免顶部还有别的 sliver 时整体错位。
-  ({List<double> offsets, List<String> labels}) _timelineMetrics(
+  TimelineMetrics _timelineMetrics(
     List<AlbumSection> sections,
     double width,
     int columns,
   ) {
-    final offsets = <double>[];
-    final labels = <String>[];
-    const spacing = 2.0;
-    final tileWidth = (width - spacing * (columns - 1)) / columns;
-    final rowHeight = tileWidth + spacing;
-    final headerHeight = _firstHeaderKey.currentContext?.size?.height ?? 48.0;
-
-    var base = 0.0;
-    final headerRender = _firstHeaderKey.currentContext?.findRenderObject();
-    if (headerRender is RenderBox && headerRender.attached) {
-      try {
-        base = RenderAbstractViewport.of(headerRender)
-            .getOffsetToReveal(headerRender, 0.0)
-            .offset;
-      } catch (_) {
-        base = 0.0;
-      }
-    }
-
-    var y = base;
-    for (final section in sections) {
-      if (section.header != null) {
-        y += headerHeight;
-      }
-      final rows = (section.items.length + columns - 1) ~/ columns;
-      for (var i = 0; i < section.items.length; i++) {
-        offsets.add(y + (i ~/ columns) * rowHeight);
-        // 平铺模式没有分组头，退回按拍摄月份显示，气泡才不会空着。
-        final header = section.header;
-        labels.add(
-          header != null && header.isNotEmpty
-              ? header
-              : _monthLabel(
-                  albumSortDate(
-                    section.items[i],
-                    AlbumViewSettings.sort.value,
-                  ),
-                ),
-        );
-      }
-      y += rows * rowHeight;
-    }
-    return (offsets: offsets, labels: labels);
+    return buildTimelineMetrics(
+      sections,
+      width: width,
+      columns: columns,
+      headerHeight: _firstHeaderKey.currentContext?.size?.height ?? 48.0,
+      base: timelineBaseOffset(_firstHeaderKey),
+      // 平铺模式没有分组头，退回按拍摄月份显示，气泡才不会空着。
+      fallbackLabel: (media) => _monthLabel(
+        albumSortDate(media, AlbumViewSettings.sort.value),
+      ),
+    );
   }
 
   String _monthLabel(DateTime time) {

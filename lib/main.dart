@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,7 @@ import 'core/design/colors.dart';
 import 'core/design/text_styles.dart';
 import 'core/design/theme.dart';
 import 'core/network_monitor.dart';
+import 'core/patch/patch_service.dart';
 import 'core/server_config.dart';
 import 'core/upload_manager.dart';
 import 'core/video_orientation.dart';
@@ -23,6 +25,7 @@ import 'features/auth/login_page.dart';
 import 'features/home/home_page.dart';
 import 'features/update/changelog_dialog.dart';
 import 'features/update/force_update_dialog.dart';
+import 'features/update/patch_ready_dialog.dart';
 import 'features/update/update_service.dart';
 import 'features/update/version_tracker.dart';
 
@@ -44,6 +47,8 @@ Future<void> main() async {
   // 不使用 Android Photo Picker：它会为携带位置信息的照片生成脱敏副本，
   // 可能把小米 Motion Photo 的内嵌视频一并丢掉。传统系统选择器返回原始文件。
   await lockAppPortrait();
+  // 配置崩溃回滚与首帧校验，必须早于 runApp；iOS 上为空实现。
+  await PatchService.init();
   await ServerConfig.init();
   await AppThemeController.init();
   ApiClient.install();
@@ -170,8 +175,14 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
     }
 
     // 1. 强制更新。检测失败（断网/404/超时）UpdateService 内部已静默返回 null。
+    //    APK 必须先升级：补丁强绑定 versionCode，升级后旧补丁自动失效。
     if (await _runUpdateCheck()) {
       return;
+    }
+
+    // 1.5 Dart 补丁：只在 Android 上跑，且不阻塞启动（后台下载，下完提示）。
+    if (Platform.isAndroid) {
+      unawaited(_checkPatch());
     }
 
     // 2. 新版本首次运行的更新日志。必须在对话框关闭后才 mark。
@@ -190,6 +201,20 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
     // 3. 登录态恢复。
     await _checkLogin();
     _readyForResumeCheck = true;
+  }
+
+  /// 补丁检查完全异步：下载期间用户照常进入 App，下载完成后才弹提示。
+  Future<void> _checkPatch() async {
+    try {
+      final applied = await PatchService.checkAndApply();
+      if (!applied || !mounted) return;
+      // context 在 await 之后现取现用，避免跨异步间隙持有。
+      final ctx = _navigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      await showPatchReadyDialog(ctx);
+    } catch (_) {
+      // 热更新失败不应该打扰用户。
+    }
   }
 
   Future<void> _checkLogin() async {

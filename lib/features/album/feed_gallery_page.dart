@@ -16,6 +16,7 @@ import '../../widgets/selection_footer.dart';
 import '../../core/media_share_service.dart';
 import '../download/batch_download.dart';
 import '../viewer/media_viewer_page.dart';
+import 'photo_timeline_scrubber.dart';
 
 /// 朋友圈相册：只读聚合视图。
 class FeedGalleryPage extends StatefulWidget {
@@ -30,6 +31,8 @@ class FeedGalleryPage extends StatefulWidget {
 
 class FeedGalleryPageState extends State<FeedGalleryPage> {
   final ScrollController _scrollController = ScrollController();
+  // 量一次分组头的实际滚动位置，时间轴才不会随滚动累积偏移。
+  final GlobalKey _firstHeaderKey = GlobalKey();
   final List<Media> _items = [];
   bool _loading = true;
   bool _loadingMore = false;
@@ -353,6 +356,7 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
         slivers.add(
           SliverToBoxAdapter(
             child: DateHeader(
+              key: identical(section, sections.first) ? _firstHeaderKey : null,
               text: section.header!,
               height: null,
               padding: const EdgeInsets.fromLTRB(16, 20, 8, 8),
@@ -470,14 +474,53 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
       );
     }
 
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () => _load(refresh: true),
-      child: CustomScrollView(
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: slivers,
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = responsiveColumns(context, 4);
+        final metrics = buildTimelineMetrics(
+          sections,
+          width: constraints.maxWidth,
+          columns: columns,
+          headerHeight: _firstHeaderKey.currentContext?.size?.height ?? 48.0,
+          base: timelineBaseOffset(_firstHeaderKey),
+          fallbackLabel: (media) => _monthLabel(
+            albumSortDate(media, AlbumViewSettings.sort.value),
+          ),
+        );
+        final showScrubber = !_selecting && displayItems.length > 12;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: () => _load(refresh: true),
+              child: CustomScrollView(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: slivers,
+              ),
+            ),
+            if (showScrubber)
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 30,
+                child: PhotoTimelineScrubber(
+                  controller: _scrollController,
+                  itemCount: displayItems.length,
+                  itemOffsets: metrics.offsets,
+                  labels: metrics.labels,
+                ),
+              ),
+          ],
+        );
+      },
     );
+  }
+
+  String _monthLabel(DateTime time) {
+    final local = time.toLocal();
+    return '${local.year}年${local.month}月';
   }
 }
