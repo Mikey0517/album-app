@@ -1,5 +1,10 @@
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    # vendor 进来的 flutter_patcher 上游代码，不按本仓库的 lint 规则要求。
+    - third_party/**
+
 linter:
   rules:
     prefer_const_constructors: true
