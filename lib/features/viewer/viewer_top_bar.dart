@@ -8,12 +8,14 @@ class ViewerTopBar extends StatelessWidget {
   final Media media;
   final VoidCallback onClose;
   final VoidCallback onDownload;
+  final VoidCallback? onDetails;
 
   const ViewerTopBar({
     super.key,
     required this.media,
     required this.onClose,
     required this.onDownload,
+    this.onDetails,
   });
 
   @override
@@ -49,6 +51,14 @@ class ViewerTopBar extends StatelessWidget {
                   ),
                 ),
               ),
+              if (onDetails != null)
+                IconButton(
+                  onPressed: onDetails,
+                  iconSize: 22,
+                  color: Colors.white,
+                  tooltip: '详情',
+                  icon: const Icon(Icons.info_outline),
+                ),
               IconButton(
                 onPressed: onDownload,
                 iconSize: 22,

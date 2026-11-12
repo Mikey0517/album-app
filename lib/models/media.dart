@@ -13,6 +13,11 @@ class Media {
   final String? originalFormat;
   final bool thumbFailed;
   final bool favorite;
+  /// 原图 EXIF 里的 GPS 坐标，没有就是 null。
+  final double? latitude;
+  final double? longitude;
+  /// 原文件的字节数，服务端只对新上传的文件填充。
+  final int? fileSize;
 
   const Media({
     required this.id,
@@ -29,6 +34,9 @@ class Media {
     this.originalFormat,
     this.thumbFailed = false,
     this.favorite = false,
+    this.latitude,
+    this.longitude,
+    this.fileSize,
   });
 
   factory Media.fromJson(Map<String, dynamic> json) {
@@ -50,6 +58,9 @@ class Media {
       originalFormat: json['original_format'] as String?,
       thumbFailed: json['thumb_failed'] as bool? ?? false,
       favorite: json['favorite'] as bool? ?? false,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      fileSize: (json['file_size'] as num?)?.toInt(),
     );
   }
 

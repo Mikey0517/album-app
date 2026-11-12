@@ -9,6 +9,7 @@ import '../../core/media_download_service.dart';
 import '../../core/video_orientation.dart';
 import '../../models/media.dart';
 import 'image_view.dart';
+import 'media_details_page.dart';
 import 'live_photo_view.dart';
 import 'video_view.dart';
 import 'viewer_thumbnail_strip.dart';
@@ -191,6 +192,15 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
 
   void _close() => Navigator.of(context).pop();
 
+  /// 打开当前这张的详情页。
+  void _openDetails(Media media) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MediaDetailsPage(media: media),
+      ),
+    );
+  }
+
   Future<void> _downloadCurrent() async {
     if (_downloading) return;
     final media = _current;
@@ -329,6 +339,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                         media: current,
                         onClose: _close,
                         onDownload: _downloadCurrent,
+                        onDetails: () => _openDetails(current),
                       ),
                     ),
                   ),
