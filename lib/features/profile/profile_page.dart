@@ -45,7 +45,6 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
   bool _cacheLoading = true;
   bool _cacheClearing = false;
   String _version = '';
-  String _server = ServerConfig.current;
   String _serverMode = '';
   String? _error;
   StorageInfo? _storage;
@@ -55,7 +54,6 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    _server = ServerConfig.current;
     _serverMode = ServerConfig.notifier.value;
     ServerConfig.notifier.addListener(_onServerChanged);
     WidgetsBinding.instance.addObserver(this);
@@ -160,7 +158,6 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
   void _onServerChanged() {
     if (!mounted) return;
     setState(() {
-      _server = ServerConfig.current;
       _serverMode = ServerConfig.notifier.value;
     });
     unawaited(_loadStorage(silent: _storage != null));
@@ -624,35 +621,19 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                     size: 22,
                   ),
                   title: const Text('服务器状态', style: AppText.body),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
-                        '${_serverMode.isEmpty ? '未连接' : _serverMode} · $_server',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        _serverMode.isEmpty ? '未连接' : _serverMode,
                         style: AppText.caption,
                       ),
-                      // iOS 只有拿到「本地网络」权限才能连 192.168.x.x，
-                      // 否则会一路走公网，速度明显比手机慢。
-                      if (Platform.isIOS && _serverMode == '互联网')
-                        Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            '同一 Wi-Fi 下仍走外网？到「设置 → 家庭相册 → 本地网络」允许访问后重试',
-                            maxLines: 2,
-                            style: AppText.caption.copyWith(
-                              color: AppColors.danger,
-                            ),
-                          ),
-                        ),
+                      Icon(
+                        Icons.chevron_right,
+                        color: AppColors.textTertiary,
+                        size: 18,
+                      ),
                     ],
-                  ),
-                  trailing: Icon(
-                    Icons.chevron_right,
-                    color: AppColors.textTertiary,
-                    size: 18,
                   ),
                 ),
                 Divider(color: AppColors.divider, height: 1),
@@ -667,14 +648,19 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                         size: 22,
                       ),
                       title: const Text('主题', style: AppText.body),
-                      subtitle: Text(
-                        AppThemeController.label(mode),
-                        style: AppText.caption,
-                      ),
-                      trailing: Icon(
-                        Icons.chevron_right,
-                        color: AppColors.textTertiary,
-                        size: 18,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            AppThemeController.label(mode),
+                            style: AppText.caption,
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            color: AppColors.textTertiary,
+                            size: 18,
+                          ),
+                        ],
                       ),
                     );
                   },

@@ -159,17 +159,6 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
             clipBehavior: Clip.none,
             alignment: Alignment.centerRight,
             children: [
-              // 常驻的细条，提示这里可以拖。
-              Center(
-                child: Container(
-                  width: 3,
-                  height: height * 0.5,
-                  decoration: BoxDecoration(
-                    color: AppColors.textTertiary.withOpacity(active ? 0.0 : 0.35),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
               if (active) ...[
                 Positioned(
                   top: thumbY - 22,

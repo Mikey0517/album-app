@@ -295,12 +295,6 @@ class AlbumApi {
     );
   }
 
-  /// 按 hash 清理当前相册内的重复媒体，返回扫描/分组/移除数量。
-  static Future<Map<String, dynamic>> dedupe(int albumId) async {
-    final response = await _dio.post<dynamic>('/api/albums/$albumId/dedupe');
-    return _asMap(response.data);
-  }
-
   static Map<String, dynamic> _asMap(dynamic data) {
     if (data is Map<String, dynamic>) return data;
     if (data is String) {

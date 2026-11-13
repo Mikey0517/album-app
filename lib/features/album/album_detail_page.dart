@@ -52,7 +52,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   bool _batchDownloading = false;
   bool _batchDeleting = false;
   bool _batchMoving = false;
-  bool _deduping = false;
   final Set<int> _selected = {};
   int? _coverSelectedId;
   final ScrollController _gridScroll = ScrollController();
@@ -211,79 +210,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     );
   }
 
-  Future<void> _cleanDuplicates() async {
-    if (_deduping) return;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('清理重复照片和视频？', style: AppText.titleMedium),
-        content: const Text(
-          '将按文件 SHA-256 对比当前相册内的媒体，每组只保留一项。\n\n'
-          '如果文件还被其他相册或朋友圈动态引用，只会清除多余的相册引用，不会误删文件。',
-          style: AppText.bodySmall,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.textSecondary,
-            ),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('开始清理'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _deduping = true);
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const PopScope(
-        canPop: false,
-        child: AlertDialog(
-          content: Row(
-            children: [
-              SizedBox(
-                width: 22,
-                height: 22,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              SizedBox(width: 16),
-              Expanded(child: Text('正在对比文件 hash…')),
-            ],
-          ),
-        ),
-      ),
-    );
-    try {
-      final result = await AlbumApi.dedupe(_album.id);
-      if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-      await _load(silent: true);
-      if (!mounted) return;
-      final removed = (result['removed'] as num?)?.toInt() ?? 0;
-      final groups = (result['groups'] as num?)?.toInt() ?? 0;
-      final scanned = (result['scanned'] as num?)?.toInt() ?? 0;
-      _snack(
-        removed == 0
-            ? '扫描 $scanned 项，没有发现重复'
-            : '扫描 $scanned 项，清理 $groups 组，共移除 $removed 项',
-      );
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        _snack(ApiClient.errorText(e));
-      }
-    } finally {
-      if (mounted) setState(() => _deduping = false);
-    }
-  }
-
   Future<void> _rename() async {
     final title = await showAlbumTitleDialog(
       context,
@@ -399,9 +325,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                   if (_canEdit || _canManage)
                     PopupMenuButton<String>(
                       onSelected: (value) {
-                        if (_deduping) return;
                         if (value == 'rename') _rename();
-                        if (value == 'dedupe') _cleanDuplicates();
                         if (value == 'delete') _deleteAlbum();
                         if (value == 'share') _shareAlbum();
                       },
@@ -421,8 +345,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                         if (_canManage) ...[
                           const PopupMenuItem<String>(
                               value: 'rename', child: Text('重命名')),
-                          const PopupMenuItem<String>(
-                              value: 'dedupe', child: Text('清理重复照片和视频')),
                           PopupMenuItem<String>(
                             value: 'delete',
                             child: Text('删除相册',
