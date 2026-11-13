@@ -51,6 +51,13 @@ class ViewerTopBar extends StatelessWidget {
                   ),
                 ),
               ),
+              IconButton(
+                onPressed: onDownload,
+                iconSize: 22,
+                color: Colors.white,
+                tooltip: '保存到相册',
+                icon: const Icon(Icons.download_outlined),
+              ),
               if (onDetails != null)
                 IconButton(
                   onPressed: onDetails,
@@ -59,13 +66,6 @@ class ViewerTopBar extends StatelessWidget {
                   tooltip: '详情',
                   icon: const Icon(Icons.info_outline),
                 ),
-              IconButton(
-                onPressed: onDownload,
-                iconSize: 22,
-                color: Colors.white,
-                tooltip: '保存到相册',
-                icon: const Icon(Icons.download_outlined),
-              ),
             ],
           ),
         ),
