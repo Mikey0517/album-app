@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../core/album_view_settings.dart';
 import '../../core/design/colors.dart';
-import '../../widgets/app_segmented_bar.dart';
+import '../../widgets/app_category_menu.dart';
 import 'custom_albums_page.dart';
 import 'feed_gallery_page.dart';
+
+/// 分类顺序即选中下标：0 朋友圈相册 / 1 家庭相册 / 2 私人相册。
+const List<String> _categories = ['朋友圈相册', '家庭相册', '私人相册'];
 
 class AlbumTabPage extends StatefulWidget {
   final ValueChanged<bool>? onEditingChanged;
@@ -26,13 +29,16 @@ class AlbumTabPageState extends State<AlbumTabPage> {
   /// 0 朋友圈相册 / 1 家庭相册 / 2 私人相册
   static const int _defaultTab = 1;
 
+  /// 分类标题行的紧凑高度：标题一行说完，下面直接是内容。
+  static const double _toolbarHeight = 48;
+
   final GlobalKey<FeedGalleryPageState> _feedGalleryKey = GlobalKey();
   int _selected = _defaultTab;
   bool _feedSelecting = false;
   int _feedSelected = 0;
   int _feedTotal = 0;
 
-  /// 各个 tab 的内容数量，由子页加载完回报；没加载完就先不显示数字。
+  /// 各个分类的相册数量，由子页加载完回报；没加载完就先不显示数字。
   final Map<int, int> _tabCounts = {};
 
   bool get _feedEditing => _selected == 0 && _feedSelecting;
@@ -57,24 +63,13 @@ class AlbumTabPageState extends State<AlbumTabPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 与相册详情页的筛选条同一套分段条：活动胶囊、字重、数量字号完全一致。
-    final bar = AppSegmentedBar(
-      expanded: true,
-      selectedIndex: _selected,
-      onChanged: (index) {
-        if (_feedEditing) return;
-        _select(index);
-      },
-      items: [
-        AppSegmentedItem('朋友圈相册', count: _tabCounts[0]),
-        AppSegmentedItem('家庭相册', count: _tabCounts[1]),
-        AppSegmentedItem('私人相册', count: _tabCounts[2]),
-      ],
-    );
-
     return Scaffold(
       appBar: AppBar(
-        centerTitle: true,
+        // 相册总页的「分类」是这一页的层级，用标题 + 下拉表达；相册详情页里
+        // 的「全部/照片/视频」才是页内筛选（分段条）。两者形式必须区分开。
+        // 高度压到 48：标题行下面直接是内容，不再夹一条 46 高的分段条带子。
+        toolbarHeight: _toolbarHeight,
+        centerTitle: false,
         leading: _feedEditing
             ? IconButton(
                 onPressed: () => _feedGalleryKey.currentState?.exitSelection(),
@@ -82,13 +77,21 @@ class AlbumTabPageState extends State<AlbumTabPage> {
                 tooltip: '退出选择',
               )
             : null,
-        title: _feedEditing ? Text('已选 $_feedSelected 项') : null,
-        // tab 条随 AppBar 一起吸顶；多选态让出这条，操作更集中。
-        bottom: _feedEditing
-            ? null
-            : PreferredSize(
-                preferredSize: const Size.fromHeight(kAppSegmentedBarHeight),
-                child: AppSegmentedBarSurface(child: bar),
+        title: _feedEditing
+            ? Text('已选 $_feedSelected 项')
+            : AppCategoryMenu(
+                items: [
+                  for (var i = 0; i < _categories.length; i++)
+                    AppCategoryItem(
+                      _categories[i],
+                      count: _tabCounts[i],
+                    ),
+                ],
+                selectedIndex: _selected,
+                onChanged: (index) {
+                  if (_feedEditing) return;
+                  _select(index);
+                },
               ),
         actions: _feedEditing
             ? [

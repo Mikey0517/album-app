@@ -421,6 +421,16 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         final showScrubber = !_selecting &&
             !widget.coverPickMode &&
             displayItems.length > 12;
+        // 时间轴轨道的顶边 = 吸顶区（折叠头 + 筛选条 + 日期头）的下沿。
+        // 轨道不能从 0 起算：那样命中区会压住吸顶条，滑块浮到筛选 tab 上面，
+        // 而且拖动比例把吸顶这一段也算进去了，与上面 topInset 的口径差一截。
+        // 从吸顶区下沿到屏幕底部，拖到轨道最上端才正好是第一行照片。
+        final stickyBottom = headerMin + filterExtent + dateHeaderExtent;
+        final timelineTop = clampDouble(
+          stickyBottom,
+          0,
+          math.max(0, constraints.maxHeight - 120),
+        );
 
         final scrollView = CustomScrollView(
           controller: _gridScroll,
@@ -457,7 +467,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             if (showScrubber)
               Positioned(
                 right: 0,
-                top: 0,
+                top: timelineTop,
                 bottom: 0,
                 width: 30,
                 child: PhotoTimelineScrubber(

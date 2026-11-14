@@ -101,6 +101,10 @@ const Key timelineScrubberLabelKey = ValueKey<String>('timeline-scrubber-label')
 /// 右侧的时间轴快速拖拽条，交互对齐小米相册：
 /// 按住上下滑，列表跟手跳到对应位置，同时浮出当前月份，松手后收起。
 ///
+/// 轨道由宿主的 Positioned 给定（相册详情页让它紧贴吸顶条下沿），滑块和
+/// 月份气泡都不会越出轨道边界：拖到最上端时贴住轨道顶边，不会浮到吸顶条
+/// 上去，也不会悬在内容外面。
+///
 /// 两种定位模式：
 /// - offsets 模式（默认）：按每一项的精确偏移跳转，用于等高网格；
 /// - progress 模式（传 [progressLabel]）：按「拖动比例 × maxScrollExtent」跳转，
@@ -224,6 +228,11 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
         final height = constraints.maxHeight;
         final thumbY = (_thumbY ?? -1000).clamp(0.0, height);
         final active = _thumbY != null;
+        // 滑块 44 高、以手指为中线；夹在轨道内，顶端不会露出轨道去压吸顶条。
+        final thumbTop =
+            (thumbY - 22).clamp(0.0, math.max(0.0, height - 44)).toDouble();
+        final bubbleTop =
+            (thumbY - 22).clamp(0.0, math.max(0.0, height - 48)).toDouble();
         return GestureDetector(
           behavior: HitTestBehavior.translucent,
           onVerticalDragStart: (details) =>
@@ -240,7 +249,7 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
             children: [
               if (active) ...[
                 Positioned(
-                  top: thumbY - 22,
+                  top: thumbTop,
                   right: 6,
                   child: Container(
                     key: timelineScrubberThumbKey,
@@ -253,7 +262,7 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
                   ),
                 ),
                 Positioned(
-                  top: (thumbY - 22).clamp(4.0, height - 48),
+                  top: bubbleTop,
                   right: 34,
                   child: _MonthBubble(
                     key: timelineScrubberLabelKey,

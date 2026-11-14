@@ -78,6 +78,27 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('拖到最上端时滑块仍留在轨道内，不浮到吸顶条上', (tester) async {
+    final controller = ScrollController();
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(_host(controller));
+    await tester.pumpAndSettle();
+
+    final rect = tester.getRect(find.byType(PhotoTimelineScrubber));
+    final gesture = await tester.startGesture(rect.center);
+    await tester.pump();
+    await gesture.moveTo(Offset(rect.left + 15, rect.top + 2));
+    await tester.pump();
+
+    final thumb = tester.getRect(find.byKey(timelineScrubberThumbKey));
+    expect(thumb.top, greaterThanOrEqualTo(rect.top - 0.01),
+        reason: '滑块不许探出轨道顶边');
+    expect(thumb.bottom, lessThanOrEqualTo(rect.bottom + 0.01));
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('项数太少时不显示拖拽条', (tester) async {
     final controller = ScrollController();
     addTearDown(controller.dispose);

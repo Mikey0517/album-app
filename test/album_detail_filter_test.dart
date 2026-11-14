@@ -1,4 +1,5 @@
 import 'package:album_app/api/album_api.dart';
+import 'package:album_app/core/design/colors.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/features/album/album_detail_page.dart';
 import 'package:album_app/features/album/album_media_filter.dart';
@@ -9,6 +10,7 @@ import 'package:album_app/models/media.dart';
 import 'package:album_app/widgets/album_thumb.dart';
 import 'package:album_app/widgets/app_segmented_bar.dart';
 import 'package:album_app/widgets/date_header.dart';
+import 'package:album_app/widgets/pinned_bar_sliver.dart';
 import 'package:album_app/widgets/selection_footer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -324,6 +326,68 @@ void main() {
     );
     // 标题不会同时出现两份：折叠后只剩工具栏标题。
     expect(find.text('夏天'), findsOneWidget);
+  });
+
+  testWidgets('时间轴紧贴吸顶条下沿：不悬空、不压住筛选条', (tester) async {
+    await _pump(tester, items: _many());
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
+    await tester.pumpAndSettle();
+
+    final filter = tester.getRect(find.byType(AppSegmentedBarSurface));
+    final scrubber = tester.getRect(find.byType(PhotoTimelineScrubber));
+    // 日期头也吸顶：它钉在筛选条下沿（56 + 46），时间轴从它下沿开始。
+    final headers = find.byType(DateHeader);
+    final rects = [
+      for (var i = 0; i < headers.evaluate().length; i++)
+        tester.getRect(headers.at(i)),
+    ];
+    final pinned =
+        rects.firstWhere((rect) => (rect.top - filter.bottom).abs() < 0.5);
+    expect(
+      scrubber.top,
+      closeTo(pinned.bottom, 0.5),
+      reason: '轨道顶边 = 吸顶区下沿，接缝宽度为 0',
+    );
+    expect(
+      scrubber.top,
+      greaterThanOrEqualTo(filter.bottom),
+      reason: '轨道不许压在筛选条上（之前轨道从 0 起算，滑块会浮到 tab 上面）',
+    );
+  });
+
+  testWidgets('平铺模式没有日期头，轨道顶边正好等于筛选条底边', (tester) async {
+    AlbumViewSettings.group.value = AlbumGroup.flat;
+    addTearDown(() => AlbumViewSettings.group.value = AlbumGroup.day);
+    await _pump(tester, items: _many());
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DateHeader), findsNothing);
+    final filter = tester.getRect(find.byType(AppSegmentedBarSurface));
+    final scrubber = tester.getRect(find.byType(PhotoTimelineScrubber));
+
+    // 吸顶条只有筛选条这一层时，两者坐标完全一致：0 缝隙。
+    expect(scrubber.top, closeTo(filter.bottom, 0.5));
+    // 轨道高度也只剩「视口 - 吸顶区」，拖动比例不再把吸顶区算进去。
+    expect(scrubber.height, closeTo(844 - filter.bottom, 0.5));
+  });
+
+  testWidgets('吸顶筛选条背景不透明，且与页面背景同色', (tester) async {
+    await _pump(tester, items: _many());
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
+    await tester.pumpAndSettle();
+
+    final surface = tester.widget<AppSegmentedBarSurface>(
+      find.byType(AppSegmentedBarSurface),
+    );
+    expect(surface.color, AppColors.bgPage);
+    expect(surface.color.alpha, 255, reason: '不透明，滚动内容不会从缝里透出来');
+
+    // 吸顶 sliver 自己也垫了一层同色底，任何一个 child 忘了画底也不会透。
+    final pinnedBar =
+        tester.widget<PinnedBarSliver>(find.byType(PinnedBarSliver).first);
+    expect(pinnedBar.color, AppColors.bgPage);
+    expect(pinnedBar.color.alpha, 255);
   });
 
   testWidgets('iPad 竖屏按 5 列排，不溢出', (tester) async {

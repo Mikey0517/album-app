@@ -4,8 +4,11 @@ import '../core/design/colors.dart';
 import '../core/design/radius.dart';
 import '../core/formatters.dart';
 
-/// 分段条的统一样式：相册详情页的筛选条与相册主页的 Tab 条共用同一套
-/// 高度、圆角、字重和间距，两个页面看起来才是一家。
+/// 页内筛选条的统一高度：相册详情页（以及选封面时的筛选）都用它。
+///
+/// 注意：它只用于**页内筛选**（全部 / 照片 / 视频）。相册总页的
+/// 朋友圈 / 家庭 / 私人 相册是「层级」，用 [AppCategoryMenu] 的标题下拉，
+/// 不要用这条分段条——层级和筛选看起来必须不一样。
 const double kAppSegmentedBarHeight = 46;
 
 /// 分段条上的一段：文案 + 可选数量。
@@ -18,7 +21,7 @@ class AppSegmentedItem {
   const AppSegmentedItem(this.label, {this.count});
 }
 
-/// 紧凑分段条（全部 / 照片 / 视频、朋友圈相册 / 家庭相册 / 私人相册）。
+/// 紧凑分段条（全部 / 照片 / 视频）。
 ///
 /// 选中态是一枚实心胶囊，未选中是描边胶囊；数量用更小的字号挂在文案后面，
 /// 靠字号和颜色分出主次，不加任何说明文字。
@@ -27,15 +30,11 @@ class AppSegmentedBar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onChanged;
 
-  /// true：等分撑满一行（相册主页的 Tab）；false：紧贴内容（详情页筛选）。
-  final bool expanded;
-
   const AppSegmentedBar({
     super.key,
     required this.items,
     required this.selectedIndex,
     required this.onChanged,
-    this.expanded = false,
   });
 
   @override
@@ -43,19 +42,15 @@ class AppSegmentedBar extends StatelessWidget {
     final segments = <Widget>[];
     for (var i = 0; i < items.length; i++) {
       if (i > 0) segments.add(const SizedBox(width: 6));
-      final segment = _Segment(
-        item: items[i],
-        selected: i == selectedIndex,
-        expanded: expanded,
-        onTap: () => onChanged(i),
+      segments.add(
+        _Segment(
+          item: items[i],
+          selected: i == selectedIndex,
+          onTap: () => onChanged(i),
+        ),
       );
-      segments.add(expanded ? Expanded(child: segment) : segment);
     }
-    final row = Row(
-      mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
-      children: segments,
-    );
-    if (expanded) return row;
+    final row = Row(mainAxisSize: MainAxisSize.min, children: segments);
     // 低分辨率窄屏上三段文案加数量可能超宽，宁可横滑也不压字。
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -65,21 +60,25 @@ class AppSegmentedBar extends StatelessWidget {
   }
 }
 
-/// 分段条的吸顶容器：统一高度、内边距和背景。
+/// 分段条的吸顶容器：统一高度、内边距和不透明底色。
 ///
-/// 详情页套在 [PinnedBarSliver] 里，相册主页套在 AppBar.bottom 里，
-/// 两处都用这一层，吸顶条的高度和内边距才不会各写各的。
+/// 详情页套在 [PinnedBarSliver] 里，选封面时套在 AppBar.bottom 里，两处都用
+/// 这一层，吸顶条的高度、内边距和底色才不会各写各的。
 class AppSegmentedBarSurface extends StatelessWidget {
   final Widget child;
   final Color? background;
 
   const AppSegmentedBarSurface({super.key, required this.child, this.background});
 
+  /// 吸顶条的底色：默认与页面背景同色，且不透明——滚动内容从它后面经过，
+  /// 半透明就会在接缝处透出来。
+  Color get color => background ?? AppColors.bgPage;
+
   @override
   Widget build(BuildContext context) {
     return Container(
       height: kAppSegmentedBarHeight,
-      color: background ?? AppColors.bgPage,
+      color: color,
       padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
       child: child,
     );
@@ -89,13 +88,11 @@ class AppSegmentedBarSurface extends StatelessWidget {
 class _Segment extends StatelessWidget {
   final AppSegmentedItem item;
   final bool selected;
-  final bool expanded;
   final VoidCallback onTap;
 
   const _Segment({
     required this.item,
     required this.selected,
-    required this.expanded,
     required this.onTap,
   });
 
@@ -122,9 +119,9 @@ class _Segment extends StatelessWidget {
           child: InkWell(
             onTap: onTap,
             child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: expanded ? 10 : 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
-                mainAxisSize: expanded ? MainAxisSize.max : MainAxisSize.min,
+                mainAxisSize: MainAxisSize.min,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Flexible(
@@ -165,4 +162,3 @@ class _Segment extends StatelessWidget {
     );
   }
 }
-
