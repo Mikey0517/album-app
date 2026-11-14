@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import '../core/design/colors.dart';
 import '../core/design/text_styles.dart';
 
-/// 日期分组头。朋友圈使用固定 36 高并吸顶；相册使用宽松上下留白。
+/// 日期分组头：固定高度 + 左右内边距 + 不透明底色。
+///
+/// 相册详情页与朋友圈相册都用 34 高（几何见
+/// `features/album/album_timeline_layout.dart`，两页同一份）；朋友圈动态流
+/// 的日期头高 36，也套这一层。
 class DateHeader extends StatelessWidget {
   final String text;
   final double? height;

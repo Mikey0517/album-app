@@ -258,9 +258,13 @@ void main() {
     final after = tester.getRect(find.byType(AppSegmentedBarSurface));
     expect(after.top, closeTo(before.top, 0.5), reason: '筛选条不跟着内容滚走');
     expect(_position(tester).pixels, greaterThan(0), reason: '确实滚动了');
-    // 时间轴轨道从吸顶条下沿开始，不会压住筛选条。
+    // 时间轴轨道从吸顶区下沿开始（筛选条 46 + 日期头 34 = 80），不压吸顶条。
     final scrubber = tester.getRect(find.byType(PhotoTimelineScrubber));
-    expect(scrubber.top, closeTo(after.bottom, 0.5));
+    expect(
+      scrubber.top,
+      closeTo(after.bottom + 34, 0.5),
+      reason: '轨道顶边 = 筛选条 + 日期头下沿',
+    );
   });
 
   testWidgets('全选与数量回报都只算可见项', (tester) async {

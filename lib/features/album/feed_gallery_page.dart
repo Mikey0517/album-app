@@ -14,7 +14,6 @@ import '../../models/media.dart';
 import '../../models/paged.dart';
 import '../../widgets/album_thumb.dart';
 import '../../widgets/app_segmented_bar.dart';
-import '../../widgets/date_header.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
 import '../../widgets/selection_footer.dart';
@@ -22,7 +21,7 @@ import '../download/batch_download.dart';
 import '../viewer/media_viewer_page.dart';
 import 'album_media_filter.dart';
 import 'album_media_filter_bar.dart';
-import 'photo_timeline_scrubber.dart';
+import 'album_timeline_layout.dart';
 
 /// 朋友圈相册：只读聚合视图。
 class FeedGalleryPage extends StatefulWidget {
@@ -53,10 +52,11 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
   static const int _maxEmptyScanPages = 5;
 
   final ScrollController _scrollController = ScrollController();
-  // 量一次分组头的实际滚动位置，时间轴才不会随滚动累积偏移。
-  final GlobalKey _firstHeaderKey = GlobalKey();
   // 每个日期分组的网格 sliver 一个 key：时间轴气泡靠它实时取顶部可见项。
   final List<GlobalKey> _gridKeys = [];
+  // 只钉当前分组的日期头：阈值表、吸顶分组都由公共组件算，
+  // 和相册详情页是同一份实现（见 album_timeline_layout.dart）。
+  final TimelinePinState _pin = TimelinePinState();
   final List<Media> _items = [];
   /// 页内类型筛选：和相册详情页同一个模型、同一根分段条，进页面默认「全部」。
   AlbumMediaFilter _filter = AlbumMediaFilter.all;
@@ -115,6 +115,8 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
   void _onScroll() {
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
+    // 吸顶分组换人时才重建一次：只钉当前分组，其余日期头留在内容流里。
+    if (_pin.onScroll(position.pixels)) setState(() {});
     if (position.pixels >= position.maxScrollExtent - 300) {
       _load();
     }
@@ -380,6 +382,11 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
     );
   }
 
+  /// 网格 + 右侧时间轴。
+  ///
+  /// 吸顶栈：筛选条 46 + 日期头 34 = 80（这一页没有折叠封面头）。吸顶栈高度、
+  /// 偏移表、topInset、气泡取值、吸顶阈值全部由 [AlbumTimelineLayout] 算，
+  /// 和相册详情页是同一份实现，所以两页的手感一致。
   Widget _buildBody() {
     if (_loading && _items.isEmpty) {
       return const LoadingView(message: '正在整理照片');
@@ -412,161 +419,229 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
       );
     }
 
-    final sections = _sections;
-    final displayItems = [
-      for (final section in sections) ...section.items,
-    ];
-    // 每个日期分组的网格 sliver 一个 key：气泡文案靠它们实时取顶部可见项。
-    final gridKeys = _gridKeysFor(sections.length);
-    final dpr = MediaQuery.of(context).devicePixelRatio;
-    final tileWidth = (MediaQuery.of(context).size.width - 2 * 3) / 4;
-    // 筛选条压在最上面并吸顶：翻到哪一年它都在，随时能放假筛选。
-    final slivers = <Widget>[
-      AlbumMediaFilterSliver(
-        counts: _counts,
-        selected: _filter,
-        onChanged: _selectFilter,
-      ),
-    ];
-    if (displayItems.isEmpty) {
-      // 有数据、但当前筛选下一个可见项都没有：只留筛选条 + 一句空状态。
-      slivers.add(
-        SliverFillRemaining(
-          hasScrollBody: false,
-          child: _buildFilteredEmpty(),
-        ),
-      );
-      return _wrapScroll(slivers, sections, displayItems, gridKeys);
-    }
-
-    var sectionStart = 0;
-    for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
-      final section = sections[sectionIndex];
-      if (section.header != null) {
-        slivers.add(
-          SliverToBoxAdapter(
-            child: DateHeader(
-              key: identical(section, sections.first) ? _firstHeaderKey : null,
-              text: section.header!,
-              height: null,
-              padding: const EdgeInsets.fromLTRB(16, 20, 8, 8),
-              trailing: _selecting
-                  ? TextButton(
-                      onPressed: _batchDownloading
-                          ? null
-                          : () => _toggleSectionSelection(section.items),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 32),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text(
-                        _isSectionSelected(section.items) ? '取消全选' : '全选',
-                      ),
-                    )
-                  : null,
-            ),
-          ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final sections = _sections;
+        final displayItems = [
+          for (final section in sections) ...section.items,
+        ];
+        // 每个日期分组的网格 sliver 一个 key：气泡文案靠它实时取顶部可见项。
+        final gridKeys = _gridKeysFor(sections.length);
+        final columns = responsiveColumns(context, 4);
+        final dpr = MediaQuery.of(context).devicePixelRatio;
+        final tileWidth = (constraints.maxWidth - 2 * (columns - 1)) / columns;
+        final sticky = TimelineStickySpec(
+          // 这一页没有会折叠的页头：吸顶区 = 筛选条 46 + 日期头 34 = 80。
+          headerMin: 0,
+          headerMax: 0,
+          filterExtent: kAppSegmentedBarHeight,
+          dateHeaderExtent: AlbumViewSettings.group.value == AlbumGroup.flat
+              ? 0
+              : kTimelineDateHeaderHeight,
         );
-      }
-      final sectionOffset = sectionStart;
-      sectionStart += section.items.length;
-      slivers.add(
-        SliverGrid.builder(
-          // 时间轴要靠这个 key 问渲染树「这一组顶部露出的是哪一格」。
-          key: sectionIndex < gridKeys.length ? gridKeys[sectionIndex] : null,
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: responsiveColumns(context, 4),
-            mainAxisSpacing: 2,
-            crossAxisSpacing: 2,
-          ),
-          itemCount: section.items.length,
-          itemBuilder: (context, index) {
-            final media = section.items[index];
-            final globalIndex = sectionOffset + index;
-            final selected = _selected.contains(media.id);
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                AlbumThumb(
-                  media: media,
-                  radius: 0,
-                  cacheWidth: (tileWidth * dpr).round(),
-                  heroTag: 'gallery_${media.id}',
-                  onTap: _selecting
-                      ? () => _toggleSelect(media)
-                      : () => _open(displayItems, globalIndex),
-                  onLongPress: _selecting
-                      ? () => _toggleSelect(media)
-                      : () => _enterSelectionWith(media),
-                ),
-                if (_selecting)
-                  IgnorePointer(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: selected
-                              ? AppColors.primary
-                              : Colors.white.withOpacity(0.6),
-                          width: selected ? 3 : 1,
-                        ),
-                        color: selected
-                            ? AppColors.primary.withOpacity(0.12)
-                            : Colors.black.withOpacity(0.06),
-                      ),
-                    ),
-                  ),
-                if (_selecting)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: IgnorePointer(
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? AppColors.primary
-                              : Colors.black.withOpacity(0.35),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 1.5),
-                        ),
-                        child: selected
-                            ? const Icon(
-                                Icons.check,
-                                size: 14,
-                                color: Colors.white,
-                              )
-                            : null,
-                      ),
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-      );
-    }
-    if (_loadingMore) {
-      slivers.add(
-        const SliverToBoxAdapter(
-          child: SizedBox(height: 64, child: LoadingView(compact: true)),
-        ),
-      );
-    } else if (_nextCursor == null) {
-      slivers.add(
-        const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.only(top: 20, bottom: 36),
-            child: Center(
-              child: Text('时间轴到底了', style: AppText.caption),
-            ),
-          ),
-        ),
-      );
-    }
+        final layout = AlbumTimelineLayout.compute(
+          sections: sections,
+          sliverKeys: gridKeys,
+          width: constraints.maxWidth,
+          columns: columns,
+          sticky: sticky,
+          sort: AlbumViewSettings.sort.value,
+          viewHeight: constraints.maxHeight,
+        );
+        // 这一帧的阈值表 + 当前吸顶分组（只钉当前分组）。
+        _pin.register(
+          layout.pinThresholds,
+          _scrollController.hasClients ? _scrollController.offset : 0.0,
+        );
 
-    return _wrapScroll(slivers, sections, displayItems, gridKeys);
+        // 筛选条压在最上面并吸顶：翻到哪一年它都在，随时能放假筛选。
+        final slivers = <Widget>[
+          AlbumMediaFilterSliver(
+            counts: _counts,
+            selected: _filter,
+            onChanged: _selectFilter,
+          ),
+        ];
+        if (displayItems.isEmpty) {
+          // 有数据、但当前筛选下一个可见项都没有：只留筛选条 + 一句空状态。
+          slivers.add(
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: _buildFilteredEmpty(),
+            ),
+          );
+        } else {
+          var sectionStart = 0;
+          for (var sectionIndex = 0;
+              sectionIndex < sections.length;
+              sectionIndex++) {
+            final section = sections[sectionIndex];
+            if (section.header != null) {
+              // 和相册详情页同一份吸顶实现：只钉当前分组，吸顶区高度恒定。
+              slivers.add(
+                timelineDateHeaderSliver(
+                  pinned: sectionIndex == _pin.pinnedSection,
+                  child: timelineDateHeader(
+                    section,
+                    trailing: _selecting
+                        ? TextButton(
+                            onPressed: _batchDownloading
+                                ? null
+                                : () => _toggleSectionSelection(section.items),
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(0, 32),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            child: Text(
+                              _isSectionSelected(section.items)
+                                  ? '取消全选'
+                                  : '全选',
+                            ),
+                          )
+                        : null,
+                  ),
+                ),
+              );
+            }
+            final sectionOffset = sectionStart;
+            sectionStart += section.items.length;
+            slivers.add(
+              // 分组头与网格之间的留白和相册页一样：偏移表里也算这一份。
+              SliverPadding(
+                padding: const EdgeInsets.only(top: kTimelineSectionGap),
+                sliver: SliverGrid.builder(
+                  // 时间轴要靠这个 key 问渲染树「这一组顶部露出的是哪一格」。
+                  key: sectionIndex < gridKeys.length
+                      ? gridKeys[sectionIndex]
+                      : null,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: columns,
+                    mainAxisSpacing: 2,
+                    crossAxisSpacing: 2,
+                  ),
+                  itemCount: section.items.length,
+                  itemBuilder: (context, index) {
+                    final media = section.items[index];
+                    final globalIndex = sectionOffset + index;
+                    final selected = _selected.contains(media.id);
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        AlbumThumb(
+                          media: media,
+                          radius: 0,
+                          cacheWidth: (tileWidth * dpr).round(),
+                          heroTag: 'gallery_${media.id}',
+                          onTap: _selecting
+                              ? () => _toggleSelect(media)
+                              : () => _open(displayItems, globalIndex),
+                          onLongPress: _selecting
+                              ? () => _toggleSelect(media)
+                              : () => _enterSelectionWith(media),
+                        ),
+                        if (_selecting)
+                          IgnorePointer(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: selected
+                                      ? AppColors.primary
+                                      : Colors.white.withOpacity(0.6),
+                                  width: selected ? 3 : 1,
+                                ),
+                                color: selected
+                                    ? AppColors.primary.withOpacity(0.12)
+                                    : Colors.black.withOpacity(0.06),
+                              ),
+                            ),
+                          ),
+                        if (_selecting)
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: IgnorePointer(
+                              child: Container(
+                                width: 22,
+                                height: 22,
+                                decoration: BoxDecoration(
+                                  color: selected
+                                      ? AppColors.primary
+                                      : Colors.black.withOpacity(0.35),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
+                                ),
+                                child: selected
+                                    ? const Icon(
+                                        Icons.check,
+                                        size: 14,
+                                        color: Colors.white,
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            );
+          }
+          if (_loadingMore) {
+            slivers.add(
+              const SliverToBoxAdapter(
+                child: SizedBox(height: 64, child: LoadingView(compact: true)),
+              ),
+            );
+          } else if (_nextCursor == null) {
+            slivers.add(
+              const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.only(top: 20, bottom: 36),
+                  child: Center(
+                    child: Text('时间轴到底了', style: AppText.caption),
+                  ),
+                ),
+              ),
+            );
+          }
+        }
+
+        final showScrubber = !_selecting && displayItems.length > 12;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: () => _load(refresh: true),
+              child: CustomScrollView(
+                controller: _scrollController,
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: slivers,
+              ),
+            ),
+            if (showScrubber)
+              // 轨道顶边 = 吸顶区下沿（80），跳转按 offsets，气泡实时取
+              // 吸顶区下沿以下第一项。
+              timelineScrubberLayer(
+                controller: _scrollController,
+                itemCount: displayItems.length,
+                itemOffsets: layout.metrics.offsets,
+                trackTop: layout.trackTop,
+                liveLabel: () => layout.liveMonthLabel(
+                  displayItems,
+                  AlbumViewSettings.sort.value,
+                ),
+              ),
+          ],
+        );
+      },
+    );
   }
 
   /// 筛选后没有可见项：文案只说这一件事，动作是回到「全部」。
@@ -582,92 +657,6 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
         child: const Text('看全部'),
       ),
     );
-  }
-
-  /// 网格 + 右侧时间轴。吸顶区只有筛选条这一层，时间轴的基准偏移和
-  /// 压住的高度都取它：拖动到某个月份时那一行正好落在筛选条下沿。
-  Widget _wrapScroll(
-    List<Widget> slivers,
-    List<AlbumSection> sections,
-    List<Media> displayItems,
-    List<GlobalKey> gridKeys,
-  ) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = responsiveColumns(context, 4);
-        const stickyExtent = kAppSegmentedBarHeight;
-        final metrics = buildTimelineMetrics(
-          sections,
-          width: constraints.maxWidth,
-          columns: columns,
-          headerHeight: _dateHeaderExtent(),
-          base: stickyExtent,
-          topInset: stickyExtent,
-          fallbackLabel: (media) => timelineMonthLabel(
-            albumSortDate(media, AlbumViewSettings.sort.value),
-          ),
-        );
-        // 顶部可见项：和相册详情页同一份定位，topInset 就是吸顶筛选条的高度，
-        // 被它压住的那一行不参与气泡文案。
-        final sliverStarts = <int>[];
-        var sliverStart = 0;
-        for (final section in sections) {
-          sliverStarts.add(sliverStart);
-          sliverStart += section.items.length;
-        }
-        final visibleLocator = VisibleItemLocator(
-          sliverStarts: sliverStarts,
-          sliverKeys: gridKeys,
-          topInset: stickyExtent,
-        );
-        final showScrubber = !_selecting && displayItems.length > 12;
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            RefreshIndicator(
-              color: AppColors.primary,
-              onRefresh: () => _load(refresh: true),
-              child: CustomScrollView(
-                controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: slivers,
-              ),
-            ),
-            if (showScrubber)
-              Positioned(
-                right: 0,
-                // 从吸顶条下沿开始：轨道不会压住筛选条，拖动比例也不算上它。
-                top: stickyExtent,
-                bottom: 0,
-                width: 30,
-                child: PhotoTimelineScrubber(
-                  controller: _scrollController,
-                  itemCount: displayItems.length,
-                  itemOffsets: metrics.offsets,
-                  // 跳转仍按 offsets，气泡文案实时取顶部可见项（已扣吸顶区）。
-                  liveLabel: () => albumVisibleMonthLabel(
-                    displayItems,
-                    visibleLocator,
-                    sort: AlbumViewSettings.sort.value,
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// 日期头的实际高度（它只给上下留白、高度自适应，只能量）。
-  ///
-  /// 量不到时退回默认值：重建途中日期头可能还没布局，直接问
-  /// [BuildContext.size] 会抛异常，所以先看 render box 有没有尺寸。
-  double _dateHeaderExtent() {
-    final context = _firstHeaderKey.currentContext;
-    if (context == null) return 48;
-    final render = context.findRenderObject();
-    if (render is! RenderBox || !render.hasSize) return 48;
-    return render.size.height;
   }
 
   /// 每个日期分组的网格 sliver 一个 key，跟着分组数量增减。

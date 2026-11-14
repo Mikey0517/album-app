@@ -111,12 +111,12 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  testWidgets('朋友圈相册：轨道顶边 = 吸顶筛选条下沿，滚动不漂移', (tester) async {
+  testWidgets('朋友圈相册：吸顶区 80（筛选条 46 + 日期头 34），轨道顶边贴其下沿', (tester) async {
     await _pumpGallery(tester);
     final position =
         tester.state<ScrollableState>(find.byType(Scrollable).first).position;
 
-    // 吸顶区只有筛选条这一层（日期头是内容流里的普通横条）：46 高，恒定。
+    // 两层吸顶：筛选条 46 + 只钉当前分组的日期头 34 = 80，滚动过程中恒定。
     for (final target in <double>[0, 300, 600, 1200]) {
       position.jumpTo(target.clamp(0.0, position.maxScrollExtent));
       await tester.pumpAndSettle();
@@ -126,41 +126,35 @@ void main() {
       expect(
         filter.height,
         closeTo(kAppSegmentedBarHeight, 0.5),
-        reason: '吸顶区高度恒为筛选条高度',
+        reason: '筛选条高度不随滚动变',
+      );
+
+      final headers = find.byType(DateHeader);
+      final pinned = <Rect>[];
+      for (var i = 0; i < headers.evaluate().length; i++) {
+        final rect = tester.getRect(headers.at(i));
+        if ((rect.top - filter.bottom).abs() <= 0.5) pinned.add(rect);
+        expect(
+          rect.top,
+          greaterThanOrEqualTo(filter.bottom - 0.5),
+          reason: '日期头不许压到筛选条上，更不许两条叠在吸顶位',
+        );
+      }
+      expect(pinned, hasLength(1), reason: '同一时刻只有一个日期头吸顶');
+      expect(
+        pinned.single.bottom,
+        closeTo(80, 0.5),
+        reason: '吸顶区 = 筛选条 46 + 日期头 34',
       );
       expect(
-        tester.getRect(find.byType(PhotoTimelineScrubber)).top - filter.bottom,
+        tester.getRect(find.byType(PhotoTimelineScrubber)).top -
+            pinned.single.bottom,
         closeTo(0.0, 0.01),
-        reason: '轨道顶边 = 吸顶条下沿，接缝 0 像素',
+        reason: '轨道顶边 = 吸顶区下沿，接缝 0 像素',
       );
     }
 
-    // 日期头跟着内容走：滚 100 就正好上移 100，说明它没有被钉住。
-    position.jumpTo(300);
-    await tester.pumpAndSettle();
-    DateHeader? probe;
-    double? before;
-    final headers = find.byType(DateHeader);
-    for (var i = 0; i < headers.evaluate().length; i++) {
-      final rect = tester.getRect(headers.at(i));
-      if (rect.top < 120) continue; // 留出余量，滚 100 之后它还在树里
-      probe = tester.widget<DateHeader>(headers.at(i));
-      before = rect.top;
-      break;
-    }
-    expect(probe, isNotNull, reason: '屏上总该有一条日期头');
-    position.jumpTo(400);
-    await tester.pumpAndSettle();
-    final after = tester.getRect(
-      find.byWidgetPredicate((w) => w is DateHeader && w.text == probe!.text),
-    );
-    expect(
-      after.top,
-      closeTo(before! - 100, 0.5),
-      reason: '日期头是普通内容，不会像 pinned 那样叠在顶部',
-    );
-
-    // 拖到轨道最上端：滑块贴住轨道顶边，不压吸顶筛选条。
+    // 拖到轨道最上端：滑块贴住轨道顶边，不压吸顶筛选条与日期头。
     final open = find.byType(PhotoTimelineScrubber);
     final rect = tester.getRect(open);
     final gesture = await tester.startGesture(rect.center);
@@ -173,8 +167,8 @@ void main() {
     expect(thumb.top - rect.top, closeTo(0.0, 0.01));
     expect(
       thumb.top,
-      greaterThanOrEqualTo(kAppSegmentedBarHeight - 0.01),
-      reason: '滑块不许盖住吸顶筛选条',
+      greaterThanOrEqualTo(kAppSegmentedBarHeight + 34 - 0.01),
+      reason: '滑块不许盖住吸顶筛选条与日期头',
     );
     await gesture.up();
     await tester.pumpAndSettle();
