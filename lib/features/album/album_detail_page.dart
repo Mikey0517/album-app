@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -15,6 +14,7 @@ import '../../core/media_picker.dart';
 import '../../core/responsive.dart';
 import 'photo_timeline_scrubber.dart';
 import '../../core/media_store.dart';
+import '../../core/source_media_cleanup.dart';
 import '../../core/upload_manager.dart';
 import '../../models/album.dart';
 import '../../models/media.dart';
@@ -127,55 +127,26 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   }
 
   /// 上传成功后问用户要不要删掉手机相册里的原图（只删这一批上传成功的）。
+  /// 弹窗、删除与结果提示都在 [source_media_cleanup.dart] 里，动态页共用同一份。
   Future<void> _offerDeleteOriginals() async {
-    // 删除系统相册原图只有 Android 实现，iOS 上不提示。
-    if (!Platform.isAndroid || !mounted) return;
+    // 删除系统相册原图只有 Android 实现，iOS 上不提示（也不提前消费掉待提示的条目）。
+    if (!supportsSourceMediaCleanup || !mounted) return;
     final uploaded =
         UploadManager.instance.takeCompletedWithSource(albumId: _album.id);
     if (uploaded.isEmpty) return;
-    final targets = uploaded
-        .map((item) => (uri: item.sourceUri!, isVideo: item.isVideo))
-        .toList(growable: false);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除手机里的原图？', style: AppText.titleMedium),
-        content: Text(
-          '${targets.length} 项已上传到「${_album.title}」。\n'
-          '删除后手机相册里就没有这些照片了，且无法恢复。',
-          style: AppText.bodySmall,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.textSecondary,
-            ),
-            child: const Text('保留'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: AppColors.danger),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
+    final targets = <SourceTarget>[
+      for (final item in uploaded)
+        (uri: item.sourceUri!, isVideo: item.isVideo),
+    ];
+    // 先取 messenger：删除要等系统确认弹窗，期间页面被关掉也要能提示结果。
+    final messenger = ScaffoldMessenger.of(context);
+    final confirmed = await confirmDeleteSourceMedia(
+      context,
+      targets,
+      targetLabel: '「${_album.title}」',
     );
-    if (confirmed != true || !mounted) return;
-    final result = await MediaStore.deleteSources(targets);
-    if (!mounted) return;
-    if (result.deleted == 0) {
-      final reason = result.error;
-      _snack(
-        reason == null || reason.isEmpty
-            ? '没能删除，请稍后在系统相册里手动删除'
-            : '没能删除（$reason），请到系统相册里手动删除',
-      );
-    } else if (result.isPartial) {
-      _snack('已删除 ${result.deleted} 张，${result.failed} 张未能删除');
-    } else {
-      _snack('已删除 ${result.deleted} 张原图');
-    }
+    if (!confirmed) return;
+    await deleteSourceMedia(targets, messenger: messenger);
   }
 
   Future<void> _shareAlbum() async {

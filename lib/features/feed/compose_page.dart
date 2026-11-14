@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -19,7 +20,9 @@ import '../../core/design/radius.dart';
 import '../../core/design/shadow.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/media_picker.dart';
+import '../../core/media_store.dart';
 import '../../core/motion_photo.dart';
+import '../../core/source_media_cleanup.dart';
 import 'preview/image_preview_page.dart';
 import 'preview/video_preview_page.dart';
 
@@ -110,12 +113,13 @@ class _ComposePageState extends State<ComposePage> {
       if (pickedResult.failedCount > 0) {
         _toast('存储空间不足，${pickedResult.failedCount} 个文件没能读取');
       }
-      final files = pickedResult.files;
-      if (files.isEmpty) return;
+      final items = pickedResult.items;
+      if (items.isEmpty) return;
 
       final picked = <_PickedMedia>[];
-      for (final file in files) {
+      for (final item in items) {
         if (_medias.length + picked.length >= _maxMedias) break;
+        final file = item.file;
         final type = _detectType(file.path, file.mimeType);
         if (type == null) continue;
 
@@ -129,6 +133,8 @@ class _ComposePageState extends State<ComposePage> {
         picked.add(
           _PickedMedia(
             path: file.path,
+            // 系统相册 URI：发布成功后用它问用户要不要删手机里的原图。
+            uri: item.uri,
             type: type,
             durationMs: durationMs,
             isMotion: isMotion,
@@ -218,6 +224,21 @@ class _ComposePageState extends State<ComposePage> {
     await Navigator.of(context).push(route);
   }
 
+  /// 已选媒体里能交给 MediaStore 删掉的那些原图（相册 URI + 图片/视频）。
+  ///
+  /// uri 来自 [pickMultipleMediaFiles] 的 [PickedMediaFile.uri]：只有 Android 原生
+  /// Photo Picker 通道会带回来；iOS 或退回 image_picker 时是 null，也就不提示。
+  List<SourceTarget> _sourceMediaTargets() {
+    final targets = <SourceTarget>[];
+    for (final media in _medias) {
+      final uri = media.uri;
+      if (uri == null || uri.isEmpty) continue;
+      // 和相册页一致：视频按媒体类型判断，删除时要带上 video 标记。
+      targets.add((uri: uri, isVideo: media.type == 'video'));
+    }
+    return List<SourceTarget>.unmodifiable(targets);
+  }
+
   Future<void> _publish() async {
     if (_publishing || !_hasContent) return;
     FocusScope.of(context).unfocus();
@@ -248,7 +269,22 @@ class _ComposePageState extends State<ComposePage> {
         _publishing = false;
         _processingUpload = false;
       });
-      Navigator.of(context).pop(true);
+      // 发布成功后照相册页的做法问一次要不要删手机里的原图。
+      // 先问再关：弹窗要挂在还活着的页面上（mounted），删除本身不挡着关闭。
+      final navigator = Navigator.of(context);
+      final messenger = ScaffoldMessenger.of(context);
+      final targets = _sourceMediaTargets();
+      final confirmed = await confirmDeleteSourceMedia(
+        context,
+        targets,
+        targetLabel: '朋友圈',
+        action: '发布到',
+      );
+      if (!mounted) return;
+      navigator.pop(true);
+      if (confirmed) {
+        unawaited(deleteSourceMedia(targets, messenger: messenger));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -686,11 +722,15 @@ class _PickedMedia {
   final int? durationMs;
   final bool isMotion;
 
+  /// 系统相册里的 URI（Android Photo Picker 才有），用来删除手机原图。
+  final String? uri;
+
   const _PickedMedia({
     required this.path,
     required this.type,
     this.durationMs,
     this.isMotion = false,
+    this.uri,
   });
 
   String get filename {
