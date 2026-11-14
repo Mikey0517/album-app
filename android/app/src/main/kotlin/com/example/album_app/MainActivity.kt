@@ -2,12 +2,18 @@ package com.example.album_app
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlarmManager
+import android.app.PendingIntent
 import android.content.ContentUris
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.security.keystore.KeyGenParameterSpec
@@ -32,6 +38,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.system.exitProcess
 
 /**
  * 使用 Android 系统 Photo Picker，同时在拿到 URI 后请求原始文件。
@@ -40,6 +47,21 @@ import kotlin.math.roundToInt
  * 并调用 setRequireOriginal()，尽量保留原始字节。
  */
 class MainActivity : FlutterFragmentActivity() {
+    private companion object {
+        /** 重启用的 PendingIntent 请求码，固定值保证 FLAG_UPDATE_CURRENT 复用同一个。 */
+        const val RELAUNCH_REQUEST_CODE = 1001
+
+        /**
+         * 从调度到真正拉起新进程的延迟。必须明显大于 [EXIT_DELAY_MS]，给旧进程
+         * 留出「回执 + 退出」的时间：闹钟若在旧进程还活着时触发，新 Activity 会
+         * 落回旧进程，补丁就没被重新装载。600ms 对用户只是不到一秒的黑屏。
+         */
+        const val RELAUNCH_DELAY_MS = 600L
+
+        /** 回执之后隔多久结束自己；必须小于 [RELAUNCH_DELAY_MS]。 */
+        const val EXIT_DELAY_MS = 300L
+    }
+
     private val channelName = "album/media_picker"
     private val secureStoreChannel = "album/secure_store"
     private val keyAlias = "album_app_credentials"
@@ -91,6 +113,7 @@ class MainActivity : FlutterFragmentActivity() {
         registerSecureStore(flutterEngine)
         registerImageEncoder(flutterEngine)
         registerMediaStore(flutterEngine)
+        registerAppControl(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 if (call.method != "pickMultiple") {
@@ -408,6 +431,86 @@ class MainActivity : FlutterFragmentActivity() {
         val ok = bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
         bitmap.recycle()
         return if (ok) out.toByteArray() else null
+    }
+
+    // ---- 补丁生效：重启进程 ----
+
+    /**
+     * 补丁在 Application.attachBaseContext 里注入，跑着的进程换不掉，所以
+     * 「重启 App」必须是「旧进程先死、新进程再起」：直接在原进程里 startActivity
+     * 只会新建一个 Activity，新实例跟旧进程同生共死，旧进程一退它也一起没了。
+     * 这里把启动 Intent 交给 AlarmManager，进程退出之后再由系统拉起新进程。
+     */
+    private fun registerAppControl(flutterEngine: FlutterEngine) {
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "album/app")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "restart") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                restartApp(result)
+            }
+    }
+
+    private fun restartApp(result: MethodChannel.Result) {
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        if (intent == null) {
+            // 拿不到启动 Intent 时不在这里退出：交回 Dart 兜底。
+            result.error("no_launch_intent", "系统没有返回启动 Intent", null)
+            return
+        }
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+        intent.setPackage(packageName)
+
+        // 通道只能回执一次，所以先做调度：成功回 true，抛异常回 error 让 Dart 兜底。
+        val scheduled = try {
+            scheduleRelaunch(intent)
+            true
+        } catch (e: Exception) {
+            Log.w("AlbumApp", "调度重启失败，退回直接拉起", e)
+            false
+        }
+        if (scheduled) {
+            result.success(true)
+        } else {
+            // 退回旧做法：新实例大概率跟着进程一起结束，用户掉回桌面后重开也能生效；
+            // 同时把失败告诉 Dart，让它 SystemNavigator.pop() 兜底退出。
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                Log.w("AlbumApp", "直接拉起也失败", e)
+            }
+            result.error("restart_failed", "无法调度重启，请手动重开", null)
+        }
+        // 先把回执交出去，再结束自己；闹钟在 EXIT_DELAY_MS 之后触发。
+        Handler(Looper.getMainLooper()).postDelayed({ exitProcess(0) }, EXIT_DELAY_MS)
+    }
+
+    /**
+     * 用 [AlarmManager] 在进程退出之后再拉起启动 Intent。
+     *
+     * 用 set() 而不是 setExactAndAllowWhileIdle()：精确闹钟在 Android 12+ 需要
+     * SCHEDULE_EXACT_ALARM 权限（Android 14 起还默认关闭、要用户手动开），为了
+     * 重启这几百毫秒去申请一个敏感权限不划算。非精确闹钟在应用刚切到后台时
+     * 基本立刻就触发（系统对前台刚退出的应用不做深度批量），最坏被延后几秒，
+     * 用户看到的只是一段稍长的黑屏；真被延后也不影响正确性，补丁一定会在新进程
+     * 的 Application.attachBaseContext 里装载。
+     */
+    private fun scheduleRelaunch(intent: Intent) {
+        val pending = PendingIntent.getActivity(
+            this,
+            RELAUNCH_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarms = getSystemService(AlarmManager::class.java)
+            ?: throw IllegalStateException("AlarmManager 不可用")
+        // ELAPSED_REALTIME 配 elapsedRealtime()：单调时钟，不受用户改系统时间影响。
+        alarms.set(
+            AlarmManager.ELAPSED_REALTIME,
+            SystemClock.elapsedRealtime() + RELAUNCH_DELAY_MS,
+            pending
+        )
     }
 
     // ---- 「记住密码」的本地加密：AndroidKeyStore 里不可导出的 AES/GCM 密钥 ----

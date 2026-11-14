@@ -40,6 +40,19 @@ import UIKit
         UIViewController.attemptRotationToDeviceOrientation()
         result(nil)
       }
+
+      // 补丁只在 Android 上，iOS 不会弹「更新已准备好」；这里只保证 Dart 侧
+      // 万一调到这条通道时拿到明确的失败，而不是崩溃或挂住。
+      FlutterMethodChannel(
+        name: "album/app",
+        binaryMessenger: controller.binaryMessenger
+      ).setMethodCallHandler { call, result in
+        if call.method == "restart" {
+          result(FlutterError(code: "unsupported", message: "iOS 不支持重启进程", details: nil))
+          return
+        }
+        result(FlutterMethodNotImplemented)
+      }
     }
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
