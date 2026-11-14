@@ -62,28 +62,73 @@ double timelineBaseOffset(GlobalKey key) {
   return 0;
 }
 
-/// 相册右侧的时间轴快速拖拽条，交互对齐小米相册：
-/// 按住上下滑，列表跟手跳到对应的月份，同时浮出当前月份。
+/// 取一个 [SliverList]（变高卡片列表）里第一条可见子项的 index。
+///
+/// 网格能用偏移表定位，变高列表不行，只能问渲染树「现在顶部是谁」：
+/// 子项在 sliver 里的位置是 `childScrollOffset - constraints.scrollOffset`
+/// （注意不能用 paintBounds，它是子项自己的局部坐标，永远是 0 起点），
+/// 加上自身高度还为正的那条就是露出视口的第一项。
+int? firstVisibleSliverChildIndex(GlobalKey key) {
+  final render = key.currentContext?.findRenderObject();
+  if (render is! RenderSliverMultiBoxAdaptor || !render.attached) return null;
+  final vertical = render.constraints.axis == Axis.vertical;
+  for (var child = render.firstChild;
+      child != null;
+      child = render.childAfter(child)) {
+    if (!child.hasSize) continue;
+    final double? layoutOffset = render.childScrollOffset(child);
+    if (layoutOffset == null) continue;
+    final extent = vertical ? child.size.height : child.size.width;
+    final double top = layoutOffset - render.constraints.scrollOffset;
+    if (top + extent <= 0) continue;
+    final data = child.parentData;
+    if (data is SliverMultiBoxAdaptorParentData) return data.index;
+    return null;
+  }
+  return null;
+}
+
+/// 拖拽时浮出的滑块与月份气泡的 key：空闲时它们不存在，
+/// 测试据此断言「不按就不显示」。
+const Key timelineScrubberThumbKey = ValueKey<String>('timeline-scrubber-thumb');
+const Key timelineScrubberLabelKey = ValueKey<String>('timeline-scrubber-label');
+
+/// 右侧的时间轴快速拖拽条，交互对齐小米相册：
+/// 按住上下滑，列表跟手跳到对应位置，同时浮出当前月份，松手后收起。
+///
+/// 两种定位模式：
+/// - offsets 模式（默认）：按每一项的精确偏移跳转，用于等高网格；
+/// - progress 模式（传 [progressLabel]）：按「拖动比例 × maxScrollExtent」跳转，
+///   用于变高卡片列表；月份文案由外部回调给出（动态流给的是顶部可见那条动态）。
 class PhotoTimelineScrubber extends StatefulWidget {
   const PhotoTimelineScrubber({
     super.key,
     required this.controller,
-    required this.itemCount,
-    required this.itemOffsets,
-    required this.labels,
+    this.itemCount = 0,
+    this.itemOffsets = const <double>[],
+    this.labels = const <String>[],
+    this.progressLabel,
     this.enabled = true,
+    this.hideDelay = const Duration(milliseconds: 700),
   });
 
   final ScrollController controller;
+
+  /// offsets 模式的项数、每一项的起始偏移、每一项的月份文案。
   final int itemCount;
-
-  /// 每一项在滚动内容里的起始偏移，长度与 [itemCount] 一致。
   final List<double> itemOffsets;
-
-  /// 每一项所属的月份文案，长度与 [itemCount] 一致。
   final List<String> labels;
 
+  /// 非空即进入 progress 模式：拖动比例直接映射到滚动位置，
+  /// 月份文案每次由这个回调现取。
+  final String Function()? progressLabel;
+
   final bool enabled;
+
+  /// 松手后月份气泡再停留多久。
+  final Duration hideDelay;
+
+  bool get isProgressMode => progressLabel != null;
 
   @override
   State<PhotoTimelineScrubber> createState() => _PhotoTimelineScrubberState();
@@ -93,6 +138,7 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
   double? _thumbY;
   String? _label;
   Timer? _hideTimer;
+  bool _labelRefreshScheduled = false;
 
   @override
   void dispose() {
@@ -100,38 +146,66 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
     super.dispose();
   }
 
-  bool get _usable =>
-      widget.enabled &&
-      widget.itemCount > 1 &&
-      widget.itemOffsets.length == widget.itemCount &&
-      widget.labels.length == widget.itemCount;
+  bool get _usable {
+    if (!widget.enabled) return false;
+    if (widget.isProgressMode) return true;
+    return widget.itemCount > 1 &&
+        widget.itemOffsets.length == widget.itemCount &&
+        widget.labels.length == widget.itemCount;
+  }
 
   void _seek(double dy, double height) {
     if (!_usable || height <= 0 || !widget.controller.hasClients) return;
-    final max = widget.controller.position.maxScrollExtent;
+    final position = widget.controller.position;
+    final max = position.maxScrollExtent;
     final ratio = (dy / height).clamp(0.0, 1.0);
-    final index =
-        (ratio * (widget.itemCount - 1)).round().clamp(0, widget.itemCount - 1);
-    final target = widget.itemOffsets[index].clamp(0.0, max);
-    if ((widget.controller.offset - target).abs() > 0.5) {
-      widget.controller.jumpTo(target);
-    }
-    final label = widget.labels[index];
-    final changed = label != _label;
-    if (changed) {
-      HapticFeedback.selectionClick();
+    final external = widget.progressLabel;
+    if (external != null) {
+      // 变高列表没法建偏移表，按比例直接跳，手感对齐相册页。
+      final target = (ratio * max).clamp(0.0, max);
+      if ((position.pixels - target).abs() > 0.5) {
+        widget.controller.jumpTo(target);
+      }
+      // 跳转要等这一帧布局完才知道顶部是谁，下一帧再取月份，避免闪错月份。
+      _scheduleProgressLabelRefresh();
+    } else {
+      final index = (ratio * (widget.itemCount - 1))
+          .round()
+          .clamp(0, widget.itemCount - 1);
+      final target = widget.itemOffsets[index].clamp(0.0, max);
+      if ((position.pixels - target).abs() > 0.5) {
+        widget.controller.jumpTo(target);
+      }
+      _applyLabel(widget.labels[index]);
     }
     _hideTimer?.cancel();
-    setState(() {
-      _thumbY = dy;
-      _label = label;
+    setState(() => _thumbY = dy);
+  }
+
+  /// 换月震动只在文案真的变了时发一次。
+  void _applyLabel(String label) {
+    if (label == _label) return;
+    _label = label;
+    HapticFeedback.selectionClick();
+  }
+
+  void _scheduleProgressLabelRefresh() {
+    final external = widget.progressLabel;
+    if (external == null || _labelRefreshScheduled) return;
+    _labelRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _labelRefreshScheduled = false;
+      if (!mounted || _thumbY == null) return;
+      final label = external();
+      if (label == _label) return;
+      setState(() => _applyLabel(label));
     });
   }
 
   void _endDrag() {
     _hideTimer?.cancel();
     // 松手后让月份再停留一下，方便确认跳到了哪一段。
-    _hideTimer = Timer(const Duration(milliseconds: 700), () {
+    _hideTimer = Timer(widget.hideDelay, () {
       if (!mounted) return;
       setState(() => _thumbY = null);
     });
@@ -164,6 +238,7 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
                   top: thumbY - 22,
                   right: 6,
                   child: Container(
+                    key: timelineScrubberThumbKey,
                     width: 6,
                     height: 44,
                     decoration: BoxDecoration(
@@ -175,7 +250,10 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
                 Positioned(
                   top: (thumbY - 22).clamp(4.0, height - 48),
                   right: 34,
-                  child: _MonthBubble(text: _label ?? ''),
+                  child: _MonthBubble(
+                    key: timelineScrubberLabelKey,
+                    text: _label ?? '',
+                  ),
                 ),
               ],
             ],
@@ -187,7 +265,7 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
 }
 
 class _MonthBubble extends StatelessWidget {
-  const _MonthBubble({required this.text});
+  const _MonthBubble({super.key, required this.text});
 
   final String text;
 

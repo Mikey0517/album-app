@@ -54,15 +54,23 @@ class _StoragePageState extends State<StoragePage> {
     return '$count 项 · ${formatBytes(_usage.pendingUploadBytes)}';
   }
 
-  Widget _row(String label, String value, {bool emphasized = false}) {
+  Widget _row(
+    String label,
+    String value, {
+    bool emphasized = false,
+    bool indented = false,
+  }) {
     final style = emphasized
         ? AppText.body.copyWith(fontWeight: FontWeight.w600)
         : AppText.body;
-    return Row(
-      children: [
-        Expanded(child: Text(label, style: style)),
-        Text(value, style: emphasized ? style : AppText.bodySmall),
-      ],
+    return Padding(
+      padding: EdgeInsets.only(left: indented ? 16 : 0),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: style)),
+          Text(value, style: emphasized ? style : AppText.bodySmall),
+        ],
+      ),
     );
   }
 
@@ -86,9 +94,23 @@ class _StoragePageState extends State<StoragePage> {
             _row('图片缓存', formatBytes(usage.imageBytes)),
             const SizedBox(height: 10),
             _row('临时文件', formatBytes(usage.tempBytes)),
+            const SizedBox(height: 10),
+            _row('更新包', formatBytes(usage.updateBytes)),
+            const SizedBox(height: 10),
+            _row('分享/导出临时文件', formatBytes(usage.shareBytes)),
+            const SizedBox(height: 10),
+            _row('其它残留', formatBytes(usage.residueBytes)),
             const Divider(height: 22),
             _row('合计可清理', formatBytes(usage.clearableBytes),
                 emphasized: true),
+            const SizedBox(height: 10),
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '待上传副本、应用数据与程序本体不会被删除。',
+                style: AppText.caption,
+              ),
+            ),
           ],
         ),
         actions: [
@@ -179,7 +201,17 @@ class _StoragePageState extends State<StoragePage> {
                 const SizedBox(height: 14),
                 _row('待上传副本', _pendingLabel),
                 const SizedBox(height: 14),
-                _row('其他', _size(_usage.otherBytes)),
+                // 下面五行缩进一级：都是原来「其他」的明细。
+                _row('更新包', _size(_usage.updateBytes), indented: true),
+                const SizedBox(height: 12),
+                _row('分享/导出临时文件', _size(_usage.shareBytes),
+                    indented: true),
+                const SizedBox(height: 12),
+                _row('应用数据', _size(_usage.appDataBytes), indented: true),
+                const SizedBox(height: 12),
+                _row('程序本体', _size(_usage.programBytes), indented: true),
+                const SizedBox(height: 12),
+                _row('其它残留', _size(_usage.residueBytes), indented: true),
                 const Divider(height: 28),
                 _row('总计', _size(_usage.appBytes), emphasized: true),
               ],

@@ -49,6 +49,20 @@ void main() {
     return file;
   }
 
+  /// 模拟 Android 的目录布局：文档目录是 `<应用数据>/app_flutter`，
+  /// 应用数据里有 databases / shared_prefs / files，supportDir 指向 files。
+  ({Directory root, Directory docs, Directory files}) androidLayout() {
+    final root = Directory('${tmp.path}/data')..createSync();
+    final docs = Directory('${root.path}/app_flutter')..createSync();
+    final files = Directory('${root.path}/files')..createSync();
+    CacheService.dirsOverride = () async => CacheDirs(
+          tempDir: tempDir.path,
+          docsDir: docs.path,
+          supportDir: files.path,
+        );
+    return (root: root, docs: docs, files: files);
+  }
+
   test('统计分别算图片缓存、临时文件和待上传副本', () async {
     writeFile('${tempDir.path}/album_image_cache/a.jpg', 1000);
     writeFile('${tempDir.path}/motion_photos/b.mp4', 2000);
@@ -61,6 +75,63 @@ void main() {
     expect(usage.pendingUploadBytes, 3000);
     expect(usage.pendingUploadCount, 1);
     expect(usage.clearableBytes, 3000);
+  });
+
+  test('五类子项各有各的数字，求和等于总计', () async {
+    final layout = androidLayout();
+    writeFile('${layout.root.path}/databases/album.db', 700);
+    writeFile('${layout.root.path}/shared_prefs/FlutterSharedPreferences.xml', 300);
+    writeFile('${layout.files.path}/support.bin', 900);
+    writeFile('${tempDir.path}/album_image_cache/a.jpg', 1000);
+    writeFile('${tempDir.path}/motion_photos/b.mp4', 2000);
+    writeFile('${tempDir.path}/album_updates/app.apk', 400);
+    writeFile('${tempDir.path}/album_share_1/c.jpg', 500);
+    writeFile('${tempDir.path}/familyalbum_9_9.jpg', 600);
+    writeFile('${layout.docs.path}/picked_media/e.jpg', 3000);
+    writeFile('${layout.docs.path}/leftover.bin', 250);
+    CacheService.programBytesOverride = () => 5000;
+
+    final usage = await CacheService.measure();
+
+    expect(usage.imageBytes, 1000);
+    expect(usage.tempBytes, 2000, reason: '动图临时文件仍算临时文件');
+    expect(usage.updateBytes, 400);
+    expect(usage.shareBytes, 500 + 600, reason: '分享目录 + 保存到相册的中间文件');
+    expect(usage.pendingUploadBytes, 3000);
+    expect(
+      usage.appDataBytes,
+      700 + 300 + 900,
+      reason: 'databases + shared_prefs + files，且 files 不能与私有目录重复统计',
+    );
+    expect(usage.programBytes, 5000);
+    expect(usage.residueBytes, 250, reason: 'app_flutter 里对不上的剩余部分');
+    expect(
+      usage.otherBytes,
+      400 + 1100 + 1900 + 5000 + 250,
+      reason: '其它 = 五类子项之和',
+    );
+    expect(
+      usage.updateBytes +
+          usage.shareBytes +
+          usage.appDataBytes +
+          usage.programBytes +
+          usage.residueBytes,
+      usage.otherBytes,
+    );
+    expect(
+      usage.appBytes,
+      usage.imageBytes +
+          usage.tempBytes +
+          usage.pendingUploadBytes +
+          usage.otherBytes,
+      reason: '总占用必须是所有分项之和',
+    );
+    expect(usage.appBytes, 1000 + 2000 + 3000 + 8650);
+    expect(
+      usage.clearableBytes,
+      1000 + 2000 + 400 + 1100 + 250,
+      reason: '可清理 = 图片缓存 + 临时文件 + 更新包 + 分享/导出 + 其它残留',
+    );
   });
 
   test('四项之和就是 App 总占用（含 picked_media 与 other）', () async {
@@ -78,7 +149,8 @@ void main() {
     expect(usage.tempBytes, 2000);
     expect(usage.pendingUploadBytes, 3500);
     expect(usage.pendingUploadCount, 2);
-    expect(usage.otherBytes, 4000 + 5000, reason: '其它私有文件 + 程序本体估算');
+    expect(usage.residueBytes, 4000, reason: '对不上已知分项的剩余部分');
+    expect(usage.otherBytes, 4000 + 5000, reason: '其它残留 + 程序本体估算');
     expect(
       usage.appBytes,
       usage.imageBytes +
@@ -88,7 +160,7 @@ void main() {
       reason: '总占用必须是四项之和',
     );
     expect(usage.appBytes, 1000 + 2000 + 3500 + 9000);
-    expect(usage.clearableBytes, 3000, reason: '待上传副本不计入可清理');
+    expect(usage.clearableBytes, 3000 + 4000, reason: '待上传副本不计入可清理');
   });
 
   test('临时目录里的旧副本算待上传副本，不算临时文件', () async {
@@ -117,6 +189,67 @@ void main() {
     expect(upload.existsSync(), isTrue, reason: '待上传副本不能被清理');
     expect(legacy.existsSync(), isTrue, reason: '旧副本也是待上传数据');
     expect((await CacheService.measure()).clearableBytes, 0);
+  });
+
+  test('主按钮清理删更新包与分享/导出，保留待上传副本、应用数据和程序本体', () async {
+    final layout = androidLayout();
+    final image = writeFile('${tempDir.path}/album_image_cache/a.jpg', 1000);
+    final temp = writeFile('${tempDir.path}/motion_photos/b.mp4', 2000);
+    final apk = writeFile('${tempDir.path}/album_updates/app.apk', 400);
+    final shareDir = writeFile('${tempDir.path}/album_share_1/c.jpg', 500);
+    final download = writeFile('${tempDir.path}/familyalbum_9_9.jpg', 600);
+    final pending = writeFile('${layout.docs.path}/picked_media/e.jpg', 3000);
+    // 残留在 app_flutter 里的分享/导出目录同样是可再生的。
+    final shareResidue = writeFile('${layout.docs.path}/album_share_9/f.jpg', 300);
+    final residue = writeFile('${layout.docs.path}/leftover.bin', 250);
+    final db = writeFile('${layout.root.path}/databases/album.db', 700);
+    final prefs =
+        writeFile('${layout.root.path}/shared_prefs/prefs.xml', 300);
+    final support = writeFile('${layout.files.path}/support.bin', 900);
+    CacheService.programBytesOverride = () => 5000;
+
+    final result = await CacheService.clear();
+
+    expect(result.freedBytes, 1000 + 2000 + 400 + 500 + 600 + 300);
+    expect(image.existsSync(), isFalse);
+    expect(temp.existsSync(), isFalse);
+    expect(apk.existsSync(), isFalse, reason: '更新包可清理');
+    expect(shareDir.existsSync(), isFalse, reason: '分享临时目录可清理');
+    expect(download.existsSync(), isFalse, reason: '保存到相册的中间文件可清理');
+    expect(shareResidue.existsSync(), isFalse, reason: '残留里的分享目录也可再生');
+    expect(pending.existsSync(), isTrue, reason: '待上传副本不能被清理');
+    expect(db.existsSync(), isTrue, reason: '应用数据不可清理');
+    expect(prefs.existsSync(), isTrue, reason: '应用数据不可清理');
+    expect(support.existsSync(), isTrue, reason: 'files 属于应用数据');
+    expect(residue.existsSync(), isTrue, reason: '拿不准的残留宁可留着');
+  });
+
+  test('其它残留只删传入的可再生路径，未知文件保留', () async {
+    final shareDir = writeFile('${docsDir.path}/album_share_7/a.jpg', 300);
+    final motion = writeFile('${docsDir.path}/motion_photos/x.mp4', 200);
+    final unknown = writeFile('${docsDir.path}/album.db', 400);
+    final emptyDir = Directory('${docsDir.path}/empty_leftover')..createSync();
+    final unknownDir = writeFile('${docsDir.path}/unknown_dir/keep.bin', 50);
+    final untouched = writeFile('${docsDir.path}/not_passed.bin', 80);
+    final pending = writeFile('${uploadsDir.path}/c.jpg', 900);
+
+    final freed = await CacheService.clearResidue([
+      '${docsDir.path}/album_share_7',
+      '${docsDir.path}/motion_photos',
+      '${docsDir.path}/album.db',
+      '${docsDir.path}/empty_leftover',
+      '${docsDir.path}/unknown_dir',
+      uploadsDir.path,
+    ]);
+
+    expect(freed, 500);
+    expect(shareDir.existsSync(), isFalse);
+    expect(motion.existsSync(), isFalse);
+    expect(unknown.existsSync(), isTrue, reason: '未知文件不能删');
+    expect(emptyDir.existsSync(), isFalse, reason: '空目录直接删');
+    expect(unknownDir.existsSync(), isTrue, reason: '非空且名字不认识，留着');
+    expect(untouched.existsSync(), isTrue, reason: '没传进来的残留不动');
+    expect(pending.existsSync(), isTrue, reason: '待上传副本有自己的入口');
   });
 
   test('更新包下载中时跳过 album_updates', () async {

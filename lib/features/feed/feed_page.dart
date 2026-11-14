@@ -11,8 +11,10 @@ import '../../models/post.dart';
 import '../../widgets/date_header.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
+import '../album/photo_timeline_scrubber.dart';
 import '../viewer/media_viewer_page.dart';
 import 'compose_page.dart';
+import 'feed_timeline.dart';
 import 'on_this_day_page.dart';
 import 'post_card.dart';
 
@@ -32,6 +34,9 @@ class _FeedPageState extends State<FeedPage> {
   String? _nextCursor;
   final GlobalKey _scrollViewKey = GlobalKey();
   final Map<int, GlobalKey> _postKeys = {};
+  // 每个日期分组的 SliverList 一个 key，时间轴靠它读「顶部可见的是哪条动态」。
+  final Map<String, GlobalKey> _groupSliverKeys = {};
+  FeedTimeline _timeline = const FeedTimeline.empty();
   String? _floatingDate;
   bool _dateUpdateScheduled = false;
 
@@ -90,6 +95,15 @@ class _FeedPageState extends State<FeedPage> {
       setState(() => _floatingDate = nextDate);
     }
   }
+
+  /// 时间轴上要显示的月份 = 顶部可见那条动态的月份。
+  String _timelineMonthLabel() => _timeline.visibleMonthLabel;
+
+  /// 评论输入等场景键盘弹起时收起时间轴，别和输入法抢右侧手势区；
+  /// 以后若加多选态，把 enabled 传 false 即可。
+  bool get _showTimeline =>
+      shouldShowFeedTimeline(_posts.length) &&
+      MediaQuery.of(context).viewInsets.bottom == 0;
 
   Future<void> _load({bool refresh = false}) async {
     if (refresh) {
@@ -250,9 +264,17 @@ class _FeedPageState extends State<FeedPage> {
         delegate: _FloatingDateHeaderDelegate(headerText),
       ),
     ];
+    final sliverKeys = <GlobalKey>[];
+    final sliverStarts = <int>[];
+    final timelinePosts = <Post>[];
     groups.forEach((key, posts) {
+      final sliverKey = _groupSliverKeys.putIfAbsent(key, () => GlobalKey());
+      sliverKeys.add(sliverKey);
+      sliverStarts.add(timelinePosts.length);
+      timelinePosts.addAll(posts);
       slivers.add(
         SliverList(
+          key: sliverKey,
           delegate: SliverChildBuilderDelegate(
             (context, index) {
               final post = posts[index];
@@ -273,6 +295,12 @@ class _FeedPageState extends State<FeedPage> {
         ),
       );
     });
+    _groupSliverKeys.removeWhere((key, _) => !groups.containsKey(key));
+    _timeline = FeedTimeline(
+      items: timelinePosts,
+      sliverStarts: sliverStarts,
+      sliverKeys: sliverKeys,
+    );
 
     if (_loadingMore) {
       slivers.add(
@@ -296,15 +324,33 @@ class _FeedPageState extends State<FeedPage> {
       );
     }
 
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: () => _load(refresh: true),
-      child: CustomScrollView(
-        key: _scrollViewKey,
-        controller: _scrollController,
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: slivers,
-      ),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        RefreshIndicator(
+          color: AppColors.primary,
+          onRefresh: () => _load(refresh: true),
+          child: CustomScrollView(
+            key: _scrollViewKey,
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: slivers,
+          ),
+        ),
+        // 时间轴浮在列表右侧、RefreshIndicator 之外：竖直拖拽由它自己接管，
+        // 列表不会跟着下拉；jumpTo 也不产生 overscroll，不会误触下拉刷新。
+        if (_showTimeline)
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 30,
+            child: PhotoTimelineScrubber(
+              controller: _scrollController,
+              progressLabel: _timelineMonthLabel,
+            ),
+          ),
+      ],
     );
   }
 }

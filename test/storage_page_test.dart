@@ -71,10 +71,12 @@ void main() {
     return file;
   }
 
-  testWidgets('分项展示四类占用，清理只删图片缓存和临时文件', (tester) async {
-    final image = writeFile('${tempDir.path}/album_image_cache/a.jpg', 4096);
-    final temp = writeFile('${tempDir.path}/motion_photos/b.mp4', 2048);
-    final pending = writeFile('${docsDir.path}/picked_media/c.jpg', 1024);
+  testWidgets('「其他」拆成五个子项，总计是所有分项之和', (tester) async {
+    writeFile('${tempDir.path}/album_image_cache/a.jpg', 4096);
+    writeFile('${tempDir.path}/motion_photos/b.mp4', 2048);
+    writeFile('${tempDir.path}/album_updates/app.apk', 1024);
+    writeFile('${tempDir.path}/album_share_1/c.jpg', 512);
+    writeFile('${docsDir.path}/picked_media/d.jpg', 256);
 
     await tester.pumpWidget(_app());
     await _pumpUntil(tester, () => find.text('…').evaluate().isEmpty);
@@ -82,29 +84,72 @@ void main() {
     expect(find.text('图片缓存'), findsOneWidget);
     expect(find.text('临时文件'), findsOneWidget);
     expect(find.text('待上传副本'), findsOneWidget);
-    expect(find.text('其他'), findsOneWidget);
+    expect(find.text('更新包'), findsOneWidget);
+    expect(find.text('分享/导出临时文件'), findsOneWidget);
+    expect(find.text('应用数据'), findsOneWidget);
+    expect(find.text('程序本体'), findsOneWidget);
+    expect(find.text('其它残留'), findsOneWidget);
     expect(find.text('总计'), findsOneWidget);
-    expect(find.text('1 项 · 1.0 KB'), findsOneWidget);
-    expect(find.text('11.0 KB'), findsOneWidget, reason: '总计是四项之和');
+    expect(find.text('1 项 · 256 B'), findsOneWidget);
+    expect(find.text('1.0 KB'), findsOneWidget, reason: '更新包');
+    expect(find.text('512 B'), findsOneWidget, reason: '分享/导出临时文件');
+    expect(find.text('0 B'), findsNWidgets(2), reason: '应用数据与其它残留为空');
+    // 4096 + 2048 + 1024 + 512 + 256 + 4096 = 12032
+    expect(find.text('11.8 KB'), findsOneWidget, reason: '总计是所有分项之和');
+
+    // 子项缩进一级，大小都在同一列右对齐。
+    expect(
+      tester.getTopLeft(find.text('更新包')).dx,
+      greaterThan(tester.getTopLeft(find.text('图片缓存')).dx),
+      reason: '子项靠缩进表达层级',
+    );
+    final valueRight = tester.getTopRight(find.text('2.0 KB')).dx;
+    expect(tester.getTopRight(find.text('1.0 KB')).dx, valueRight);
+    expect(tester.getTopRight(find.text('11.8 KB')).dx, valueRight);
+    expect(
+      tester.getTopRight(find.text('0 B').first).dx,
+      valueRight,
+      reason: '大小统一右对齐',
+    );
+  });
+
+  testWidgets('主按钮清理会列明细，删可清理分项但保留不可清理的', (tester) async {
+    final image = writeFile('${tempDir.path}/album_image_cache/a.jpg', 4096);
+    final temp = writeFile('${tempDir.path}/motion_photos/b.mp4', 2048);
+    final apk = writeFile('${tempDir.path}/album_updates/app.apk', 1024);
+    final share = writeFile('${tempDir.path}/album_share_1/c.jpg', 512);
+    final pending = writeFile('${docsDir.path}/picked_media/d.jpg', 256);
+
+    await tester.pumpWidget(_app());
+    await _pumpUntil(tester, () => find.text('…').evaluate().isEmpty);
 
     await tester.tap(find.widgetWithText(FilledButton, '清理'));
     await _pumpUntil(tester, () => find.text('清理缓存？').evaluate().isNotEmpty);
 
     expect(find.text('清理缓存？'), findsOneWidget);
     expect(find.text('合计可清理'), findsOneWidget);
+    expect(find.text('7.5 KB'), findsOneWidget, reason: '弹窗里的合计明细');
+    expect(
+      find.text('待上传副本、应用数据与程序本体不会被删除。'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.widgetWithText(TextButton, '清理'));
     await _pumpUntil(
       tester,
       () =>
           !image.existsSync() &&
-          find.textContaining('已清理 6.0 KB').evaluate().isNotEmpty,
+          find.textContaining('已清理 7.5 KB').evaluate().isNotEmpty,
     );
 
     expect(image.existsSync(), isFalse);
     expect(temp.existsSync(), isFalse);
+    expect(apk.existsSync(), isFalse, reason: '更新包可清理');
+    expect(share.existsSync(), isFalse, reason: '分享临时目录可清理');
     expect(pending.existsSync(), isTrue, reason: '主按钮不能删待上传副本');
-    expect(find.textContaining('已清理 6.0 KB'), findsOneWidget);
+    expect(find.textContaining('已清理 7.5 KB'), findsOneWidget);
+    // 清理后数字刷新：四个可清理分项归零。
+    expect(find.text('0 B'), findsWidgets);
   });
 
   testWidgets('清理待上传副本有二次确认，确认后副本被删掉', (tester) async {
