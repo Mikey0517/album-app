@@ -69,7 +69,7 @@ class AlbumTabPageState extends State<AlbumTabPage> {
         // 的「全部/照片/视频」才是页内筛选（分段条）。两者形式必须区分开。
         // 高度压到 48：标题行下面直接是内容，不再夹一条 46 高的分段条带子。
         toolbarHeight: _toolbarHeight,
-        centerTitle: false,
+        centerTitle: true,
         leading: _feedEditing
             ? IconButton(
                 onPressed: () => _feedGalleryKey.currentState?.exitSelection(),
