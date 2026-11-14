@@ -2,8 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/album_view_settings.dart';
 import '../../core/design/colors.dart';
-import '../../core/design/radius.dart';
-import '../../core/design/text_styles.dart';
+import '../../widgets/app_segmented_bar.dart';
 import 'custom_albums_page.dart';
 import 'feed_gallery_page.dart';
 
@@ -33,6 +32,9 @@ class AlbumTabPageState extends State<AlbumTabPage> {
   int _feedSelected = 0;
   int _feedTotal = 0;
 
+  /// 各个 tab 的内容数量，由子页加载完回报；没加载完就先不显示数字。
+  final Map<int, int> _tabCounts = {};
+
   bool get _feedEditing => _selected == 0 && _feedSelecting;
 
   /// 点底部「相册」时回到家庭相册。
@@ -48,12 +50,31 @@ class AlbumTabPageState extends State<AlbumTabPage> {
     setState(() => _selected = next);
   }
 
+  void _onTabCount(int tab, int count) {
+    if (_tabCounts[tab] == count || !mounted) return;
+    setState(() => _tabCounts[tab] = count);
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 与相册详情页的筛选条同一套分段条：活动胶囊、字重、数量字号完全一致。
+    final bar = AppSegmentedBar(
+      expanded: true,
+      selectedIndex: _selected,
+      onChanged: (index) {
+        if (_feedEditing) return;
+        _select(index);
+      },
+      items: [
+        AppSegmentedItem('朋友圈相册', count: _tabCounts[0]),
+        AppSegmentedItem('家庭相册', count: _tabCounts[1]),
+        AppSegmentedItem('私人相册', count: _tabCounts[2]),
+      ],
+    );
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
-        titleSpacing: 8,
         leading: _feedEditing
             ? IconButton(
                 onPressed: () => _feedGalleryKey.currentState?.exitSelection(),
@@ -61,64 +82,13 @@ class AlbumTabPageState extends State<AlbumTabPage> {
                 tooltip: '退出选择',
               )
             : null,
-        title: _feedEditing
-            ? Text('已选 $_feedSelected 项')
-            : SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<int>(
-                  segments: const [
-                    ButtonSegment<int>(
-                      value: 0,
-                      label: Text('朋友圈相册'),
-                    ),
-                    ButtonSegment<int>(
-                      value: 1,
-                      label: Text('家庭相册'),
-                    ),
-                    ButtonSegment<int>(
-                      value: 2,
-                      label: Text('私人相册'),
-                    ),
-                  ],
-                  selected: {_selected},
-                  showSelectedIcon: false,
-                  expandedInsets: EdgeInsets.zero,
-                  onSelectionChanged: (selection) {
-                    if (selection.isEmpty) return;
-                    _select(selection.first);
-                  },
-                  style: ButtonStyle(
-                    padding: WidgetStateProperty.all(
-                      const EdgeInsets.symmetric(horizontal: 2),
-                    ),
-                    backgroundColor: WidgetStateProperty.resolveWith((states) {
-                      return states.contains(WidgetState.selected)
-                          ? AppColors.primary
-                          : AppColors.bgSurface;
-                    }),
-                    foregroundColor: WidgetStateProperty.resolveWith((states) {
-                      return states.contains(WidgetState.selected)
-                          ? Colors.white
-                          : AppColors.textSecondary;
-                    }),
-                    side: WidgetStateProperty.all(
-                      BorderSide(color: AppColors.borderLight),
-                    ),
-                    textStyle: WidgetStateProperty.all(
-                      AppText.bodySmall.copyWith(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    shape: WidgetStateProperty.all(
-                      RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                      ),
-                    ),
-                    minimumSize: WidgetStateProperty.all(const Size(0, 36)),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                ),
+        title: _feedEditing ? Text('已选 $_feedSelected 项') : null,
+        // tab 条随 AppBar 一起吸顶；多选态让出这条，操作更集中。
+        bottom: _feedEditing
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(kAppSegmentedBarHeight),
+                child: AppSegmentedBarSurface(child: bar),
               ),
         actions: _feedEditing
             ? [
@@ -150,13 +120,13 @@ class AlbumTabPageState extends State<AlbumTabPage> {
           if (velocity.abs() < 260) return;
           if (velocity < 0) {
             if (_selected < 2) {
-              setState(() => _selected += 1);
+              _select(_selected + 1);
             } else {
               widget.onSwipeLeft?.call();
             }
           } else {
             if (_selected > 0) {
-              setState(() => _selected -= 1);
+              _select(_selected - 1);
             } else {
               widget.onSwipeRight?.call();
             }
@@ -180,12 +150,17 @@ class AlbumTabPageState extends State<AlbumTabPage> {
                   widget.onEditingChanged?.call(editing);
                 }
               },
+              onCountChanged: (count) => _onTabCount(0, count),
             ),
-            // 非 const：主题切换时需要重建相册列表。
-            // ignore: prefer_const_constructors
-            CustomAlbumsPage(scope: AlbumScope.family),
-            // ignore: prefer_const_constructors
-            CustomAlbumsPage(scope: AlbumScope.private),
+            // 非 const：主题切换时需要重建相册列表，还要回报数量。
+            CustomAlbumsPage(
+              scope: AlbumScope.family,
+              onCountChanged: (count) => _onTabCount(1, count),
+            ),
+            CustomAlbumsPage(
+              scope: AlbumScope.private,
+              onCountChanged: (count) => _onTabCount(2, count),
+            ),
           ],
         ),
       ),

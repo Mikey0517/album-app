@@ -23,7 +23,14 @@ enum AlbumScope { family, private }
 class CustomAlbumsPage extends StatefulWidget {
   final AlbumScope scope;
 
-  const CustomAlbumsPage({super.key, this.scope = AlbumScope.family});
+  /// 列表数量回报给父级 tab 条上的数字；只在加载成功后报，失败时保留旧值。
+  final ValueChanged<int>? onCountChanged;
+
+  const CustomAlbumsPage({
+    super.key,
+    this.scope = AlbumScope.family,
+    this.onCountChanged,
+  });
 
   @override
   State<CustomAlbumsPage> createState() => _CustomAlbumsPageState();
@@ -55,6 +62,7 @@ class _CustomAlbumsPageState extends State<CustomAlbumsPage> {
           ..addAll(albums.where((album) => album.isPrivate == wantPrivate));
         _loading = false;
       });
+      widget.onCountChanged?.call(_albums.length);
     } catch (e) {
       if (!mounted) return;
       setState(() {

@@ -63,6 +63,19 @@ void main() {
     return (root: root, docs: docs, files: files);
   }
 
+  /// 独立实测：把整套私有目录从头到尾走一遍（不经过 CacheService），
+  /// 得到磁盘上的真实字节数，用来验证「分项之和 == 实测总量」。
+  int actualPrivateBytes(Iterable<Directory> roots) {
+    var total = 0;
+    for (final root in roots) {
+      if (!root.existsSync()) continue;
+      for (final entity in root.listSync(recursive: true, followLinks: false)) {
+        if (entity is File) total += entity.lengthSync();
+      }
+    }
+    return total;
+  }
+
   test('统计分别算图片缓存、临时文件和待上传副本', () async {
     writeFile('${tempDir.path}/album_image_cache/a.jpg', 1000);
     writeFile('${tempDir.path}/motion_photos/b.mp4', 2000);
@@ -222,6 +235,91 @@ void main() {
     expect(prefs.existsSync(), isTrue, reason: '应用数据不可清理');
     expect(support.existsSync(), isTrue, reason: 'files 属于应用数据');
     expect(residue.existsSync(), isTrue, reason: '拿不准的残留宁可留着');
+  });
+
+  test('应用数据不吞掉 files/picked_media：每个字节只归一类', () async {
+    final layout = androidLayout();
+    // 原生端（MainActivity）把待上传副本写进 filesDir/picked_media：
+    // 一个「很大」的副本 + 一个小的普通文件。
+    final big = writeFile(
+      '${layout.files.path}/picked_media/big.mp4',
+      4 * 1024 * 1024,
+    );
+    writeFile('${layout.files.path}/small.bin', 120);
+    writeFile('${layout.root.path}/databases/album.db', 700);
+    writeFile('${layout.root.path}/shared_prefs/prefs.xml', 300);
+    // 文档目录里的副本（老布局）同样只算待上传副本。
+    writeFile('${layout.docs.path}/picked_media/doc.jpg', 900);
+    // 文档目录里对不上的残留。
+    writeFile('${layout.docs.path}/leftover.bin', 60);
+    writeFile('${tempDir.path}/album_image_cache/a.jpg', 1000);
+    writeFile('${tempDir.path}/motion_photos/b.mp4', 2000);
+    CacheService.programBytesOverride = () => 5000;
+
+    final usage = await CacheService.measure();
+
+    expect(
+      usage.appDataBytes,
+      700 + 300 + 120,
+      reason: '应用数据 = databases + shared_prefs + files 里非 picked_media 的部分',
+    );
+    expect(
+      usage.pendingUploadBytes,
+      big.lengthSync() + 900,
+      reason: '待上传副本 = files/picked_media + app_flutter/picked_media',
+    );
+    expect(usage.pendingUploadCount, 2);
+    // files 里的字节只能算一次：应用数据里 files 那一份 + 副本 == files 实测总量。
+    expect(
+      usage.appDataBytes - (700 + 300) + big.lengthSync(),
+      actualPrivateBytes([layout.files]),
+      reason: 'files 里的字节不能两边都算',
+    );
+    expect(usage.residueBytes, 60);
+    expect(
+      usage.appBytes,
+      actualPrivateBytes([layout.root, tempDir]) + 5000,
+      reason: '所有分项之和 == 各私有根实测总量 + 程序本体',
+    );
+  });
+
+  test('不变式：分项之和 == 私有根实测总量 + 程序本体', () async {
+    final layout = androidLayout();
+    writeFile('${layout.files.path}/picked_media/huge.bin', 3 * 1024 * 1024);
+    writeFile('${layout.files.path}/keep.bin', 77);
+    writeFile('${layout.files.path}/unknown_dir/x.bin', 33);
+    writeFile('${layout.root.path}/databases/album.db', 512);
+    writeFile('${layout.root.path}/shared_prefs/p.xml', 64);
+    writeFile('${layout.docs.path}/picked_media/a.jpg', 800);
+    writeFile('${layout.docs.path}/album.db', 4096);
+    writeFile('${layout.docs.path}/nested/deep.bin', 12);
+    writeFile('${tempDir.path}/album_image_cache/a.jpg', 256);
+    writeFile('${tempDir.path}/album_updates/u.apk', 300);
+    writeFile('${tempDir.path}/album_share_1/s.jpg', 128);
+    writeFile('${tempDir.path}/familyalbum_1.jpg', 96);
+    writeFile('${tempDir.path}/picked_media/legacy.jpg', 700);
+    writeFile('${tempDir.path}/motion_photos/m.mp4', 2048);
+    CacheService.programBytesOverride = () => 999;
+
+    final usage = await CacheService.measure();
+    final actual = actualPrivateBytes([layout.root, tempDir]);
+    final sum = usage.imageBytes +
+        usage.tempBytes +
+        usage.pendingUploadBytes +
+        usage.updateBytes +
+        usage.shareBytes +
+        usage.appDataBytes +
+        usage.residueBytes;
+
+    expect(
+      sum,
+      actual,
+      reason: '任何一项吞掉别的项都会让和偏大，漏算则会偏小',
+    );
+    expect(usage.appBytes, actual + 999);
+    expect(usage.appDataBytes, 512 + 64 + 77 + 33, reason: 'files 整体算应用数据（副本除外）');
+    expect(usage.pendingUploadBytes, 3 * 1024 * 1024 + 800 + 700);
+    expect(usage.residueBytes, 4096 + 12, reason: '残留逐目录实算，不靠总量减已知项');
   });
 
   test('其它残留只删传入的可再生路径，未知文件保留', () async {

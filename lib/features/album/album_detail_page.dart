@@ -1,6 +1,10 @@
 import 'dart:async';
+import 'dart:math' as math;
+import 'dart:ui' show clampDouble;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../api/album_api.dart';
 import '../../core/album_view_settings.dart';
@@ -10,33 +14,42 @@ import '../../core/design/colors.dart';
 import '../../core/design/radius.dart';
 import '../../core/design/shadow.dart';
 import '../../core/design/text_styles.dart';
+import '../../core/media_cache.dart';
 import '../../core/media_picker.dart';
-import '../../core/responsive.dart';
-import 'photo_timeline_scrubber.dart';
+import '../../core/media_share_service.dart';
 import '../../core/media_store.dart';
+import '../../core/responsive.dart';
 import '../../core/source_media_cleanup.dart';
 import '../../core/upload_manager.dart';
+import '../../core/url_utils.dart';
 import '../../models/album.dart';
 import '../../models/media.dart';
 import '../../widgets/album_thumb.dart';
+import '../../widgets/app_segmented_bar.dart';
 import '../../widgets/date_header.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
-import '../../core/media_share_service.dart';
+import '../../widgets/pinned_bar_sliver.dart';
 import '../../widgets/selection_footer.dart';
 import '../download/batch_download.dart';
 import '../viewer/media_viewer_page.dart';
+import 'album_media_filter.dart';
 import 'album_share_sheet.dart';
 import 'album_title_dialog.dart';
+import 'photo_timeline_scrubber.dart';
 
 class AlbumDetailPage extends StatefulWidget {
   final Album album;
   final bool coverPickMode;
 
+  /// 数据加载入口，测试注入用；生产环境走 [AlbumApi.detail]。
+  final Future<AlbumDetail> Function(int albumId)? loader;
+
   const AlbumDetailPage({
     super.key,
     required this.album,
     this.coverPickMode = false,
+    this.loader,
   });
 
   @override
@@ -44,8 +57,22 @@ class AlbumDetailPage extends StatefulWidget {
 }
 
 class _AlbumDetailPageState extends State<AlbumDetailPage> {
+  // 网格：四周 12，格间距 2，圆角 4，一整块马赛克。
+  static const double _pagePadding = 12;
+  static const double _gridSpacing = 2;
+  static const double _gridRadius = AppRadius.xs;
+  static const double _dateHeaderHeight = 34;
+  static const double _sectionGap = 4;
+  // 底部留白 = FAB 高度 + 边距 + 一点余量，最后一行不会被上传按钮压住。
+  static const double _fabClearance = 108;
+  static const double _headerCoverHeight = 216;
+  static const double _headerPlainHeight = 136;
+
+  static const int _uploadLimit = 500;
+
   late Album _album = widget.album;
   final List<Media> _items = [];
+  AlbumMediaFilter _filter = AlbumMediaFilter.all;
   bool _loading = true;
   String? _error;
   bool _selecting = false;
@@ -55,10 +82,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   final Set<int> _selected = {};
   int? _coverSelectedId;
   final ScrollController _gridScroll = ScrollController();
-  // 用来量一次日期分组头的高度：分组头样式一致，量到一个就能算出整条时间轴的偏移。
-  final GlobalKey _firstHeaderKey = GlobalKey();
-
-  static const int _uploadLimit = 500;
+  // 点按由缩略图自己处理，滑动多选要跨格命中，所以给每格留一个 key。
+  final Map<int, GlobalKey> _tileKeys = {};
+  bool? _dragSelectValue;
+  // 封面在顶上时状态栏图标要转成白色，完全收起后回到深色。
+  bool _headerScrolled = false;
 
   /// 能上传/删除照片（可写及以上）。
   bool get _canEdit => _album.canEditMedia;
@@ -66,12 +94,27 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   /// 能改名/改封面/删相册（管理员及以上）。
   bool get _canManage => _album.canManage;
 
+  bool get _hasCover => (_album.coverThumb ?? '').isNotEmpty;
+
+  AlbumMediaCounts get _counts => AlbumMediaCounts.from(_items);
+
+  List<Media> get _visibleItems => filterAlbumMedia(_items, _filter);
+
+  List<AlbumSection> get _sections => albumSections(
+        _visibleItems,
+        AlbumViewSettings.sort.value,
+        AlbumViewSettings.group.value,
+      );
+
+  bool get _busy => _batchDownloading || _batchDeleting || _batchMoving;
+
   @override
   void initState() {
     super.initState();
     AlbumViewSettings.sort.addListener(_onViewChanged);
     AlbumViewSettings.group.addListener(_onViewChanged);
     AppEvents.albumContentRevision.addListener(_onAlbumContentChanged);
+    _gridScroll.addListener(_onScroll);
     _load();
   }
 
@@ -80,8 +123,16 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     AlbumViewSettings.sort.removeListener(_onViewChanged);
     AlbumViewSettings.group.removeListener(_onViewChanged);
     AppEvents.albumContentRevision.removeListener(_onAlbumContentChanged);
+    _gridScroll.removeListener(_onScroll);
     _gridScroll.dispose();
     super.dispose();
+  }
+
+  /// 只在跨过阈值时重建一次，滚动过程中不会每帧 setState。
+  void _onScroll() {
+    final scrolled = _gridScroll.hasClients && _gridScroll.offset > 110;
+    if (scrolled == _headerScrolled) return;
+    setState(() => _headerScrolled = scrolled);
   }
 
   void _onViewChanged() {
@@ -101,16 +152,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       });
     }
     try {
-      final detail = await AlbumApi.detail(widget.album.id);
+      final loader = widget.loader;
+      final detail = loader != null
+          ? await loader(widget.album.id)
+          : await AlbumApi.detail(widget.album.id);
       if (!mounted) return;
       setState(() {
         _album = detail.album;
         _items
           ..clear()
           ..addAll(detail.items);
-        _selected.removeWhere(
-          (id) => !_items.any((item) => item.id == id),
-        );
+        _pruneSelection();
         _loading = false;
         _error = null;
       });
@@ -124,6 +176,30 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         _snack(ApiClient.errorText(e));
       }
     }
+  }
+
+  /// 选中集合只保留「当前筛选下可见」的项，多选数量才和眼睛看到的一致。
+  void _pruneSelection() {
+    final visibleIds = <int>{};
+    for (final item in _items) {
+      if (_filter.matches(item)) visibleIds.add(item.id);
+    }
+    _selected.removeWhere((id) => !visibleIds.contains(id));
+    _tileKeys.removeWhere((id, _) => !_items.any((item) => item.id == id));
+  }
+
+  void _selectFilter(AlbumMediaFilter filter) {
+    if (filter == _filter) return;
+    setState(() {
+      _filter = filter;
+      _pruneSelection();
+      if (widget.coverPickMode && _coverSelectedId != null) {
+        final selected = _items.where((item) => item.id == _coverSelectedId);
+        if (selected.isEmpty || !filter.matches(selected.first)) {
+          _coverSelectedId = null;
+        }
+      }
+    });
   }
 
   /// 上传成功后问用户要不要删掉手机相册里的原图（只删这一批上传成功的）。
@@ -251,110 +327,37 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // 结构
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     if (widget.coverPickMode) return _buildCoverPicker();
-    final title = '${_album.title} · ${_items.length} 张';
-    return PopScope(
-      canPop: !_selecting,
-      onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _selecting) _exitSelection();
-      },
-      child: Scaffold(
-        appBar: AppBar(
-          leading: _selecting
-              ? IconButton(
-                  onPressed: _batchDownloading ? null : _exitSelection,
-                  icon: const Icon(Icons.close),
-                  tooltip: '退出选择',
-                )
-              : null,
-          title: Text(
-            _selecting ? '已选 ${_selected.length} 项' : title,
-            overflow: TextOverflow.ellipsis,
-          ),
-          actions: _selecting
-              ? [
-                  TextButton(
-                    onPressed:
-                        _batchDownloading || _batchDeleting || _batchMoving
-                            ? null
-                            : _toggleSelectAll,
-                    child: Text(_allSelected ? '取消全选' : '全选'),
-                  ),
-                ]
-              : [
-                  IconButton(
-                    onPressed: () => showAlbumViewMenu(context),
-                    tooltip: '排序与视图',
-                    icon: Icon(
-                      Icons.tune_rounded,
-                      size: 22,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  if (_canEdit || _canManage)
-                    PopupMenuButton<String>(
-                      onSelected: (value) {
-                        if (value == 'rename') _rename();
-                        if (value == 'delete') _deleteAlbum();
-                        if (value == 'share') _shareAlbum();
-                      },
-                      tooltip: '相册操作',
-                      icon: Icon(Icons.more_horiz,
-                          size: 22, color: AppColors.textPrimary),
-                      itemBuilder: (context) => [
-                        if (_album.isPrivate && _album.isOwner)
-                          PopupMenuItem<String>(
-                            value: 'share',
-                            child: Text(
-                              _album.shareCount > 0
-                                  ? '分享管理（${_album.shareCount} 人）'
-                                  : '分享给家人',
-                            ),
-                          ),
-                        if (_canManage) ...[
-                          const PopupMenuItem<String>(
-                              value: 'rename', child: Text('重命名')),
-                          PopupMenuItem<String>(
-                            value: 'delete',
-                            child: Text('删除相册',
-                                style: TextStyle(color: AppColors.danger)),
-                          ),
-                        ],
-                      ],
-                    ),
-                ],
-        ),
-        floatingActionButton:
-            _selecting || !_canEdit ? null : _DetailFab(onPressed: _upload),
-        bottomNavigationBar: _selecting ? _buildSelectionBar() : null,
-        body: Column(
-          children: [
-            if (_album.isPrivate && !_album.isOwner)
-              Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: AppColors.primaryLight.withOpacity(0.5),
-                child: Row(
-                  children: [
-                    Icon(Icons.lock_outline,
-                        size: 14, color: AppColors.textSecondary),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        '来自 ${_album.ownerLabel} 的私人相册 · ${_album.roleLabel}',
-                        style: AppText.caption,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            Expanded(child: _buildBody()),
-          ],
+    // 没有 AppBar 接管状态栏，白色封面上的图标得自己换色。
+    final lightStatusBar = _hasCover && !_selecting && !_headerScrolled;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness:
+            lightStatusBar ? Brightness.light : Brightness.dark,
+        statusBarBrightness:
+            lightStatusBar ? Brightness.dark : Brightness.light,
+      ),
+      child: PopScope(
+        canPop: !_selecting,
+        onPopInvokedWithResult: (didPop, result) {
+          if (!didPop && _selecting) _exitSelection();
+        },
+        child: Scaffold(
+          // 空相册的入口在空状态里，右下角就不再叠一个同样的按钮。
+          floatingActionButton: _selecting || !_canEdit || _items.isEmpty
+              ? null
+              : _DetailFab(onPressed: _upload),
+          // 没选中任何一项时不出操作条，屏幕只留内容。
+          bottomNavigationBar:
+              _selecting && _selected.isNotEmpty ? _buildSelectionBar() : null,
+          body: _buildBody(),
         ),
       ),
     );
@@ -375,21 +378,438 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             child: const Text('确定'),
           ),
         ],
+        bottom: _items.isEmpty
+            ? null
+            : PreferredSize(
+                preferredSize:
+                    const Size.fromHeight(kAppSegmentedBarHeight),
+                child: AppSegmentedBarSurface(child: _buildFilterBar()),
+              ),
       ),
       body: _buildBody(),
     );
   }
 
-  Future<void> _confirmCover() async {
-    final mediaId = _coverSelectedId;
-    if (mediaId == null) return;
-    try {
-      await AlbumApi.setCover(_album.id, mediaId);
-      if (mounted) Navigator.of(context).pop(true);
-    } catch (e) {
-      if (mounted) _snack(ApiClient.errorText(e));
-    }
+  Widget _buildBody() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = responsiveColumns(context, 4);
+        final gridWidth =
+            math.max(0.0, constraints.maxWidth - _pagePadding * 2);
+        final tileWidth = (gridWidth - _gridSpacing * (columns - 1)) / columns;
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        final sections = _sections;
+        final displayItems = [for (final section in sections) ...section.items];
+
+        final headerMax = _headerMaxExtent(context);
+        final headerMin = _headerMinExtent(context);
+        final filterExtent = _filterBarExtent;
+        final dateHeaderExtent = _dateHeaderExtent;
+        // 行的内容偏移 = 头部 + 筛选条 + 分组头；吸顶区把这三层都压住。
+        final metrics = buildTimelineMetrics(
+          sections,
+          width: gridWidth,
+          columns: columns,
+          headerHeight: dateHeaderExtent + _sectionGap,
+          base: headerMax + filterExtent,
+          topInset: headerMin + filterExtent + dateHeaderExtent + _sectionGap,
+          // 平铺模式没有分组头，退回按拍摄月份显示，气泡才不会空着。
+          fallbackLabel: (media) => _monthLabel(
+            albumSortDate(media, AlbumViewSettings.sort.value),
+          ),
+        );
+        final showScrubber = !_selecting &&
+            !widget.coverPickMode &&
+            displayItems.length > 12;
+
+        final scrollView = CustomScrollView(
+          controller: _gridScroll,
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: _buildSlivers(
+            context,
+            columns: columns,
+            tileWidth: tileWidth,
+            dpr: dpr,
+            displayItems: displayItems,
+          ),
+        );
+
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: () => _load(silent: true),
+              child: _selecting
+                  // 多选态下横向划过格子即可连选/连消，竖向滚动不受影响。
+                  ? GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onHorizontalDragStart: (details) =>
+                          _startDragSelect(details.globalPosition),
+                      onHorizontalDragUpdate: (details) =>
+                          _applyDragSelect(details.globalPosition),
+                      onHorizontalDragEnd: (_) => _endDragSelect(),
+                      onHorizontalDragCancel: _endDragSelect,
+                      child: scrollView,
+                    )
+                  : scrollView,
+            ),
+            if (showScrubber)
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                width: 30,
+                child: PhotoTimelineScrubber(
+                  controller: _gridScroll,
+                  itemCount: displayItems.length,
+                  itemOffsets: metrics.offsets,
+                  labels: metrics.labels,
+                ),
+              ),
+          ],
+        );
+      },
+    );
   }
+
+  List<Widget> _buildSlivers(
+    BuildContext context, {
+    required int columns,
+    required double tileWidth,
+    required double dpr,
+    required List<Media> displayItems,
+  }) {
+    final slivers = <Widget>[];
+
+    if (!widget.coverPickMode) {
+      slivers.add(_buildHeader(context));
+      if (_items.isNotEmpty) {
+        slivers.add(
+          PinnedBarSliver(
+            height: kAppSegmentedBarHeight,
+            child: AppSegmentedBarSurface(child: _buildFilterBar()),
+          ),
+        );
+      }
+    }
+
+    if (_loading && _items.isEmpty) {
+      slivers.add(
+        const SliverFillRemaining(
+          hasScrollBody: false,
+          child: LoadingView(message: '正在打开相册'),
+        ),
+      );
+      return slivers;
+    }
+    if (_error != null && _items.isEmpty) {
+      slivers.add(
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: EmptyState(
+            icon: Icons.cloud_off_outlined,
+            title: '加载失败',
+            subtitle: _error,
+            action: FilledButton(
+              onPressed: () => _load(),
+              child: const Text('重新加载'),
+            ),
+          ),
+        ),
+      );
+      return slivers;
+    }
+    if (_items.isEmpty) {
+      slivers.add(
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: EmptyState(
+            icon: Icons.photo_library_outlined,
+            title: '相册还是空的',
+            action: _canEdit
+                ? FilledButton(
+                    onPressed: _upload,
+                    child: const Text('添加媒体'),
+                  )
+                : null,
+          ),
+        ),
+      );
+      return slivers;
+    }
+    if (displayItems.isEmpty) {
+      final noVideos = _filter == AlbumMediaFilter.videos;
+      slivers.add(
+        SliverFillRemaining(
+          hasScrollBody: false,
+          child: EmptyState(
+            icon: noVideos
+                ? Icons.videocam_off_outlined
+                : Icons.image_not_supported_outlined,
+            title: noVideos ? '还没有视频' : '还没有照片',
+            action: FilledButton(
+              onPressed: () => _selectFilter(AlbumMediaFilter.all),
+              child: const Text('看全部'),
+            ),
+          ),
+        ),
+      );
+      return slivers;
+    }
+
+    var sectionStart = 0;
+    for (final section in _sections) {
+      if (section.header != null) {
+        slivers.add(
+          PinnedBarSliver(
+            height: _dateHeaderHeight,
+            child: DateHeader(
+              text: section.header!,
+              height: _dateHeaderHeight,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: _pagePadding + 4),
+              trailing: Text(
+                '${section.items.length}',
+                style: AppText.caption,
+              ),
+            ),
+          ),
+        );
+      }
+      final start = sectionStart;
+      sectionStart += section.items.length;
+      slivers.add(
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(
+            _pagePadding,
+            _sectionGap,
+            _pagePadding,
+            0,
+          ),
+          sliver: SliverGrid.builder(
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: _gridSpacing,
+              crossAxisSpacing: _gridSpacing,
+            ),
+            itemCount: section.items.length,
+            itemBuilder: (context, index) {
+              final media = section.items[index];
+              return _buildTile(
+                media: media,
+                index: start + index,
+                displayItems: displayItems,
+                tileWidth: tileWidth,
+                dpr: dpr,
+              );
+            },
+          ),
+        ),
+      );
+    }
+    slivers.add(
+      const SliverToBoxAdapter(child: SizedBox(height: _fabClearance)),
+    );
+    return slivers;
+  }
+
+  Widget _buildFilterBar() {
+    final counts = _counts;
+    return AppSegmentedBar(
+      selectedIndex: _filter.index,
+      onChanged: (index) => _selectFilter(AlbumMediaFilter.values[index]),
+      items: [
+        AppSegmentedItem('全部', count: counts.total),
+        AppSegmentedItem('照片', count: counts.photos),
+        AppSegmentedItem('视频', count: counts.videos),
+      ],
+    );
+  }
+
+  Widget _buildHeader(BuildContext context) {
+    final counts = _counts;
+    // 空相册不摆 0 / 0，让人一眼看到的是「这里还没有东西」。
+    final subtitle = _items.isEmpty
+        ? null
+        : _album.isPrivate && !_album.isOwner
+            ? '来自 ${_album.ownerLabel} · ${_album.roleLabel} · '
+                '${counts.photos} 张照片 · ${counts.videos} 个视频'
+            : '${counts.photos} 张照片 · ${counts.videos} 个视频';
+    final delegate = _AlbumHeaderDelegate(
+      topPadding: MediaQuery.paddingOf(context).top,
+      // 多选态直接把头图收成一条工具栏，屏幕让给勾选。
+      contentHeight: _selecting
+          ? kToolbarHeight
+          : (_hasCover ? _headerCoverHeight : _headerPlainHeight),
+      title: _selecting ? '已选 ${_selected.length} 项' : _album.title,
+      subtitle: _selecting ? null : subtitle,
+      coverUrl: _selecting || !_hasCover ? null : fullUrl(_album.coverThumb!),
+      leading: _selecting
+          ? IconButton(
+              onPressed: _exitSelection,
+              icon: const Icon(Icons.close),
+              tooltip: '退出选择',
+            )
+          : const BackButton(),
+      actions: _selecting ? _selectionActions() : _browseActions(),
+      toolbarIcon:
+          _album.isPrivate && !_album.isOwner ? Icons.lock_outline : null,
+    );
+    return SliverPersistentHeader(pinned: true, delegate: delegate);
+  }
+
+  List<Widget> _selectionActions() {
+    return [
+      TextButton(
+        onPressed: _busy ? null : _toggleSelectAll,
+        child: Text(_allSelected ? '取消全选' : '全选'),
+      ),
+    ];
+  }
+
+  List<Widget> _browseActions() {
+    return [
+      IconButton(
+        onPressed: () => showAlbumViewMenu(context),
+        tooltip: '排序与视图',
+        icon: const Icon(Icons.tune_rounded, size: 22),
+      ),
+      if (_canEdit || _canManage)
+        PopupMenuButton<String>(
+          onSelected: (value) {
+            if (value == 'rename') _rename();
+            if (value == 'delete') _deleteAlbum();
+            if (value == 'share') _shareAlbum();
+          },
+          tooltip: '相册操作',
+          icon: const Icon(Icons.more_horiz, size: 22),
+          itemBuilder: (context) => [
+            if (_album.isPrivate && _album.isOwner)
+              PopupMenuItem<String>(
+                value: 'share',
+                child: Text(
+                  _album.shareCount > 0
+                      ? '分享管理（${_album.shareCount} 人）'
+                      : '分享给家人',
+                ),
+              ),
+            if (_canManage) ...[
+              const PopupMenuItem<String>(
+                  value: 'rename', child: Text('重命名')),
+              PopupMenuItem<String>(
+                value: 'delete',
+                child: Text('删除相册', style: TextStyle(color: AppColors.danger)),
+              ),
+            ],
+          ],
+        ),
+    ];
+  }
+
+  Widget _buildTile({
+    required Media media,
+    required int index,
+    required List<Media> displayItems,
+    required double tileWidth,
+    required double dpr,
+  }) {
+    final tileKey = _tileKeys.putIfAbsent(media.id, () => GlobalKey());
+    final selected = widget.coverPickMode
+        ? _coverSelectedId == media.id
+        : _selected.contains(media.id);
+    final showSelection = _selecting || widget.coverPickMode;
+    final radius = BorderRadius.circular(_gridRadius);
+    return Stack(
+      key: tileKey,
+      fit: StackFit.expand,
+      children: [
+        AlbumThumb(
+          media: media,
+          radius: _gridRadius,
+          cacheWidth: (tileWidth * dpr).round(),
+          heroTag:
+              widget.coverPickMode ? null : 'album_${_album.id}_${media.id}',
+          onTap: widget.coverPickMode
+              ? () => setState(() => _coverSelectedId = media.id)
+              : _selecting
+                  ? () => _toggleSelect(media)
+                  : () => _openViewer(displayItems, index),
+          onLongPress: widget.coverPickMode
+              ? () => setState(() => _coverSelectedId = media.id)
+              : _selecting
+                  ? () => _toggleSelect(media)
+                  : () => _enterSelectionWith(media),
+        ),
+        if (showSelection)
+          IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: radius,
+                border: Border.all(
+                  color: selected
+                      ? AppColors.primary
+                      : Colors.white.withOpacity(0.5),
+                  width: selected ? 2.5 : 1,
+                ),
+                color: selected
+                    ? AppColors.primary.withOpacity(0.14)
+                    : Colors.black.withOpacity(0.04),
+              ),
+            ),
+          ),
+        if (showSelection)
+          Positioned(
+            top: 5,
+            right: 5,
+            child: IgnorePointer(
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? AppColors.primary
+                      : Colors.black.withOpacity(0.35),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                child: selected
+                    ? const Icon(Icons.check, size: 13, color: Colors.white)
+                    : null,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  double get _filterBarExtent =>
+      widget.coverPickMode || _items.isEmpty ? 0 : kAppSegmentedBarHeight;
+
+  double get _dateHeaderExtent =>
+      AlbumViewSettings.group.value == AlbumGroup.flat ? 0 : _dateHeaderHeight;
+
+  double _headerMinExtent(BuildContext context) => widget.coverPickMode
+      ? 0
+      : MediaQuery.paddingOf(context).top + kToolbarHeight;
+
+  double _headerMaxExtent(BuildContext context) {
+    if (widget.coverPickMode) return 0;
+    final top = MediaQuery.paddingOf(context).top;
+    final extra = _selecting
+        ? kToolbarHeight
+        : (_hasCover ? _headerCoverHeight : _headerPlainHeight);
+    return top + math.max(kToolbarHeight, extra);
+  }
+
+  String _monthLabel(DateTime time) {
+    final local = time.toLocal();
+    return '${local.year}年${local.month}月';
+  }
+
+  // ---------------------------------------------------------------------------
+  // 多选
+  // ---------------------------------------------------------------------------
 
   void _enterSelectionWith(Media media) {
     setState(() {
@@ -404,6 +824,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     setState(() {
       _selecting = false;
       _selected.clear();
+      _dragSelectValue = null;
     });
   }
 
@@ -413,76 +834,99 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     });
   }
 
-  bool get _allSelected =>
-      _items.isNotEmpty && _selected.length == _items.length;
+  bool get _allSelected {
+    final visible = _visibleItems;
+    return visible.isNotEmpty && _selected.length == visible.length;
+  }
 
   void _toggleSelectAll() {
+    final visible = _visibleItems;
     setState(() {
       if (_allSelected) {
         _selected.clear();
       } else {
         _selected
           ..clear()
-          ..addAll(_items.map((item) => item.id));
+          ..addAll(visible.map((item) => item.id));
       }
     });
   }
 
-  bool _isSectionSelected(List<Media> items) {
-    return items.isNotEmpty &&
-        items.every((item) => _selected.contains(item.id));
+  void _startDragSelect(Offset globalPosition) {
+    final id = _tileAt(globalPosition);
+    if (id == null) return;
+    setState(() => _dragSelectValue = !_selected.contains(id));
+    _applyDragSelect(globalPosition);
   }
 
-  void _toggleSectionSelection(List<Media> items) {
-    if (!_selecting) return;
-    setState(() {
-      if (_isSectionSelected(items)) {
-        for (final item in items) {
-          _selected.remove(item.id);
-        }
-      } else {
-        for (final item in items) {
-          _selected.add(item.id);
-        }
+  void _applyDragSelect(Offset globalPosition) {
+    final value = _dragSelectValue;
+    if (value == null) return;
+    final id = _tileAt(globalPosition);
+    if (id == null) return;
+    final changed = value ? _selected.add(id) : _selected.remove(id);
+    if (changed) setState(() {});
+  }
+
+  void _endDragSelect() {
+    if (_dragSelectValue == null) return;
+    setState(() => _dragSelectValue = null);
+  }
+
+  /// 滑动多选靠命中检测找格子：只有真正建出来的格子有 render box，
+  /// 划出屏幕的格子自然命中不到，松手前滚回来还能接着选。
+  int? _tileAt(Offset globalPosition) {
+    for (final entry in _tileKeys.entries) {
+      final box = entry.value.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.hasSize) continue;
+      final local = box.globalToLocal(globalPosition);
+      if (local.dx < 0 ||
+          local.dy < 0 ||
+          local.dx > box.size.width ||
+          local.dy > box.size.height) {
+        continue;
       }
-    });
+      return entry.key;
+    }
+    return null;
   }
 
   Widget _buildSelectionBar() {
-    final busy = _batchDownloading || _batchDeleting || _batchMoving;
     return SelectionFooter(
       safeArea: true,
       actions: [
         SelectionFooterAction(
           icon: Icons.download_outlined,
           label: _batchDownloading ? '保存中' : '下载',
-          onTap: _selected.isEmpty || busy ? null : _downloadSelected,
+          onTap: _selected.isEmpty || _busy ? null : _downloadSelected,
         ),
         if (_canEdit)
           SelectionFooterAction(
             icon: Icons.drive_file_move_outline,
             label: _batchMoving ? '移动中' : '移动',
-            onTap: _selected.isEmpty || busy ? null : _moveSelected,
+            onTap: _selected.isEmpty || _busy ? null : _moveSelected,
           ),
         if (_canEdit)
           SelectionFooterAction(
             icon: Icons.delete_outline,
             label: _batchDeleting ? '删除中' : '删除',
-            onTap: _selected.isEmpty || busy ? null : _deleteSelected,
+            onTap: _selected.isEmpty || _busy ? null : _deleteSelected,
           ),
         SelectionFooterAction(
           icon: Icons.ios_share,
           label: '分享',
-          onTap: _selected.isEmpty || busy ? null : _shareSelected,
+          onTap: _selected.isEmpty || _busy ? null : _shareSelected,
         ),
       ],
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // 批量操作
+  // ---------------------------------------------------------------------------
+
   Future<void> _moveSelected() async {
-    if (_batchDownloading || _batchDeleting || _batchMoving) {
-      return;
-    }
+    if (_busy) return;
     final selected = _selected.toList(growable: false);
     if (selected.isEmpty) return;
     List<Album> albums;
@@ -584,9 +1028,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   }
 
   Future<void> _deleteSelected() async {
-    if (_batchDownloading || _batchDeleting || _batchMoving) {
-      return;
-    }
+    if (_busy) return;
     final targets = _items
         .where((item) => _selected.contains(item.id))
         .toList(growable: false);
@@ -673,220 +1115,234 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     );
   }
 
-  Widget _buildBody() {
-    if (_loading && _items.isEmpty) {
-      return const LoadingView(message: '正在打开相册');
+  Future<void> _confirmCover() async {
+    final mediaId = _coverSelectedId;
+    if (mediaId == null) return;
+    try {
+      await AlbumApi.setCover(_album.id, mediaId);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) _snack(ApiClient.errorText(e));
     }
-    if (_error != null && _items.isEmpty) {
-      return EmptyState(
-        icon: Icons.cloud_off_outlined,
-        title: '加载失败',
-        subtitle: _error!,
-        action: FilledButton(
-          onPressed: () => _load(),
-          child: const Text('重新加载'),
-        ),
-      );
-    }
-    if (_items.isEmpty) {
-      return EmptyState(
-        icon: Icons.photo_outlined,
-        title: '相册还是空的',
-        subtitle: _canEdit ? '点右下角添加照片或视频' : '创建者还没有往里放照片',
-        action: _canEdit
-            ? FilledButton(
-                onPressed: _upload,
-                child: const Text('添加媒体'),
-              )
-            : null,
-      );
-    }
-
-    final sections = albumSections(
-      _items,
-      AlbumViewSettings.sort.value,
-      AlbumViewSettings.group.value,
-    );
-    final displayItems = [
-      for (final section in sections) ...section.items,
-    ];
-    final dpr = MediaQuery.of(context).devicePixelRatio;
-    final tile = (MediaQuery.of(context).size.width - 6) / 4;
-    final slivers = <Widget>[];
-    var sectionStart = 0;
-    for (final section in sections) {
-      if (section.header != null) {
-        slivers.add(
-          SliverToBoxAdapter(
-            child: DateHeader(
-              key: identical(section, sections.first) ? _firstHeaderKey : null,
-              text: section.header!,
-              height: null,
-              padding: const EdgeInsets.fromLTRB(16, 20, 8, 8),
-              trailing: _selecting
-                  ? TextButton(
-                      onPressed:
-                          _batchDownloading || _batchDeleting || _batchMoving
-                              ? null
-                              : () => _toggleSectionSelection(section.items),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 32),
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      child: Text(
-                        _isSectionSelected(section.items) ? '取消全选' : '全选',
-                      ),
-                    )
-                  : null,
-            ),
-          ),
-        );
-      }
-      final sectionOffset = sectionStart;
-      sectionStart += section.items.length;
-      slivers.add(
-        SliverGrid.builder(
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: responsiveColumns(context, 4),
-            mainAxisSpacing: 2,
-            crossAxisSpacing: 2,
-          ),
-          itemCount: section.items.length,
-          itemBuilder: (context, index) {
-            final media = section.items[index];
-            final globalIndex = sectionOffset + index;
-            final selected = widget.coverPickMode
-                ? _coverSelectedId == media.id
-                : _selected.contains(media.id);
-            final showSelection = _selecting || widget.coverPickMode;
-            return Stack(
-              fit: StackFit.expand,
-              children: [
-                AlbumThumb(
-                  media: media,
-                  radius: 0,
-                  cacheWidth: (tile * dpr).round(),
-                  heroTag: 'album_${_album.id}_${media.id}',
-                  onTap: widget.coverPickMode
-                      ? () => setState(() => _coverSelectedId = media.id)
-                      : _selecting
-                          ? () => _toggleSelect(media)
-                          : () => _openViewer(displayItems, globalIndex),
-                  onLongPress: widget.coverPickMode
-                      ? () => setState(() => _coverSelectedId = media.id)
-                      : _selecting
-                          ? () => _toggleSelect(media)
-                          : () => _enterSelectionWith(media),
-                ),
-                if (showSelection)
-                  IgnorePointer(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: selected
-                              ? AppColors.primary
-                              : Colors.white.withOpacity(0.6),
-                          width: selected ? 3 : 1,
-                        ),
-                        color: selected
-                            ? AppColors.primary.withOpacity(0.12)
-                            : Colors.black.withOpacity(0.06),
-                      ),
-                    ),
-                  ),
-                if (showSelection)
-                  Positioned(
-                    top: 4,
-                    right: 4,
-                    child: IgnorePointer(
-                      child: Container(
-                        width: 22,
-                        height: 22,
-                        decoration: BoxDecoration(
-                          color: selected
-                              ? AppColors.primary
-                              : Colors.black.withOpacity(0.35),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 1.5),
-                        ),
-                        child: selected
-                            ? const Icon(Icons.check,
-                                size: 14, color: Colors.white)
-                            : null,
-                      ),
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-      );
-    }
-    slivers.add(const SliverToBoxAdapter(child: SizedBox(height: 100)));
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final columns = responsiveColumns(context, 4);
-        final metrics = _timelineMetrics(
-          sections,
-          constraints.maxWidth,
-          columns,
-        );
-        final showScrubber =
-            !_selecting && !widget.coverPickMode && displayItems.length > 12;
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            RefreshIndicator(
-              color: AppColors.primary,
-              onRefresh: () => _load(silent: true),
-              child: CustomScrollView(
-                controller: _gridScroll,
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: slivers,
-              ),
-            ),
-            if (showScrubber)
-              Positioned(
-                right: 0,
-                top: 0,
-                bottom: 0,
-                width: 30,
-                child: PhotoTimelineScrubber(
-                  controller: _gridScroll,
-                  itemCount: displayItems.length,
-                  itemOffsets: metrics.offsets,
-                  labels: metrics.labels,
-                ),
-              ),
-          ],
-        );
-      },
-    );
   }
+}
 
-  /// 算出每一张图在滚动内容里的起始偏移，以及它属于哪个月份分组。
-  TimelineMetrics _timelineMetrics(
-    List<AlbumSection> sections,
-    double width,
-    int columns,
-  ) {
-    return buildTimelineMetrics(
-      sections,
-      width: width,
-      columns: columns,
-      headerHeight: _firstHeaderKey.currentContext?.size?.height ?? 48.0,
-      base: timelineBaseOffset(_firstHeaderKey),
-      // 平铺模式没有分组头，退回按拍摄月份显示，气泡才不会空着。
-      fallbackLabel: (media) => _monthLabel(
-        albumSortDate(media, AlbumViewSettings.sort.value),
+/// 相册头：封面随滚动折叠成一条工具栏，展开时露出相册名与照片/视频数量。
+///
+/// 自己算收缩进度，是为了让「展开标题块」和「工具栏标题」交叉淡入淡出，
+/// 中间不会出现两块同名文字；折叠后的高度也和详情页算时间轴时用的
+/// 吸顶高度是同一个数。
+class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final double topPadding;
+  final double contentHeight;
+  final String title;
+  final String? subtitle;
+  final String? coverUrl;
+  final Widget leading;
+  final List<Widget> actions;
+  final IconData? toolbarIcon;
+
+  _AlbumHeaderDelegate({
+    required this.topPadding,
+    required this.contentHeight,
+    required this.title,
+    required this.subtitle,
+    required this.coverUrl,
+    required this.leading,
+    required this.actions,
+    required this.toolbarIcon,
+  });
+
+  double get _toolbarExtent => topPadding + kToolbarHeight;
+
+  @override
+  double get minExtent => _toolbarExtent;
+
+  @override
+  double get maxExtent => math.max(
+      _toolbarExtent, topPadding + math.max(kToolbarHeight, contentHeight));
+
+  @override
+  Widget build(
+      BuildContext context, double shrinkOffset, bool overlapsContent) {
+    final range = maxExtent - minExtent;
+    final t = range <= 0 ? 1.0 : clampDouble(shrinkOffset / range, 0.0, 1.0);
+    final hasCover = coverUrl != null;
+    final foreground = hasCover
+        ? Color.lerp(Colors.white, AppColors.textPrimary, t)!
+        : AppColors.textPrimary;
+    final surfaceOpacity = hasCover ? t : 1.0;
+    // 两块标题不重叠：展开块先淡出，工具栏标题再淡入。
+    final blockOpacity = t < 0.45 ? clampDouble(1 - t / 0.45, 0.0, 1.0) : 0.0;
+    final titleOpacity =
+        t > 0.45 ? clampDouble((t - 0.45) / 0.4, 0.0, 1.0) : 0.0;
+
+    return ClipRect(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: AppColors.bgPage),
+          if (hasCover) _cover(context, t),
+          // 工具栏底色：折叠过程中渐显，保证图标和标题始终读得清。
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            height: _toolbarExtent,
+            child: IgnorePointer(
+              child: ColoredBox(
+                color: AppColors.bgPage.withOpacity(surfaceOpacity),
+              ),
+            ),
+          ),
+          if (blockOpacity > 0.01)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 14,
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: blockOpacity,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppText.titleLarge.copyWith(
+                          color:
+                              hasCover ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                      if (subtitle != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          subtitle!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: AppText.caption.copyWith(
+                            color: hasCover
+                                ? Colors.white.withOpacity(0.86)
+                                : AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            height: _toolbarExtent,
+            child: Padding(
+              padding: EdgeInsets.only(top: topPadding),
+              child: IconTheme(
+                data: IconThemeData(color: foreground, size: 22),
+                child: Row(
+                  children: [
+                    leading,
+                    Expanded(
+                      child: titleOpacity > 0.01
+                          ? Opacity(
+                              opacity: titleOpacity,
+                              child: Row(
+                                children: [
+                                  if (toolbarIcon != null) ...[
+                                    Icon(toolbarIcon, size: 13),
+                                    const SizedBox(width: 4),
+                                  ],
+                                  Flexible(
+                                    child: Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: AppText.titleMedium
+                                          .copyWith(color: foreground),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    const SizedBox(width: 4),
+                    ...actions,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  String _monthLabel(DateTime time) {
-    final local = time.toLocal();
-    return '${local.year}年${local.month}月';
+  Widget _cover(BuildContext context, double t) {
+    final width = MediaQuery.sizeOf(context).width;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return Positioned(
+      left: 0,
+      right: 0,
+      top: 0,
+      height: maxExtent,
+      child: Opacity(
+        opacity: clampDouble(1 - math.max(0.0, t - 0.7) / 0.3, 0.0, 1.0),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned(
+              left: 0,
+              right: 0,
+              top: -t * 24,
+              height: maxExtent + 24,
+              child: CachedNetworkImage(
+                cacheManager: MediaCache.manager,
+                imageUrl: coverUrl!,
+                fit: BoxFit.cover,
+                memCacheWidth: (width * dpr).round(),
+                fadeInDuration: const Duration(milliseconds: 200),
+                placeholder: (context, url) =>
+                    ColoredBox(color: AppColors.mediaPlaceholder),
+                errorWidget: (context, url, error) =>
+                    ColoredBox(color: AppColors.mediaPlaceholder),
+              ),
+            ),
+            // 底部压深：白色相册名和小字压在任何封面上都能读。
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0x33000000),
+                    Color(0x00000000),
+                    Color(0xAA000000),
+                  ],
+                  stops: [0.0, 0.35, 1.0],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _AlbumHeaderDelegate oldDelegate) {
+    return topPadding != oldDelegate.topPadding ||
+        contentHeight != oldDelegate.contentHeight ||
+        title != oldDelegate.title ||
+        subtitle != oldDelegate.subtitle ||
+        coverUrl != oldDelegate.coverUrl ||
+        leading != oldDelegate.leading ||
+        actions != oldDelegate.actions ||
+        toolbarIcon != oldDelegate.toolbarIcon;
   }
 }
 

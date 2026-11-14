@@ -23,6 +23,13 @@ class PickedMediaCleaner {
       // 桌面/测试环境可能没有该插件。
     }
     try {
+      // Android 原生端把副本写进 filesDir/picked_media（即 support 目录），
+      // 这里必须一起扫，否则副本永远删不掉，存储空间里也会两边对不上。
+      roots.add((await getApplicationSupportDirectory()).path);
+    } catch (_) {
+      // 桌面/测试环境可能没有该插件。
+    }
+    try {
       // 兼容 1.2.48 之前放在缓存目录里的副本。
       roots.add((await getTemporaryDirectory()).path);
     } catch (_) {

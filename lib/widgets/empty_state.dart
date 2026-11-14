@@ -6,7 +6,9 @@ import '../core/design/text_styles.dart';
 class EmptyState extends StatelessWidget {
   final IconData icon;
   final String title;
-  final String subtitle;
+
+  /// 可选：能靠标题讲清楚的地方就别加副标题（AGENTS.md 的文案规则）。
+  final String? subtitle;
   final Widget? action;
   final EdgeInsetsGeometry padding;
 
@@ -14,13 +16,14 @@ class EmptyState extends StatelessWidget {
     super.key,
     required this.icon,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     this.action,
     this.padding = const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
   });
 
   @override
   Widget build(BuildContext context) {
+    final subtitle = this.subtitle;
     return Center(
       child: Padding(
         padding: padding,
@@ -31,12 +34,14 @@ class EmptyState extends StatelessWidget {
             const SizedBox(height: 14),
             Text(title,
                 style: AppText.titleMedium, textAlign: TextAlign.center),
-            const SizedBox(height: 6),
-            Text(
-              subtitle,
-              style: AppText.bodySmall,
-              textAlign: TextAlign.center,
-            ),
+            if (subtitle != null && subtitle.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                style: AppText.bodySmall,
+                textAlign: TextAlign.center,
+              ),
+            ],
             if (action != null) ...[
               const SizedBox(height: 20),
               SizedBox(width: 200, child: action),

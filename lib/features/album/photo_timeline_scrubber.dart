@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -13,12 +14,16 @@ typedef TimelineMetrics = ({List<double> offsets, List<String> labels});
 
 /// 算时间轴映射：按实际行高 + 分组头高度 + 视口基准偏移推导，
 /// 这样拖到「2024年8月」就真的落在 8 月那一行，不会随距离累积误差。
+///
+/// [topInset] 是吸顶区（折叠后的头部 + 筛选条 + 分组头）压住的高度：
+/// 偏移减去它，拖到某个月份时那一行才落在吸顶区下面，而不是被盖住。
 TimelineMetrics buildTimelineMetrics(
   List<AlbumSection> sections, {
   required double width,
   required int columns,
   required double headerHeight,
   double base = 0,
+  double topInset = 0,
   String Function(Media media)? fallbackLabel,
 }) {
   final offsets = <double>[];
@@ -33,7 +38,7 @@ TimelineMetrics buildTimelineMetrics(
     }
     final rows = (section.items.length + columns - 1) ~/ columns;
     for (var i = 0; i < section.items.length; i++) {
-      offsets.add(y + (i ~/ columns) * rowHeight);
+      offsets.add(math.max(0.0, y + (i ~/ columns) * rowHeight - topInset));
       final header = section.header;
       labels.add(
         header != null && header.isNotEmpty

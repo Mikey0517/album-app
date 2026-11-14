@@ -23,7 +23,14 @@ class FeedGalleryPage extends StatefulWidget {
   final void Function(bool selecting, int selected, int total)?
       onSelectionChanged;
 
-  const FeedGalleryPage({super.key, this.onSelectionChanged});
+  /// 照片数量回报给父级 tab 条上的数字；只在加载成功后报。
+  final ValueChanged<int>? onCountChanged;
+
+  const FeedGalleryPage({
+    super.key,
+    this.onSelectionChanged,
+    this.onCountChanged,
+  });
 
   @override
   State<FeedGalleryPage> createState() => FeedGalleryPageState();
@@ -114,6 +121,8 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
         _loadingMore = false;
         _error = null;
       });
+      // 还有下一页时报的不是总数，tab 上的数字会一直涨；只有拉到底才报。
+      if (_nextCursor == null) widget.onCountChanged?.call(_items.length);
       if (_selecting) _notifySelection();
     } catch (e) {
       if (!mounted) return;

@@ -37,7 +37,7 @@ class CacheUsage {
   /// 临时文件：动图提取等临时产物（更新包、分享/导出单独统计）。
   final int tempBytes;
 
-  /// 待上传副本（`picked_media/`），不是缓存，不计入可清理。
+  /// 待上传副本（`picked_media/`，含 `files` 里那份），不是缓存，不计入可清理。
   final int pendingUploadBytes;
 
   /// 待上传副本的条数。
@@ -49,13 +49,15 @@ class CacheUsage {
   /// 分享/导出临时文件：`album_share_*` 目录与 `familyalbum_*` 中间文件。
   final int shareBytes;
 
-  /// 应用数据：`databases`、`shared_prefs`、`files`，不可清理。
+  /// 应用数据：`databases`、`shared_prefs` 与 `files` 里**不属于**待上传副本的
+  /// 部分，不可清理。
   final int appDataBytes;
 
   /// 程序本体估算（安装包 / .app）。
   final int programBytes;
 
-  /// 其它残留：以上都对不上的私有目录剩余部分。
+  /// 其它残留：临时目录之外、又不属于应用数据的私有目录里，排除待上传副本后
+  /// 剩下的部分（逐目录实算，不是「总量减已知项」的兜底）。
   final int residueBytes;
 
   const CacheUsage({
@@ -187,10 +189,7 @@ class CacheService {
         '${dirs.tempDir}/${MediaCache.cacheKey}',
         '${dirs.tempDir}/${MediaCache.legacyCacheKey}',
       ]);
-      final pendingDirs = _unique([
-        dirs.uploadsDir,
-        '${dirs.tempDir}/$pendingDirName',
-      ]);
+      final pendingDirs = _pendingDirs(dirs);
       var pendingBytes = 0;
       var pendingCount = 0;
       for (final path in pendingDirs) {
@@ -217,11 +216,11 @@ class CacheService {
           tempBytes += bytes;
         }
       }
-      final appDataBytes = await _appDataBytes(dirs);
+      // 每个字节只归一类：应用数据显式排除嵌在 `files` 里的副本，
+      // 残留逐目录实算，不再用「私有总量减已知项」兜底。
+      final appDataBytes = await _appDataBytes(dirs, pendingDirs);
       final programBytes = await _programBytes();
-      final privateBytes = await _privateBytes(dirs);
-      final known = imageBytes + pendingBytes + updateBytes + shareBytes + tempBytes;
-      final residue = privateBytes - known;
+      final residueBytes = await _residueBytes(dirs, pendingDirs);
       return CacheUsage(
         imageBytes: imageBytes,
         tempBytes: tempBytes,
@@ -231,7 +230,7 @@ class CacheService {
         shareBytes: shareBytes,
         appDataBytes: appDataBytes,
         programBytes: programBytes,
-        residueBytes: residue > 0 ? residue : 0,
+        residueBytes: residueBytes,
       );
     } catch (_) {
       return CacheUsage.empty;
@@ -433,11 +432,27 @@ class CacheService {
     return _sizeOf(File(executable).parent);
   }
 
+  /// 待上传副本的候选目录：原生端把副本写进 `filesDir/picked_media`
+  /// （Android 上就是 support 目录），Dart 端历史上用文档目录，
+  /// 1.2.48 之前的老副本还在临时目录里。
+  static List<String> _pendingDirs(CacheDirs dirs) => _unique([
+        dirs.uploadsDir,
+        if (dirs.supportDir != null)
+          '${_normalize(dirs.supportDir!)}/$pendingDirName',
+        '${dirs.tempDir}/$pendingDirName',
+      ]);
+
   /// 应用数据：Android 上 `app_flutter` 同级的 databases / shared_prefs / files。
-  static Future<int> _appDataBytes(CacheDirs dirs) async {
+  ///
+  /// `files` 里嵌着 `picked_media`（原生端把待上传副本写进 filesDir），
+  /// 这部分字节归「待上传副本」，这里显式排除，避免同一批字节被算两次。
+  static Future<int> _appDataBytes(
+    CacheDirs dirs,
+    List<String> pendingDirs,
+  ) async {
     var total = 0;
     for (final path in _appDataDirs(dirs)) {
-      total += await _sizeOf(Directory(path));
+      total += await _sizeExcluding(path, pendingDirs);
     }
     return total;
   }
@@ -450,11 +465,19 @@ class CacheService {
     return [for (final name in appDataDirNames) '$parent/$name'];
   }
 
-  /// 私有目录总量：临时目录 + 文档目录 + 支持目录（去掉重复、被包含与属于应用数据的）。
-  static Future<int> _privateBytes(CacheDirs dirs) async {
+  /// 其它残留：临时目录之外、又不属于应用数据的私有目录（文档目录 / 支持目录）
+  /// 里，排除已知分项后剩下的部分。
+  ///
+  /// 逐目录实算而不是「私有总量减已知项」：任何一项算错都不会被这一项悄悄吸收。
+  static Future<int> _residueBytes(
+    CacheDirs dirs,
+    List<String> pendingDirs,
+  ) async {
+    final temp = _normalize(dirs.tempDir);
     var total = 0;
     for (final root in _privateRoots(dirs)) {
-      total += await _sizeOf(Directory(root));
+      if (root == temp) continue;
+      total += await _sizeExcluding(root, pendingDirs);
     }
     return total;
   }
@@ -588,6 +611,33 @@ class CacheService {
     }
     return (bytes: bytes, count: count);
   }
+
+  /// 目录体积，跳过 [excluded] 里列出的路径（连同其子树）。
+  ///
+  /// 用来把嵌在某个目录里的已知分项剥离出来，保证分项之间互不重叠。
+  static Future<int> _sizeExcluding(String path, List<String> excluded) async {
+    final dir = Directory(path);
+    if (!await dir.exists()) return 0;
+    var total = 0;
+    try {
+      await for (final item in dir.list(recursive: true, followLinks: false)) {
+        if (item is! File) continue;
+        if (excluded.any((root) => _isSameOrInside(item.path, root))) continue;
+        try {
+          total += (await item.stat()).size;
+        } catch (_) {
+          // 单个文件失败跳过。
+        }
+      }
+    } catch (_) {
+      // 目录不可读时当作空。
+    }
+    return total;
+  }
+
+  /// [path] 是否就是 [root] 或在 [root] 之下。
+  static bool _isSameOrInside(String path, String root) =>
+      path == root || path.startsWith('$root${Platform.pathSeparator}');
 
   static Future<int> _sizeOf(FileSystemEntity entity) async {
     try {
