@@ -2,6 +2,7 @@ import 'package:album_app/api/album_api.dart';
 import 'package:album_app/core/album_view_settings.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/features/album/album_detail_page.dart';
+import 'package:album_app/features/album/album_timeline_layout.dart';
 import 'package:album_app/features/album/feed_gallery_page.dart';
 import 'package:album_app/features/album/photo_timeline_scrubber.dart';
 import 'package:album_app/models/album.dart';
@@ -53,7 +54,8 @@ void _usePhoneViewport(WidgetTester tester) {
   addTearDown(tester.view.resetDevicePixelRatio);
 }
 
-/// 相册详情页：有折叠封面头，折叠后的吸顶区 = 56 工具栏 + 46 筛选条 + 34 日期头。
+/// 相册详情页：有折叠封面头，折叠后的吸顶区 = 56 工具栏 + 46 筛选条 + 38 日期头
+/// （38 = 34 文字区 + 4 与网格之间的留白，见 kTimelineDateHeaderExtent）。
 Future<void> _pumpAlbum(WidgetTester tester) async {
   _usePhoneViewport(tester);
   final items = _crossMonths();
@@ -76,7 +78,7 @@ Future<void> _pumpAlbum(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
-/// 朋友圈相册：没有折叠封面头，吸顶区 = 46 筛选条 + 34 日期头 = 80。
+/// 朋友圈相册：没有折叠封面头，吸顶区 = 46 筛选条 + 38 日期头 = 84。
 Future<void> _pumpFeedGallery(WidgetTester tester) async {
   _usePhoneViewport(tester);
   final items = _crossMonths();
@@ -113,8 +115,16 @@ class _PageSpec {
 }
 
 const List<_PageSpec> _pages = <_PageSpec>[
-  _PageSpec(name: '相册详情页', stickyHeight: 136, pump: _pumpAlbum),
-  _PageSpec(name: '朋友圈相册', stickyHeight: 80, pump: _pumpFeedGallery),
+  _PageSpec(
+    name: '相册详情页',
+    stickyHeight: 56 + kAppSegmentedBarHeight + kTimelineDateHeaderExtent,
+    pump: _pumpAlbum,
+  ),
+  _PageSpec(
+    name: '朋友圈相册',
+    stickyHeight: kAppSegmentedBarHeight + kTimelineDateHeaderExtent,
+    pump: _pumpFeedGallery,
+  ),
 ];
 
 ScrollPosition _position(WidgetTester tester) =>
@@ -244,7 +254,12 @@ void main() {
         // 筛选条钉在折叠页头下沿：相册页 56，朋友圈相册 0（没有页头）。
         expect(
           filter.top,
-          closeTo(page.stickyHeight - kAppSegmentedBarHeight - 34, 0.5),
+          closeTo(
+            page.stickyHeight -
+                kAppSegmentedBarHeight -
+                kTimelineDateHeaderExtent,
+            0.5,
+          ),
           reason: '筛选条始终吸在折叠页头下沿，不随滚动走',
         );
         expect(
@@ -257,13 +272,13 @@ void main() {
         expect(pinned, hasLength(1), reason: '同一时刻只有一个日期头吸顶');
         expect(
           pinned.single.height,
-          closeTo(34, 0.5),
-          reason: '日期头是 34 高（和另一页同一个数）',
+          closeTo(kTimelineDateHeaderExtent, 0.5),
+          reason: '日期头整体 38 高 = 34 文字区 + 4 留白（和另一页同一个数）',
         );
         expect(
           pinned.single.bottom,
           closeTo(page.stickyHeight, 0.5),
-          reason: '吸顶区 = 折叠头(相册页 56) + 筛选条 46 + 日期头 34',
+          reason: '吸顶区 = 折叠头(相册页 56) + 筛选条 46 + 日期头 38',
         );
         expect(
           tester.getRect(find.byType(PhotoTimelineScrubber)).top,
@@ -349,7 +364,7 @@ void main() {
       await _dragTimelineTo(tester, 0);
       // 没有日期头时吸顶区只剩折叠页头 + 筛选条（相册页 102，朋友圈相册 46）。
       final inset = _stickyBottom(tester);
-      expect(inset, closeTo(page.stickyHeight - 34, 0.5));
+      expect(inset, closeTo(page.stickyHeight - kTimelineDateHeaderExtent, 0.5));
       final sections = albumSections(
         _crossMonths(),
         AlbumViewSettings.sort.value,

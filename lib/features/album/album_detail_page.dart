@@ -606,9 +606,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       sectionStart += section.items.length;
       slivers.add(
         SliverPadding(
+          // 顶部内边距取时间轴那一份（= 0）：分组头与网格之间的留白已经算在
+          // 分组头自己身上，网格再补一份就会在吸顶条下沿漏出页面底色。
           padding: const EdgeInsets.fromLTRB(
             _pagePadding,
-            kTimelineSectionGap,
+            kTimelineGridTopPadding,
             _pagePadding,
             0,
           ),
@@ -800,10 +802,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   double get _filterBarExtent =>
       widget.coverPickMode || _items.isEmpty ? 0 : kAppSegmentedBarHeight;
 
+  /// 日期分组头的整体高度（含与网格之间的留白）：平铺分组时没有分组头。
   double get _dateHeaderExtent =>
       AlbumViewSettings.group.value == AlbumGroup.flat
           ? 0
-          : kTimelineDateHeaderHeight;
+          : kTimelineDateHeaderExtent;
 
   double _headerMinExtent(BuildContext context) => widget.coverPickMode
       ? 0

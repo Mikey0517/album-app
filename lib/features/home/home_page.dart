@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/design/colors.dart';
+import '../../widgets/app_bottom_tab_bar.dart';
 import '../album/album_tab_page.dart';
 import '../feed/feed_page.dart';
 import '../profile/profile_page.dart';
@@ -69,27 +70,27 @@ class _HomePageState extends State<HomePage> {
         ),
         bottomNavigationBar: _hideNavigation
             ? null
-            : NavigationBar(
+            : AppBottomTabBar(
                 selectedIndex: _index,
-                onDestinationSelected: (value) {
+                onSelected: (value) {
                   // 点底部「相册」始终先回到家庭相册。
                   if (value == 1) _albumKey.currentState?.resetToDefault();
                   setState(() => _index = value);
                 },
-                destinations: const [
-                  NavigationDestination(
-                    icon: Icon(Icons.people_outline),
-                    selectedIcon: Icon(Icons.people),
+                items: const [
+                  AppBottomTabItem(
+                    icon: Icons.people_outline,
+                    selectedIcon: Icons.people,
                     label: '朋友圈',
                   ),
-                  NavigationDestination(
-                    icon: Icon(Icons.photo_library_outlined),
-                    selectedIcon: Icon(Icons.photo_library),
+                  AppBottomTabItem(
+                    icon: Icons.photo_library_outlined,
+                    selectedIcon: Icons.photo_library,
                     label: '相册',
                   ),
-                  NavigationDestination(
-                    icon: Icon(Icons.person_outline),
-                    selectedIcon: Icon(Icons.person),
+                  AppBottomTabItem(
+                    icon: Icons.person_outline,
+                    selectedIcon: Icons.person,
                     label: '我的',
                   ),
                 ],

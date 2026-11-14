@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import 'api/auth_api.dart';
 import 'core/api_client.dart';
+import 'core/app_accent_controller.dart';
 import 'core/app_theme_controller.dart';
 import 'core/cache_service.dart';
 import 'core/auth_storage.dart';
@@ -51,6 +52,7 @@ Future<void> main() async {
   await PatchService.init();
   await ServerConfig.init();
   await AppThemeController.init();
+  await AppAccentController.init();
   ApiClient.install();
   // 读回上次没传完的队列：登录态确认后自动续传。
   await UploadManager.instance.restore();
@@ -75,6 +77,7 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     AppThemeController.mode.addListener(_onThemeChanged);
+    AppAccentController.seed.addListener(_onThemeChanged);
     ApiClient.onUnauthorized = _handleUnauthorized;
     // 更新/更新日志对话框需要 Navigator 已经挂载，因此等第一帧结束后再启动。
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
@@ -84,6 +87,7 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     AppThemeController.mode.removeListener(_onThemeChanged);
+    AppAccentController.seed.removeListener(_onThemeChanged);
     super.dispose();
   }
 

@@ -1,4 +1,5 @@
 import 'package:album_app/core/design/theme.dart';
+import 'package:album_app/features/album/album_timeline_layout.dart';
 import 'package:album_app/features/album/feed_gallery_page.dart';
 import 'package:album_app/features/album/photo_timeline_scrubber.dart';
 import 'package:album_app/features/feed/feed_page.dart';
@@ -143,8 +144,8 @@ void main() {
       expect(pinned, hasLength(1), reason: '同一时刻只有一个日期头吸顶');
       expect(
         pinned.single.bottom,
-        closeTo(80, 0.5),
-        reason: '吸顶区 = 筛选条 46 + 日期头 34',
+        closeTo(kTimelineDateHeaderExtent + kAppSegmentedBarHeight, 0.5),
+        reason: '吸顶区 = 筛选条 46 + 日期头 38',
       );
       expect(
         tester.getRect(find.byType(PhotoTimelineScrubber)).top -
@@ -167,7 +168,9 @@ void main() {
     expect(thumb.top - rect.top, closeTo(0.0, 0.01));
     expect(
       thumb.top,
-      greaterThanOrEqualTo(kAppSegmentedBarHeight + 34 - 0.01),
+      greaterThanOrEqualTo(
+        kAppSegmentedBarHeight + kTimelineDateHeaderExtent - 0.01,
+      ),
       reason: '滑块不许盖住吸顶筛选条与日期头',
     );
     await gesture.up();

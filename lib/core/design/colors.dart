@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../app_accent_controller.dart';
+import 'accent.dart';
+
 /// 全局调色板。通过 [setDark] 切换浅色/深色，主题变化时整棵界面重建。
+///
+/// 主色不再是写死的常量：[primary] 每次读取时都从 [AppAccentController]
+/// 取当前主题色，再按明暗模式做可读性微调。调用点继续写 `AppColors.primary`，
+/// 一行都不用改，换色后全局自动跟着变。
 class AppColors {
   static bool _dark = false;
 
@@ -10,10 +17,20 @@ class AppColors {
 
   static bool get isDark => _dark;
 
-  static Color get primary =>
-      _dark ? const Color(0xFF8AA2FF) : const Color(0xFF4A6CF7);
-  static Color get primaryLight =>
-      _dark ? const Color(0xFF252D4A) : const Color(0xFFE8EDFE);
+  /// 当前主题色（用户在「我的 → 主题色」选的种子色，经明暗模式微调）。
+  static Color get primary => AppAccent.primary(
+        AppAccentController.seed.value,
+        isDark: _dark,
+        pageBg: bgPage,
+      );
+
+  /// 主色的浅色底：选中底、进度条轨道、头像底等。
+  static Color get primaryLight => AppAccent.surfaceTint(
+        primary,
+        isDark: _dark,
+        surface: bgSurface,
+      );
+
   static Color get bgPage =>
       _dark ? const Color(0xFF0E1118) : const Color(0xFFF7F8FA);
   static Color get bgSurface =>

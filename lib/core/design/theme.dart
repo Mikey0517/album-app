@@ -38,23 +38,6 @@ ThemeData buildAppTheme({bool dark = false}) {
       surfaceTintColor: Colors.transparent,
       foregroundColor: AppColors.textPrimary,
     ),
-    navigationBarTheme: NavigationBarThemeData(
-      backgroundColor: AppColors.bgSurface,
-      indicatorColor: AppColors.primaryLight,
-      elevation: 0,
-      height: 64,
-      labelTextStyle: WidgetStateProperty.all(
-        AppText.caption.copyWith(fontWeight: FontWeight.w500, fontSize: 11),
-      ),
-      iconTheme: WidgetStateProperty.resolveWith((states) {
-        return IconThemeData(
-          size: 24,
-          color: states.contains(WidgetState.selected)
-              ? AppColors.primary
-              : AppColors.textSecondary,
-        );
-      }),
-    ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.bgSurface,

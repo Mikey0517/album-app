@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../api/auth_api.dart';
 import '../../api/storage_api.dart';
 import '../../core/api_client.dart';
+import '../../core/app_accent_controller.dart';
 import '../../core/app_theme_controller.dart';
 import '../../core/auth_storage.dart';
 import '../../core/cache_service.dart';
@@ -27,6 +28,7 @@ import '../update/force_update_dialog.dart';
 import '../update/ios_update_service.dart';
 import '../update/update_service.dart';
 import 'storage_page.dart';
+import 'theme_accent_sheet.dart';
 
 class ProfilePage extends StatefulWidget {
   final VoidCallback onLogout;
@@ -162,6 +164,10 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     if (selected != null) {
       await AppThemeController.setMode(selected);
     }
+  }
+
+  Future<void> _openAccentPicker() async {
+    await showThemeAccentSheet(context);
   }
 
   Future<void> _loadVersion() async {
@@ -598,6 +604,40 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                           Text(
                             AppThemeController.label(mode),
                             style: AppText.caption,
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            color: AppColors.textTertiary,
+                            size: 18,
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+                Divider(color: AppColors.divider, height: 1),
+                ValueListenableBuilder<Color>(
+                  valueListenable: AppAccentController.seed,
+                  builder: (context, seed, child) {
+                    return ListTile(
+                      onTap: _openAccentPicker,
+                      leading: Icon(
+                        Icons.palette_outlined,
+                        color: AppColors.textSecondary,
+                        size: 22,
+                      ),
+                      title: const Text('主题色', style: AppText.body),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 16,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: AppColors.primary,
+                              border: Border.all(color: AppColors.borderLight),
+                            ),
                           ),
                           Icon(
                             Icons.chevron_right,

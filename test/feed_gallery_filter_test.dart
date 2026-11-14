@@ -1,4 +1,5 @@
 import 'package:album_app/core/design/theme.dart';
+import 'package:album_app/features/album/album_timeline_layout.dart';
 import 'package:album_app/features/album/feed_gallery_page.dart';
 import 'package:album_app/features/album/photo_timeline_scrubber.dart';
 import 'package:album_app/models/media.dart';
@@ -262,8 +263,8 @@ void main() {
     final scrubber = tester.getRect(find.byType(PhotoTimelineScrubber));
     expect(
       scrubber.top,
-      closeTo(after.bottom + 34, 0.5),
-      reason: '轨道顶边 = 筛选条 + 日期头下沿',
+      closeTo(after.bottom + kTimelineDateHeaderExtent, 0.5),
+      reason: '轨道顶边 = 筛选条 + 日期头（含留白）下沿',
     );
   });
 

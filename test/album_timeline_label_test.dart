@@ -210,7 +210,7 @@ void main() {
 
     // 滚到「11 月最后一行被吸顶条压住一半、10 月第一行刚好露在吸顶条下沿」。
     final inset = _stickyBottom(tester);
-    expect(inset, 136, reason: '折叠后的吸顶区：56 工具栏 + 46 筛选条 + 34 日期头');
+    expect(inset, 140, reason: '折叠后的吸顶区：56 工具栏 + 46 筛选条 + 38 日期头');
     scrollable.position.jumpTo(lastRowOfNovemberTop - inset + 22);
     await tester.pump();
 

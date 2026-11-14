@@ -442,8 +442,8 @@ void main() {
       final bottom = pinned.single.bottom;
       expect(
         bottom,
-        closeTo(136, 0.5),
-        reason: '吸顶区下沿恒为 136（56 + 46 + 34）',
+        closeTo(140, 0.5),
+        reason: '吸顶区下沿恒为 140（56 + 46 + 38）',
       );
       sticky ??= bottom;
       expect(bottom, closeTo(sticky, 0.01), reason: '滚动过程中吸顶区高度不变');
@@ -466,7 +466,11 @@ void main() {
       if ((rect.top - filter.bottom).abs() <= 0.5) atSlot.add(rect);
     }
     expect(atSlot, hasLength(1), reason: '展开态也只有一条日期头贴在筛选条下沿');
-    expect(atSlot.single.bottom, closeTo(216, 0.5), reason: '展开头 136 + 筛选条 46 + 日期头 34');
+    expect(
+      atSlot.single.bottom,
+      closeTo(220, 0.5),
+      reason: '展开头 136 + 筛选条 46 + 日期头 38',
+    );
   });
 
   testWidgets('平铺模式没有日期头，轨道顶边正好等于筛选条底边', (tester) async {

@@ -437,7 +437,7 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
           filterExtent: kAppSegmentedBarHeight,
           dateHeaderExtent: AlbumViewSettings.group.value == AlbumGroup.flat
               ? 0
-              : kTimelineDateHeaderHeight,
+              : kTimelineDateHeaderExtent,
         );
         final layout = AlbumTimelineLayout.compute(
           sections: sections,
@@ -508,9 +508,11 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
             final sectionOffset = sectionStart;
             sectionStart += section.items.length;
             slivers.add(
-              // 分组头与网格之间的留白和相册页一样：偏移表里也算这一份。
+              // 网格顶部内边距和相册页同一个数（0）：分组头自己吃掉了留白。
+              // 顶部内边距取时间轴那一份（= 0）：留白在分组头自己的下内边距里，
+              // 网格再加一份，吸顶条下沿与第一行照片之间就会多一条页面底色。
               SliverPadding(
-                padding: const EdgeInsets.only(top: kTimelineSectionGap),
+                padding: const EdgeInsets.only(top: kTimelineGridTopPadding),
                 sliver: SliverGrid.builder(
                   // 时间轴要靠这个 key 问渲染树「这一组顶部露出的是哪一格」。
                   key: sectionIndex < gridKeys.length
