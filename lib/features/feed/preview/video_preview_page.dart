@@ -52,8 +52,8 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
         materialProgressColors: ChewieProgressColors(
           playedColor: AppColors.primary,
           handleColor: AppColors.textInverse,
-          bufferedColor: AppColors.textInverse.withOpacity(0.3),
-          backgroundColor: AppColors.textInverse.withOpacity(0.24),
+          bufferedColor: AppColors.textInverse.withValues(alpha: 0.3),
+          backgroundColor: AppColors.textInverse.withValues(alpha: 0.24),
         ),
       );
       _chewieController = chewie;

@@ -85,7 +85,7 @@ class _ThemeAccentSheet extends StatelessWidget {
                     for (final preset in AppAccent.presets)
                       _AccentSwatch(
                         preset: preset,
-                        selected: preset.color.value == seed.value,
+                        selected: preset.color.toARGB32() == seed.toARGB32(),
                         onTap: () async {
                           await AppAccentController.setSeed(preset.color);
                           if (context.mounted) Navigator.pop(context);

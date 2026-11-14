@@ -405,7 +405,7 @@ class _NoticeBanner extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 6),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppColors.warning.withOpacity(0.12),
+        color: AppColors.warning.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(AppRadius.sm),
       ),
       child: Row(
@@ -560,7 +560,7 @@ class _UploadItemTile extends StatelessWidget {
             ),
           ),
         ),
-        Divider(height: 1, color: AppColors.divider.withOpacity(0.7)),
+        Divider(height: 1, color: AppColors.divider.withValues(alpha: 0.7)),
       ],
     );
   }

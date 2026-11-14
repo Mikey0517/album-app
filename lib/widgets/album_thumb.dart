@@ -131,7 +131,7 @@ class _MediaBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.45),
+        color: Colors.black.withValues(alpha: 0.45),
         borderRadius: BorderRadius.circular(AppRadius.sm),
       ),
       child: Row(

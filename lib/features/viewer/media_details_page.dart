@@ -88,7 +88,7 @@ class MediaDetailsPage extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.06),
+                color: Colors.white.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(AppRadius.lg),
               ),
               child: Column(
@@ -123,7 +123,7 @@ class MediaDetailsPage extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     height: 1.5,
-                    color: Colors.white.withOpacity(0.45),
+                    color: Colors.white.withValues(alpha: 0.45),
                   ),
                 ),
               ),
@@ -153,7 +153,7 @@ class _Row extends StatelessWidget {
       constraints: const BoxConstraints(minHeight: 46),
       decoration: BoxDecoration(
         border: Border(
-          bottom: BorderSide(color: Colors.white.withOpacity(0.06)),
+          bottom: BorderSide(color: Colors.white.withValues(alpha: 0.06)),
         ),
       ),
       child: Row(
@@ -164,7 +164,7 @@ class _Row extends StatelessWidget {
               label,
               style: TextStyle(
                 fontSize: 13,
-                color: Colors.white.withOpacity(0.55),
+                color: Colors.white.withValues(alpha: 0.55),
               ),
             ),
           ),

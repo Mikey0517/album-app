@@ -386,7 +386,7 @@ class _AlbumTileState extends State<_AlbumTile> {
                               vertical: 3,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.55),
+                              color: Colors.black.withValues(alpha: 0.55),
                               borderRadius:
                                   BorderRadius.circular(AppRadius.pill),
                             ),

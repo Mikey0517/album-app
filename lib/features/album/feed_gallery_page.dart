@@ -550,12 +550,12 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
                                 border: Border.all(
                                   color: selected
                                       ? AppColors.primary
-                                      : Colors.white.withOpacity(0.6),
+                                      : Colors.white.withValues(alpha: 0.6),
                                   width: selected ? 3 : 1,
                                 ),
                                 color: selected
-                                    ? AppColors.primary.withOpacity(0.12)
-                                    : Colors.black.withOpacity(0.06),
+                                    ? AppColors.primary.withValues(alpha: 0.12)
+                                    : Colors.black.withValues(alpha: 0.06),
                               ),
                             ),
                           ),
@@ -570,7 +570,7 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
                                 decoration: BoxDecoration(
                                   color: selected
                                       ? AppColors.primary
-                                      : Colors.black.withOpacity(0.35),
+                                      : Colors.black.withValues(alpha: 0.35),
                                   shape: BoxShape.circle,
                                   border: Border.all(
                                     color: Colors.white,

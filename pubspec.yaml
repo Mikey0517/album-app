@@ -1,7 +1,7 @@
 name: album_app
 description: A warm, calm LAN family album.
 publish_to: "none"
-version: 1.2.84+88
+version: 1.2.85+89
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -28,10 +28,13 @@ dependencies:
   path_provider: ^2.1.4
   gal: 2.2.3
   crypto: ^3.0.5
-  # Dart 层热更新（自托管补丁）。仓库内 vendor 了 0.1.4 并适配了 Flutter 3.24 的
-  # FlutterJNI 签名（上游 0.1.4 的 LoaderHook 用了 3.29+ 才有的 engineId 参数）。
+  # Dart 层热更新（自托管补丁）。仓库内 vendor 了 0.1.4，LoaderHook 用的是上游
+  # 6 参数版 runBundleAndSnapshotFromLibrary（Flutter 3.29+ 的 engineId）。
   flutter_patcher:
     path: third_party/flutter_patcher
+  # 液态玻璃（iOS 26 风格玻璃控件）。会声明 5 个 fragment shader，靠 Flutter 的
+  # shaders: 机制随包一起编进 APK；初始化失败时 main.dart 会整体回退到普通 UI。
+  liquid_glass_widgets: ^1.17.3
   open_filex: ^4.5.0
   video_thumbnail: ^0.5.3
 

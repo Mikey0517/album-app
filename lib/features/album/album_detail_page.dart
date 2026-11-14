@@ -765,12 +765,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                 border: Border.all(
                   color: selected
                       ? AppColors.primary
-                      : Colors.white.withOpacity(0.5),
+                      : Colors.white.withValues(alpha: 0.5),
                   width: selected ? 2.5 : 1,
                 ),
                 color: selected
-                    ? AppColors.primary.withOpacity(0.14)
-                    : Colors.black.withOpacity(0.04),
+                    ? AppColors.primary.withValues(alpha: 0.14)
+                    : Colors.black.withValues(alpha: 0.04),
               ),
             ),
           ),
@@ -785,7 +785,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                 decoration: BoxDecoration(
                   color: selected
                       ? AppColors.primary
-                      : Colors.black.withOpacity(0.35),
+                      : Colors.black.withValues(alpha: 0.35),
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white, width: 1.5),
                 ),
@@ -1216,7 +1216,7 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
             height: _toolbarExtent,
             child: IgnorePointer(
               child: ColoredBox(
-                color: AppColors.bgPage.withOpacity(surfaceOpacity),
+                color: AppColors.bgPage.withValues(alpha: surfaceOpacity),
               ),
             ),
           ),
@@ -1249,7 +1249,7 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
                           overflow: TextOverflow.ellipsis,
                           style: AppText.caption.copyWith(
                             color: hasCover
-                                ? Colors.white.withOpacity(0.86)
+                                ? Colors.white.withValues(alpha: 0.86)
                                 : AppColors.textSecondary,
                           ),
                         ),

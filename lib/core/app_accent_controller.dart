@@ -33,13 +33,15 @@ class AppAccentController {
     if (!persist) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt(_key, next.value);
+      await prefs.setInt(_key, next.toARGB32());
     } catch (_) {
       // 落盘失败不影响本次生效，下次冷启动回到上一次成功保存的颜色。
     }
   }
 
   /// 当前颜色是否正好命中某个预设（设置页/取色器用来高亮）。
-  static bool isPreset(Color value) => AppAccent.presets
-      .any((preset) => preset.color.value == AppAccent.clamp(value).value);
+  static bool isPreset(Color value) => AppAccent.presets.any(
+        (preset) =>
+            preset.color.toARGB32() == AppAccent.clamp(value).toARGB32(),
+      );
 }

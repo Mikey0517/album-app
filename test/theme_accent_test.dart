@@ -29,7 +29,7 @@ void main() {
       // 按钮、链接、进度条等走 ColorScheme 的地方也一起换。
       expect(buildAppTheme().colorScheme.primary, preset);
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getInt('app_accent_color'), preset.value);
+      expect(prefs.getInt('app_accent_color'), preset.toARGB32());
     });
 
     test('冷启动从 SharedPreferences 恢复上次选的颜色', () async {
@@ -284,8 +284,11 @@ void main() {
       expect(AppAccentController.seed.value, isNot(AppAccent.brand));
       expect(AppColors.primary, isNot(AppAccent.brand));
       final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getInt('app_accent_color'), AppAccentController.seed.value.value);
-      expect(AppColors.primary.value & 0xFF000000, 0xFF000000);
+      expect(
+        prefs.getInt('app_accent_color'),
+        AppAccentController.seed.value.toARGB32(),
+      );
+      expect(AppColors.primary.toARGB32() & 0xFF000000, 0xFF000000);
     });
   });
 }

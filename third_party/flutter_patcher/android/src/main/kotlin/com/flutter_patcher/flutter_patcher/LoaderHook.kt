@@ -139,12 +139,16 @@ internal object LoaderHook {
         private val archivePath: String,
         private val bundlePath: String
     ) : FlutterJNI() {
+        // Flutter 3.29+ 的 FlutterJNI.runBundleAndSnapshotFromLibrary 多了
+        // engineId: Long（多引擎实例标识），上游 0.1.4 就是 6 参数版本；
+        // 3.24 上没有这个参数所以当时删掉了，3.41 必须恢复，否则 override 不成立。
         override fun runBundleAndSnapshotFromLibrary(
             bundlePath: String,
             entrypointFunctionName: String?,
             pathToEntrypointFunction: String?,
             assetManager: android.content.res.AssetManager,
-            entrypointArgs: MutableList<String>?
+            entrypointArgs: MutableList<String>?,
+            engineId: Long
         ) {
             try {
                 val packageContext = context.createPackageContext(context.packageName, 0)
@@ -154,7 +158,8 @@ internal object LoaderHook {
                         entrypointFunctionName,
                         pathToEntrypointFunction,
                         packageContext.assets,
-                        entrypointArgs
+                        entrypointArgs,
+                        engineId
                     )
                     return
                 }
@@ -166,7 +171,8 @@ internal object LoaderHook {
                 entrypointFunctionName,
                 pathToEntrypointFunction,
                 assetManager,
-                entrypointArgs
+                entrypointArgs,
+                engineId
             )
         }
     }

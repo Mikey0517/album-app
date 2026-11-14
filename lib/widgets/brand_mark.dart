@@ -20,7 +20,7 @@ class BrandMark extends StatelessWidget {
         boxShadow: shadow
             ? [
                 BoxShadow(
-                  color: AppColors.primary.withOpacity(0.24),
+                  color: AppColors.primary.withValues(alpha: 0.24),
                   blurRadius: size * 0.24,
                   offset: Offset(0, size * 0.10),
                 ),

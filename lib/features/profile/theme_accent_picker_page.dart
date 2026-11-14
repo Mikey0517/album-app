@@ -135,7 +135,7 @@ class _ThemeAccentPickerPageState extends State<ThemeAccentPickerPage> {
   }
 
   static String _hex(Color color) =>
-      '#${(color.value & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+      '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
 }
 
 class _HsvSlider extends StatelessWidget {
@@ -189,7 +189,7 @@ class _HsvSlider extends StatelessWidget {
                   activeTrackColor: Colors.transparent,
                   inactiveTrackColor: Colors.transparent,
                   thumbColor: Colors.white,
-                  overlayColor: AppColors.primary.withOpacity(0.12),
+                  overlayColor: AppColors.primary.withValues(alpha: 0.12),
                   thumbShape: const RoundSliderThumbShape(
                     enabledThumbRadius: 9,
                     elevation: 1.5,

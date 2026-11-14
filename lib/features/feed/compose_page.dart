@@ -600,7 +600,7 @@ class _ComposePageState extends State<ComposePage> {
   Widget _buildPublishOverlay() {
     return Positioned.fill(
       child: Material(
-        color: Colors.black.withOpacity(0.5),
+        color: Colors.black.withValues(alpha: 0.5),
         child: Center(
           child: Container(
             width: 240,
@@ -840,7 +840,7 @@ class _MediaPreviewTile extends StatelessWidget {
                   width: 20,
                   height: 20,
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.6),
+                    color: Colors.black.withValues(alpha: 0.6),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -869,7 +869,7 @@ class _MediaBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.55),
+        color: Colors.black.withValues(alpha: 0.55),
         borderRadius: BorderRadius.circular(AppRadius.pill),
       ),
       child: Row(

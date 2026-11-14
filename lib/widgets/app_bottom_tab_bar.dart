@@ -82,8 +82,8 @@ class _TabButton extends StatelessWidget {
       type: MaterialType.transparency,
       child: InkWell(
         onTap: onTap,
-        splashColor: AppColors.primary.withOpacity(0.08),
-        highlightColor: AppColors.primary.withOpacity(0.04),
+        splashColor: AppColors.primary.withValues(alpha: 0.08),
+        highlightColor: AppColors.primary.withValues(alpha: 0.04),
         child: Semantics(
           button: true,
           selected: selected,

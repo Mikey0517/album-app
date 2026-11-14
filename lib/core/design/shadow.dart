@@ -10,7 +10,7 @@ class AppShadow {
   /// FAB 的品牌色光晕跟着主题色走，否则换成绿色主题会拖一圈蓝影。
   static List<BoxShadow> get fab => [
         BoxShadow(
-          color: AppColors.primary.withOpacity(0.10),
+          color: AppColors.primary.withValues(alpha: 0.10),
           blurRadius: 20,
           offset: const Offset(0, 6),
         ),

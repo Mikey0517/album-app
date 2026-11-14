@@ -43,7 +43,7 @@ class AppAccent {
 
   /// 去掉 alpha 并夹到 0xFF：主题色必须不透明，半透明主色会穿透卡片底色。
   static Color clamp(Color value) =>
-      Color(0xFF000000 | (value.value & 0x00FFFFFF));
+      Color(0xFF000000 | (value.toARGB32() & 0x00FFFFFF));
 
   /// 由 HSV 取值建色。滑块/持久化的原始值可能越界，先 clamp 再建色，
   /// 否则 HSVColor.fromAHSV 在 debug 下会直接断言失败。
@@ -64,9 +64,9 @@ class AppAccent {
     double channel(double c) => c <= 0.03928
         ? c / 12.92
         : math.pow((c + 0.055) / 1.055, 2.4).toDouble();
-    final r = channel(color.red / 255.0);
-    final g = channel(color.green / 255.0);
-    final b = channel(color.blue / 255.0);
+    final r = channel(color.r);
+    final g = channel(color.g);
+    final b = channel(color.b);
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   }
 

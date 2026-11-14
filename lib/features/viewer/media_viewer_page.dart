@@ -266,7 +266,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         body: ColoredBox(
-          color: Colors.black.withOpacity(backgroundOpacity),
+          color: Colors.black.withValues(alpha: backgroundOpacity),
           child: Transform.translate(
             offset: Offset(0, _dragOffset),
             child: Stack(
@@ -391,7 +391,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.62),
+                          color: Colors.black.withValues(alpha: 0.62),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(

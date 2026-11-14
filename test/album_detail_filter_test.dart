@@ -499,13 +499,17 @@ void main() {
       find.byType(AppSegmentedBarSurface),
     );
     expect(surface.color, AppColors.bgPage);
-    expect(surface.color.alpha, 255, reason: '不透明，滚动内容不会从缝里透出来');
+    expect(
+      (surface.color.a * 255.0).round(),
+      255,
+      reason: '不透明，滚动内容不会从缝里透出来',
+    );
 
     // 吸顶 sliver 自己也垫了一层同色底，任何一个 child 忘了画底也不会透。
     final pinnedBar =
         tester.widget<PinnedBarSliver>(find.byType(PinnedBarSliver).first);
     expect(pinnedBar.color, AppColors.bgPage);
-    expect(pinnedBar.color.alpha, 255);
+    expect((pinnedBar.color.a * 255.0).round(), 255);
   });
 
   testWidgets('iPad 竖屏按 5 列排，不溢出', (tester) async {

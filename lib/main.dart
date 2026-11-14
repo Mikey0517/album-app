@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'api/auth_api.dart';
@@ -56,7 +57,28 @@ Future<void> main() async {
   ApiClient.install();
   // 读回上次没传完的队列：登录态确认后自动续传。
   await UploadManager.instance.restore();
-  runApp(const AlbumApp());
+
+  // 液态玻璃：预编译 5 个 fragment shader，必须早于首帧。老设备上 shader 编译
+  // 失败时整体退回普通 UI —— 玻璃控件一个都不渲染，而不是画出一片空白。
+  var glassReady = false;
+  try {
+    await LiquidGlassWidgets.initialize();
+    glassReady = true;
+  } catch (e, stack) {
+    debugPrint('LiquidGlassWidgets.initialize failed, 回退普通 UI: $e\n$stack');
+  }
+  runApp(
+    glassReady
+        ? LiquidGlassWidgets.wrap(
+            child: const AlbumApp(),
+            // 按真机 P75 光栅耗时自动升降玻璃质量；降到 minimal 时
+            // HomePage/FeedPage 各自回退成普通控件。
+            adaptiveQuality: true,
+            // 玻璃控件零 material 依赖，深色模式要靠这个回调感知 ThemeMode。
+            brightnessResolver: Theme.maybeBrightnessOf,
+          )
+        : const AlbumApp(),
+  );
 }
 
 class AlbumApp extends StatefulWidget {
@@ -358,7 +380,7 @@ class _BootView extends StatelessWidget {
                     height: 24,
                     child: CircularProgressIndicator(
                       strokeWidth: 2.2,
-                      color: AppColors.primary.withOpacity(0.85),
+                      color: AppColors.primary.withValues(alpha: 0.85),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -392,7 +414,7 @@ class _BootBackdrop extends StatelessWidget {
             right: -110,
             child: _SoftOrb(
               size: 360,
-              color: const Color(0xFFDDE4FF).withOpacity(0.9),
+              color: const Color(0xFFDDE4FF).withValues(alpha: 0.9),
             ),
           ),
           Positioned(
@@ -400,7 +422,7 @@ class _BootBackdrop extends StatelessWidget {
             left: -130,
             child: _SoftOrb(
               size: 380,
-              color: const Color(0xFFFFE8DE).withOpacity(0.8),
+              color: const Color(0xFFFFE8DE).withValues(alpha: 0.8),
             ),
           ),
         ],
@@ -423,7 +445,7 @@ class _SoftOrb extends StatelessWidget {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         gradient: RadialGradient(
-          colors: [color, color.withOpacity(0)],
+          colors: [color, color.withValues(alpha: 0)],
           stops: const [0.2, 1],
         ),
       ),

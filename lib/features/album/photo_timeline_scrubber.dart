@@ -402,7 +402,7 @@ class _MonthBubble extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.78),
+        color: Colors.black.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(

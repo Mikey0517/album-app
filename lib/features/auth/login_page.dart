@@ -175,7 +175,7 @@ class _LoginPageState extends State<LoginPage> {
             begin: Alignment.topCenter,
             end: const Alignment(0, 0.55),
             colors: [
-              AppColors.primaryLight.withOpacity(0.55),
+              AppColors.primaryLight.withValues(alpha: 0.55),
               AppColors.bgPage,
             ],
           ),

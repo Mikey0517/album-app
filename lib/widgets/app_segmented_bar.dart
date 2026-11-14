@@ -148,7 +148,7 @@ class _Segment extends StatelessWidget {
                         height: 1.2,
                         fontWeight: FontWeight.w600,
                         color: selected
-                            ? Colors.white.withOpacity(0.8)
+                            ? Colors.white.withValues(alpha: 0.8)
                             : AppColors.textTertiary,
                       ),
                     ),

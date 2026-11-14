@@ -35,7 +35,7 @@ class AppButton extends StatelessWidget {
           backgroundColor: backgroundColor ?? AppColors.primary,
           foregroundColor: foregroundColor ?? Colors.white,
           disabledBackgroundColor:
-              (backgroundColor ?? AppColors.primary).withOpacity(0.55),
+              (backgroundColor ?? AppColors.primary).withValues(alpha: 0.55),
           disabledForegroundColor: Colors.white70,
           minimumSize: Size(double.infinity, height),
           shape: RoundedRectangleBorder(

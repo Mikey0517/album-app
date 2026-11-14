@@ -36,7 +36,8 @@ printf '%s\n' "$NOTES_RENDERED" > assets/changelog.md
 echo "==> 打包 v$VERSION_NAME ($VERSION_CODE)"
 "$FLUTTER" build apk --release \
   --build-name="$VERSION_NAME" \
-  --build-number="$VERSION_CODE"
+  --build-number="$VERSION_CODE" \
+  --target-platform android-arm,android-arm64
 
 APK="build/app/outputs/flutter-apk/app-release.apk"
 if [ ! -f "$APK" ]; then
