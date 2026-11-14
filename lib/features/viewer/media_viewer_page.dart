@@ -12,6 +12,7 @@ import 'image_view.dart';
 import 'media_details_page.dart';
 import 'live_photo_view.dart';
 import 'video_view.dart';
+import 'viewer_bottom_controls.dart';
 import 'viewer_thumbnail_strip.dart';
 import 'viewer_top_bar.dart';
 
@@ -249,6 +250,9 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
       );
     }
     final current = _current;
+    // 横屏一套、竖屏一套：缩略图条贴着进度条，间距由控制条几何统一算。
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
     final backgroundOpacity =
         (1 - _dragOffset / 400).clamp(0.3, 1.0).toDouble();
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -348,7 +352,12 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                   Positioned(
                     left: 0,
                     right: 0,
-                    bottom: current.isVideo ? 86 : 12,
+                    bottom: current.isVideo
+                        ? viewerThumbnailStripBottom(
+                            landscape: landscape,
+                            bottomInset: MediaQuery.paddingOf(context).bottom,
+                          )
+                        : 12,
                     child: IgnorePointer(
                       ignoring: !_uiVisible,
                       child: AnimatedOpacity(

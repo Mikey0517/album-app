@@ -15,17 +15,22 @@ bool shouldShowFeedTimeline(int postCount) =>
 /// 动态流的卡片高度不定，没法像网格那样预先算偏移表，所以：
 /// 跳转按滚动比例做；月份从渲染树里现读——每个日期分组的 SliverList 挂一个
 /// [GlobalKey]，按 sliver 顺序找到第一条露出视口的动态，取它的发布时间。
+///
+/// 「顶部可见是谁」的定位与相册网格共用 [VisibleItemLocator]，
+/// 月份写法共用 [timelineMonthLabel]，两边不会各写一份。
 class FeedTimeline {
   const FeedTimeline({
     required this.items,
     required this.sliverStarts,
     required this.sliverKeys,
+    this.topInset = 0,
   });
 
   const FeedTimeline.empty()
       : items = const <Post>[],
         sliverStarts = const <int>[],
-        sliverKeys = const <GlobalKey>[];
+        sliverKeys = const <GlobalKey>[],
+        topInset = 0;
 
   /// 按 sliver 顺序扁平化的动态。
   final List<Post> items;
@@ -36,22 +41,22 @@ class FeedTimeline {
   /// 每个 SliverList 的 key，用来问渲染树「顶部看得见的是哪一项」。
   final List<GlobalKey> sliverKeys;
 
+  /// 吸顶日期头压住的高度：被它压住的那条动态不参与月份文案。
+  final double topInset;
+
   /// 发布时间（本地时区）→ 「2024年8月」。
-  static String monthLabel(DateTime time) {
-    final local = time.toLocal();
-    return '${local.year}年${local.month}月';
-  }
+  static String monthLabel(DateTime time) => timelineMonthLabel(time);
+
+  VisibleItemLocator get _locator => VisibleItemLocator(
+        sliverStarts: sliverStarts,
+        sliverKeys: sliverKeys,
+        topInset: topInset,
+      );
 
   /// 顶部可见动态的月份；还没布局完、量不到时返回空串。
   String get visibleMonthLabel {
-    for (var i = 0; i < sliverKeys.length; i++) {
-      if (i >= sliverStarts.length) break;
-      final localIndex = firstVisibleSliverChildIndex(sliverKeys[i]);
-      if (localIndex == null) continue;
-      final index = sliverStarts[i] + localIndex;
-      if (index < 0 || index >= items.length) continue;
-      return monthLabel(items[index].postedAt);
-    }
-    return '';
+    final index = _locator.visibleIndex;
+    if (index == null || index < 0 || index >= items.length) return '';
+    return monthLabel(items[index].postedAt);
   }
 }

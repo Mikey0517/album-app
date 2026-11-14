@@ -34,6 +34,7 @@ import '../../widgets/selection_footer.dart';
 import '../download/batch_download.dart';
 import '../viewer/media_viewer_page.dart';
 import 'album_media_filter.dart';
+import 'album_media_filter_bar.dart';
 import 'album_share_sheet.dart';
 import 'album_title_dialog.dart';
 import 'photo_timeline_scrubber.dart';
@@ -84,9 +85,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   final ScrollController _gridScroll = ScrollController();
   // 点按由缩略图自己处理，滑动多选要跨格命中，所以给每格留一个 key。
   final Map<int, GlobalKey> _tileKeys = {};
+  // 每个日期分组的网格 sliver 一个 key：时间轴气泡靠它实时取顶部可见项。
+  final List<GlobalKey> _gridSliverKeys = [];
   bool? _dragSelectValue;
   // 封面在顶上时状态栏图标要转成白色，完全收起后回到深色。
   bool _headerScrolled = false;
+  // 当前该吸顶的那个日期分组（-1 = 还没滚到第一个分组头）。
+  // 只给这一个分组头套 PinnedBarSliver：多个 pinned 头在 Flutter 里会互相
+  // 堆叠，吸顶区就随滚动越叠越厚（每组 34px），照片被一条条空白顶下去。
+  int _pinnedSection = -1;
+  // 每个分组头「顶到吸顶位」时的滚动偏移，按分组下标对齐；滚动时只比这张表。
+  List<double> _pinThresholds = const <double>[];
 
   /// 能上传/删除照片（可写及以上）。
   bool get _canEdit => _album.canEditMedia;
@@ -130,9 +139,23 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
   /// 只在跨过阈值时重建一次，滚动过程中不会每帧 setState。
   void _onScroll() {
-    final scrolled = _gridScroll.hasClients && _gridScroll.offset > 110;
-    if (scrolled == _headerScrolled) return;
-    setState(() => _headerScrolled = scrolled);
+    final pixels = _gridScroll.hasClients ? _gridScroll.offset : 0.0;
+    final scrolled = pixels > 110;
+    final pinned = _pinnedSectionAt(pixels);
+    if (scrolled == _headerScrolled && pinned == _pinnedSection) return;
+    setState(() {
+      _headerScrolled = scrolled;
+      _pinnedSection = pinned;
+    });
+  }
+
+  /// 最后一个已经顶到吸顶位的分组；还没到第一个分组头时是 -1。
+  int _pinnedSectionAt(double pixels) {
+    var index = -1;
+    for (var i = 0; i < _pinThresholds.length; i++) {
+      if (_pinThresholds[i] <= pixels + 0.01) index = i;
+    }
+    return index;
   }
 
   void _onViewChanged() {
@@ -383,7 +406,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             : PreferredSize(
                 preferredSize:
                     const Size.fromHeight(kAppSegmentedBarHeight),
-                child: AppSegmentedBarSurface(child: _buildFilterBar()),
+                child: AppSegmentedBarSurface(
+                  child: AlbumMediaFilterBar(
+                    counts: _counts,
+                    selected: _filter,
+                    onChanged: _selectFilter,
+                  ),
+                ),
               ),
       ),
       body: _buildBody(),
@@ -400,36 +429,74 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         final dpr = MediaQuery.devicePixelRatioOf(context);
         final sections = _sections;
         final displayItems = [for (final section in sections) ...section.items];
+        // 网格 sliver 及它们的第一项在扁平列表里的下标：气泡文案靠它们
+        // 实时取「现在顶部是哪一张」，与朋友圈动态流共用同一套定位。
+        final gridKeys = _gridKeysFor(sections.length);
+        final sliverStarts = <int>[];
+        var sliverStart = 0;
+        for (final section in sections) {
+          sliverStarts.add(sliverStart);
+          sliverStart += section.items.length;
+        }
 
         final headerMax = _headerMaxExtent(context);
         final headerMin = _headerMinExtent(context);
         final filterExtent = _filterBarExtent;
         final dateHeaderExtent = _dateHeaderExtent;
+        // 吸顶区（折叠头 + 筛选条 + 日期分组头）压住的高度，也是时间轴轨道的
+        // 顶边。**只在这里算一次**：轨道的 Positioned(top:) 和偏移表的 topInset
+        // 都取这个值。以前 topInset 另外又加了 _sectionGap，结果拖到最上端时
+        // 第一行照片落在吸顶条下面 4px 处，接缝处就是一条 4px 的空白。
+        // 轨道也不能从 0 起算：那样命中区会压住吸顶条，滑块浮到筛选 tab 上面，
+        // 拖动比例还会把吸顶这一段算进去。
+        final stickyBottom = headerMin + filterExtent + dateHeaderExtent;
+        // 视口极矮时轨道至少要留 120 高，其他情况下 timelineTop == stickyBottom。
+        final timelineTop = clampDouble(
+          stickyBottom,
+          0,
+          math.max(0, constraints.maxHeight - 120),
+        );
         // 行的内容偏移 = 头部 + 筛选条 + 分组头；吸顶区把这三层都压住。
+        // topInset 用轨道顶边同一个值，拖到轨道最上端时第一行正好贴住吸顶条。
         final metrics = buildTimelineMetrics(
           sections,
           width: gridWidth,
           columns: columns,
           headerHeight: dateHeaderExtent + _sectionGap,
           base: headerMax + filterExtent,
-          topInset: headerMin + filterExtent + dateHeaderExtent + _sectionGap,
+          topInset: timelineTop,
           // 平铺模式没有分组头，退回按拍摄月份显示，气泡才不会空着。
-          fallbackLabel: (media) => _monthLabel(
+          fallbackLabel: (media) => timelineMonthLabel(
             albumSortDate(media, AlbumViewSettings.sort.value),
           ),
+        );
+        // 顶部可见项定位：topInset 直接用上面算好的吸顶区下沿，被吸顶条压住
+        // 的那一行既不是跳转目标、也不该用来报月份。
+        final visibleLocator = VisibleItemLocator(
+          sliverStarts: sliverStarts,
+          sliverKeys: gridKeys,
+          topInset: timelineTop,
         );
         final showScrubber = !_selecting &&
             !widget.coverPickMode &&
             displayItems.length > 12;
-        // 时间轴轨道的顶边 = 吸顶区（折叠头 + 筛选条 + 日期头）的下沿。
-        // 轨道不能从 0 起算：那样命中区会压住吸顶条，滑块浮到筛选 tab 上面，
-        // 而且拖动比例把吸顶这一段也算进去了，与上面 topInset 的口径差一截。
-        // 从吸顶区下沿到屏幕底部，拖到轨道最上端才正好是第一行照片。
-        final stickyBottom = headerMin + filterExtent + dateHeaderExtent;
-        final timelineTop = clampDouble(
-          stickyBottom,
-          0,
-          math.max(0, constraints.maxHeight - 120),
+
+        // 每个分组头「顶到吸顶位」的滚动量 = 该组第一行正好贴在吸顶条下沿时
+        // 的偏移（offset 表已扣掉 topInset，减去分组头与照片之间的 _sectionGap
+        // 就是分组头自身顶到吸顶位的时刻）。滚到点才把这一组的头换成吸顶版，
+        // 其余分组头留在内容流里，吸顶区高度因此恒定。
+        final pinThresholds = <double>[
+          for (var i = 0; i < sections.length; i++)
+            if (sections[i].header == null ||
+                i >= sliverStarts.length ||
+                sliverStarts[i] >= metrics.offsets.length)
+              double.infinity
+            else
+              math.max(0.0, metrics.offsets[sliverStarts[i]] - _sectionGap),
+        ];
+        _pinThresholds = pinThresholds;
+        _pinnedSection = _pinnedSectionAt(
+          _gridScroll.hasClients ? _gridScroll.offset : 0.0,
         );
 
         final scrollView = CustomScrollView(
@@ -437,6 +504,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: _buildSlivers(
             context,
+            sections: sections,
+            gridKeys: gridKeys,
+            pinnedSection: _pinnedSection,
             columns: columns,
             tileWidth: tileWidth,
             dpr: dpr,
@@ -474,7 +544,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                   controller: _gridScroll,
                   itemCount: displayItems.length,
                   itemOffsets: metrics.offsets,
-                  labels: metrics.labels,
+                  // 跳转仍按 offsets（越拖越准），气泡文案改成实时取顶部可见项。
+                  liveLabel: () => albumVisibleMonthLabel(
+                    displayItems,
+                    visibleLocator,
+                    sort: AlbumViewSettings.sort.value,
+                  ),
                 ),
               ),
           ],
@@ -485,6 +560,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
   List<Widget> _buildSlivers(
     BuildContext context, {
+    required List<AlbumSection> sections,
+    required List<GlobalKey> gridKeys,
+    required int pinnedSection,
     required int columns,
     required double tileWidth,
     required double dpr,
@@ -496,9 +574,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       slivers.add(_buildHeader(context));
       if (_items.isNotEmpty) {
         slivers.add(
-          PinnedBarSliver(
-            height: kAppSegmentedBarHeight,
-            child: AppSegmentedBarSurface(child: _buildFilterBar()),
+          AlbumMediaFilterSliver(
+            counts: _counts,
+            selected: _filter,
+            onChanged: _selectFilter,
           ),
         );
       }
@@ -569,22 +648,25 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     }
 
     var sectionStart = 0;
-    for (final section in _sections) {
+    for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+      final section = sections[sectionIndex];
       if (section.header != null) {
-        slivers.add(
-          PinnedBarSliver(
-            height: _dateHeaderHeight,
-            child: DateHeader(
-              text: section.header!,
-              height: _dateHeaderHeight,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: _pagePadding + 4),
-              trailing: Text(
-                '${section.items.length}',
-                style: AppText.caption,
-              ),
-            ),
+        final header = DateHeader(
+          text: section.header!,
+          height: _dateHeaderHeight,
+          padding: const EdgeInsets.symmetric(horizontal: _pagePadding + 4),
+          trailing: Text(
+            '${section.items.length}',
+            style: AppText.caption,
           ),
+        );
+        // 只有「当前分组」这一个头吸顶，其余分组头是内容流里的普通 34 高横条。
+        // 两者几何完全一样（同样 34 高、同为不透明底色），所以滚动到阈值时切换
+        // 不会跳：那一刻它的内容位置本来就已经和吸顶位重合。
+        slivers.add(
+          sectionIndex == pinnedSection
+              ? PinnedBarSliver(height: _dateHeaderHeight, child: header)
+              : SliverToBoxAdapter(child: header),
         );
       }
       final start = sectionStart;
@@ -598,6 +680,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             0,
           ),
           sliver: SliverGrid.builder(
+            // 时间轴要靠这个 key 问渲染树「这一组顶部露出的是哪一格」。
+            key: sectionIndex < gridKeys.length ? gridKeys[sectionIndex] : null,
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: columns,
               mainAxisSpacing: _gridSpacing,
@@ -622,19 +706,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       const SliverToBoxAdapter(child: SizedBox(height: _fabClearance)),
     );
     return slivers;
-  }
-
-  Widget _buildFilterBar() {
-    final counts = _counts;
-    return AppSegmentedBar(
-      selectedIndex: _filter.index,
-      onChanged: (index) => _selectFilter(AlbumMediaFilter.values[index]),
-      items: [
-        AppSegmentedItem('全部', count: counts.total),
-        AppSegmentedItem('照片', count: counts.photos),
-        AppSegmentedItem('视频', count: counts.videos),
-      ],
-    );
   }
 
   Widget _buildHeader(BuildContext context) {
@@ -812,9 +883,15 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     return top + math.max(kToolbarHeight, extra);
   }
 
-  String _monthLabel(DateTime time) {
-    final local = time.toLocal();
-    return '${local.year}年${local.month}月';
+  /// 每个日期分组的网格 sliver 一个 key，复用到分组数量变化为止。
+  List<GlobalKey> _gridKeysFor(int count) {
+    while (_gridSliverKeys.length < count) {
+      _gridSliverKeys.add(GlobalKey());
+    }
+    if (_gridSliverKeys.length > count) {
+      _gridSliverKeys.removeRange(count, _gridSliverKeys.length);
+    }
+    return _gridSliverKeys;
   }
 
   // ---------------------------------------------------------------------------

@@ -46,7 +46,9 @@ TimelineMetrics buildTimelineMetrics(
             : (fallbackLabel?.call(section.items[i]) ?? ''),
       );
     }
-    y += rows * rowHeight;
+    // 分组高度 = 行高 * 行数 − 最后一行的格间距：网格不会在最后一行下面再
+    // 留 2px，这里多算的话每过一组就累积 2px，拖到后面的月份就会差一截。
+    if (rows > 0) y += rows * rowHeight - spacing;
   }
   return (offsets: offsets, labels: labels);
 }
@@ -73,10 +75,21 @@ double timelineBaseOffset(GlobalKey key) {
 /// 子项在 sliver 里的位置是 `childScrollOffset - constraints.scrollOffset`
 /// （注意不能用 paintBounds，它是子项自己的局部坐标，永远是 0 起点），
 /// 加上自身高度还为正的那条就是露出视口的第一项。
-int? firstVisibleSliverChildIndex(GlobalKey key) {
-  final render = key.currentContext?.findRenderObject();
+///
+/// [minTop] 是吸顶区（折叠头 + 筛选条 + 日期头）压住的高度：大于 0 时改成
+/// 「顶边已经落到吸顶条下沿的第一项」，被吸顶条压住的那一行不再算顶部可见项；
+/// 传 0 保持原来的视口口径。
+int? firstVisibleSliverChildIndex(GlobalKey key, {double minTop = 0}) {
+  final context = key.currentContext;
+  final render = context?.findRenderObject();
   if (render is! RenderSliverMultiBoxAdaptor || !render.attached) return null;
   final vertical = render.constraints.axis == Axis.vertical;
+  // 视口顶边在滚动内容里的位置：子项在内容里的位置减去它，才是「离视口顶多远」。
+  // 只用 constraints.scrollOffset 算不准「还没滚到视口顶」的那条 sliver
+  // （那时 scrollOffset 是 0，子项位置会被当成 0），吸顶区一扣就错行。
+  final position =
+      context == null ? null : Scrollable.maybeOf(context)?.position;
+  final pixels = position?.pixels;
   for (var child = render.firstChild;
       child != null;
       child = render.childAfter(child)) {
@@ -84,13 +97,92 @@ int? firstVisibleSliverChildIndex(GlobalKey key) {
     final double? layoutOffset = render.childScrollOffset(child);
     if (layoutOffset == null) continue;
     final extent = vertical ? child.size.height : child.size.width;
-    final double top = layoutOffset - render.constraints.scrollOffset;
-    if (top + extent <= 0) continue;
+    final double top = pixels == null
+        ? layoutOffset - render.constraints.scrollOffset
+        : render.constraints.precedingScrollExtent + layoutOffset - pixels;
+    // 吸顶条下面压住的那一行（顶边还没露出吸顶条）不算顶部可见项。
+    if (minTop > 0 ? top < minTop : top + extent <= 0) continue;
     final data = child.parentData;
     if (data is SliverMultiBoxAdaptorParentData) return data.index;
     return null;
   }
   return null;
+}
+
+/// 「2024年8月」：时间轴气泡只有这一种月份写法。
+///
+/// 相册网格和朋友圈动态流都从这里取文案，两边不会写出两种格式。
+String timelineMonthLabel(DateTime time) {
+  final local = time.toLocal();
+  return '${local.year}年${local.month}月';
+}
+
+/// 「顶部现在是谁」的定位器：相册网格与朋友圈动态流共用同一份实现。
+///
+/// [sliverKeys] 按 sliver 顺序排列，[sliverStarts] 是每条 sliver 的第一个
+/// 子项在扁平列表里的下标。网格能预先算偏移表做跳转，但「拖动中顶部露出
+/// 的是哪一项」只有渲染树知道，所以两种列表都走这里。
+class VisibleItemLocator {
+  const VisibleItemLocator({
+    required this.sliverStarts,
+    required this.sliverKeys,
+    this.topInset = 0,
+  });
+
+  static const VisibleItemLocator empty = VisibleItemLocator(
+    sliverStarts: <int>[],
+    sliverKeys: <GlobalKey>[],
+  );
+
+  final List<int> sliverStarts;
+  final List<GlobalKey> sliverKeys;
+
+  /// 吸顶区（折叠头 + 筛选条 + 日期头）压住的高度。
+  ///
+  /// 0 是视口口径（视口顶端那一项）；大于 0 时只认「顶边落到吸顶条下沿」的项，
+  /// 被吸顶条压住的那一行不再参与文案——用户看不见它，不该用它报月份。
+  /// 加载这个定位器的三处（相册详情页 / 朋友圈动态流 / 朋友圈相册）都显式传。
+  final double topInset;
+
+  /// 扁平列表里顶部可见项的下标；还没布局完、量不到时返回 null。
+  int? get visibleIndex {
+    final strict = _scan(topInset);
+    if (strict != null || topInset <= 0) return strict;
+    // 吸顶条下面已经不够露出一整行时（比如列表最后一行正好被压住），
+    // 退回视口口径，免得拖动中气泡空掉。
+    return _scan(0);
+  }
+
+  int? _scan(double minTop) {
+    final count = math.min(sliverStarts.length, sliverKeys.length);
+    for (var i = 0; i < count; i++) {
+      final localIndex =
+          firstVisibleSliverChildIndex(sliverKeys[i], minTop: minTop);
+      if (localIndex == null || localIndex < 0) continue;
+      return sliverStarts[i] + localIndex;
+    }
+    return null;
+  }
+
+  /// 顶部可见项对应的文案；[labelAt] 把扁平下标映射成月份。
+  String visibleLabel(String Function(int index) labelAt) {
+    final index = visibleIndex;
+    return index == null ? '' : labelAt(index);
+  }
+}
+
+/// 相册类网格的实时月份文案：顶部可见那一项是哪个月。
+///
+/// 相册详情页与朋友圈相册共用，取月份的规则（按当前排序字段）只写一份。
+String albumVisibleMonthLabel(
+  List<Media> displayItems,
+  VisibleItemLocator locator, {
+  required AlbumSort sort,
+}) {
+  return locator.visibleLabel((index) {
+    if (index < 0 || index >= displayItems.length) return '';
+    return timelineMonthLabel(albumSortDate(displayItems[index], sort));
+  });
 }
 
 /// 拖拽时浮出的滑块与月份气泡的 key：空闲时它们不存在，
@@ -105,10 +197,13 @@ const Key timelineScrubberLabelKey = ValueKey<String>('timeline-scrubber-label')
 /// 月份气泡都不会越出轨道边界：拖到最上端时贴住轨道顶边，不会浮到吸顶条
 /// 上去，也不会悬在内容外面。
 ///
-/// 两种定位模式：
+/// 两种跳转方式：
 /// - offsets 模式（默认）：按每一项的精确偏移跳转，用于等高网格；
 /// - progress 模式（传 [progressLabel]）：按「拖动比例 × maxScrollExtent」跳转，
-///   用于变高卡片列表；月份文案由外部回调给出（动态流给的是顶部可见那条动态）。
+///   用于变高卡片列表。
+///
+/// 气泡文案与跳转方式解耦：传了 [liveLabel] 就实时取「顶部可见项」的月份
+/// （相册页与朋友圈动态流共用），否则沿用 [labels] 里预计算的那一份。
 class PhotoTimelineScrubber extends StatefulWidget {
   const PhotoTimelineScrubber({
     super.key,
@@ -117,6 +212,7 @@ class PhotoTimelineScrubber extends StatefulWidget {
     this.itemOffsets = const <double>[],
     this.labels = const <String>[],
     this.progressLabel,
+    this.liveLabel,
     this.enabled = true,
     this.hideDelay = const Duration(milliseconds: 700),
   });
@@ -131,6 +227,12 @@ class PhotoTimelineScrubber extends StatefulWidget {
   /// 非空即进入 progress 模式：拖动比例直接映射到滚动位置，
   /// 月份文案每次由这个回调现取。
   final String Function()? progressLabel;
+
+  /// 气泡文案现取：不用 [labels] 里预计算的那一份，而是每次都问
+  /// 「现在顶部露出的是哪一项」（相册页与朋友圈动态流同一套逻辑）。
+  ///
+  /// 跳转方式不受影响：仍然按 [itemOffsets] 精确定位，避免越拖越偏。
+  final String Function()? liveLabel;
 
   final bool enabled;
 
@@ -158,25 +260,30 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
   bool get _usable {
     if (!widget.enabled) return false;
     if (widget.isProgressMode) return true;
-    return widget.itemCount > 1 &&
-        widget.itemOffsets.length == widget.itemCount &&
+    if (widget.itemCount <= 1) return false;
+    if (widget.itemOffsets.length != widget.itemCount) return false;
+    // 现取文案时不需要预计算的 label 表。
+    return widget.liveLabel != null ||
         widget.labels.length == widget.itemCount;
   }
+
+  /// 实时文案的来源：progress 模式问进度回调，offsets 模式问 [liveLabel]。
+  String Function()? get _liveLabelSource =>
+      widget.liveLabel ?? widget.progressLabel;
 
   void _seek(double dy, double height) {
     if (!_usable || height <= 0 || !widget.controller.hasClients) return;
     final position = widget.controller.position;
     final max = position.maxScrollExtent;
     final ratio = (dy / height).clamp(0.0, 1.0);
-    final external = widget.progressLabel;
-    if (external != null) {
+    if (widget.isProgressMode) {
       // 变高列表没法建偏移表，按比例直接跳，手感对齐相册页。
       final target = (ratio * max).clamp(0.0, max);
       if ((position.pixels - target).abs() > 0.5) {
         widget.controller.jumpTo(target);
       }
       // 跳转要等这一帧布局完才知道顶部是谁，下一帧再取月份，避免闪错月份。
-      _scheduleProgressLabelRefresh();
+      _scheduleLiveLabelRefresh();
     } else {
       final index = (ratio * (widget.itemCount - 1))
           .round()
@@ -185,7 +292,12 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
       if ((position.pixels - target).abs() > 0.5) {
         widget.controller.jumpTo(target);
       }
-      _applyLabel(widget.labels[index]);
+      if (widget.liveLabel != null) {
+        // 跳转是按偏移算的（不会越拖越偏），文案仍取顶部可见项。
+        _scheduleLiveLabelRefresh();
+      } else {
+        _applyLabel(widget.labels[index]);
+      }
     }
     _hideTimer?.cancel();
     setState(() => _thumbY = dy);
@@ -198,14 +310,14 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
     HapticFeedback.selectionClick();
   }
 
-  void _scheduleProgressLabelRefresh() {
-    final external = widget.progressLabel;
-    if (external == null || _labelRefreshScheduled) return;
+  void _scheduleLiveLabelRefresh() {
+    final source = _liveLabelSource;
+    if (source == null || _labelRefreshScheduled) return;
     _labelRefreshScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _labelRefreshScheduled = false;
       if (!mounted || _thumbY == null) return;
-      final label = external();
+      final label = source();
       if (label == _label) return;
       setState(() => _applyLabel(label));
     });

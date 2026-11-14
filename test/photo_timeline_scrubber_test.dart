@@ -93,6 +93,8 @@ void main() {
     final thumb = tester.getRect(find.byKey(timelineScrubberThumbKey));
     expect(thumb.top, greaterThanOrEqualTo(rect.top - 0.01),
         reason: '滑块不许探出轨道顶边');
+    expect(thumb.top, closeTo(rect.top, 0.01),
+        reason: '拖到最上端时滑块贴住轨道顶边，轨道顶部不许留白');
     expect(thumb.bottom, lessThanOrEqualTo(rect.bottom + 0.01));
 
     await gesture.up();

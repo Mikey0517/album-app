@@ -66,6 +66,14 @@ List<Media> _mixed() => [
       _video(12, DateTime(2020, 5, 12, 10, 1)),
     ];
 
+/// 60 张、10 个日期分组：列表够长，能实打实滚到 600 / 1200。
+List<Media> _long() {
+  return [
+    for (var i = 0; i < 60; i++)
+      _photo(1 + i, DateTime(2020, 8, 1 + (i ~/ 6), 9, i % 60)),
+  ];
+}
+
 /// 30 项（16 照片 + 14 视频），用来验证时间轴跟筛选走。
 List<Media> _many() {
   final items = <Media>[];
@@ -113,6 +121,18 @@ int? _chipCount(WidgetTester tester, String label) {
     if (item.label == label) return item.count;
   }
   return null;
+}
+
+/// 吸顶条下沿以下第一行照片的顶边：用来量「轨道/内容与吸顶条之间的缝」。
+double _firstRowTopBelow(WidgetTester tester, double stickyBottom) {
+  final thumbs = find.byType(AlbumThumb);
+  double? top;
+  for (var i = 0; i < thumbs.evaluate().length; i++) {
+    final rect = tester.getRect(thumbs.at(i));
+    if (rect.top < stickyBottom - 0.01) continue;
+    if (top == null || rect.top < top) top = rect.top;
+  }
+  return top ?? double.nan;
 }
 
 /// 分组头右侧的数量：日期头里第二个 Text 就是它。
@@ -328,7 +348,7 @@ void main() {
     expect(find.text('夏天'), findsOneWidget);
   });
 
-  testWidgets('时间轴紧贴吸顶条下沿：不悬空、不压住筛选条', (tester) async {
+  testWidgets('时间轴紧贴吸顶条下沿：接缝 0 像素，滑块不越界', (tester) async {
     await _pump(tester, items: _many());
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
     await tester.pumpAndSettle();
@@ -344,8 +364,8 @@ void main() {
     final pinned =
         rects.firstWhere((rect) => (rect.top - filter.bottom).abs() < 0.5);
     expect(
-      scrubber.top,
-      closeTo(pinned.bottom, 0.5),
+      scrubber.top - pinned.bottom,
+      closeTo(0.0, 0.01),
       reason: '轨道顶边 = 吸顶区下沿，接缝宽度为 0',
     );
     expect(
@@ -353,6 +373,100 @@ void main() {
       greaterThanOrEqualTo(filter.bottom),
       reason: '轨道不许压在筛选条上（之前轨道从 0 起算，滑块会浮到 tab 上面）',
     );
+
+    // 拖到轨道最上端：滑块贴住轨道顶边，不许探出去压吸顶条。
+    final gesture = await tester.startGesture(scrubber.center);
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, 24)); // 先越过触摸斜率
+    await tester.pump();
+    await gesture.moveTo(Offset(scrubber.center.dx, scrubber.top + 1));
+    await tester.pump();
+    await tester.pump();
+
+    final thumb = tester.getRect(find.byKey(timelineScrubberThumbKey));
+    expect(
+      thumb.top - scrubber.top,
+      greaterThanOrEqualTo(-0.01),
+      reason: '滑块不许探出轨道顶边压住吸顶条',
+    );
+    expect(
+      thumb.top - pinned.bottom,
+      greaterThanOrEqualTo(-0.01),
+      reason: '滑块顶端也不许高过吸顶条下沿',
+    );
+    expect(
+      thumb.top - scrubber.top,
+      closeTo(0.0, 0.01),
+      reason: '拖到最上端时滑块贴住轨道顶边，不额外留 4px 空档',
+    );
+
+    // 同一时刻内容也贴住吸顶条：这才是肉眼看到的那条缝。
+    final rowTop = _firstRowTopBelow(tester, pinned.bottom);
+    expect(
+      rowTop - pinned.bottom,
+      closeTo(0.0, 0.01),
+      reason: '拖到最上端时第一行照片顶边 == 吸顶条下沿（曾经因为 topInset 多加 4 而低 4px）',
+    );
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('日期头只钉当前分组：吸顶区恒定 136，不会层层堆叠', (tester) async {
+    await _pump(tester, items: _long());
+    final position =
+        tester.state<ScrollableState>(find.byType(Scrollable).first).position;
+    expect(position.maxScrollExtent, greaterThan(1200));
+
+    // 折叠完成之后（> 80）到列表底部：吸顶区高度必须一直是 136
+    // = 折叠头 56 + 筛选条 46 + 日期头 34。以前每个分组头都 pinned，
+    // 滚过 4 组就叠成 4 条 34px 的空白，把照片顶下去。
+    double? sticky;
+    for (final target in <double>[80, 300, 600, 1200]) {
+      position.jumpTo(target);
+      await tester.pumpAndSettle();
+
+      final filter = tester.getRect(find.byType(AppSegmentedBarSurface));
+      final headers = find.byType(DateHeader);
+      final pinned = <Rect>[];
+      for (var i = 0; i < headers.evaluate().length; i++) {
+        final rect = tester.getRect(headers.at(i));
+        if ((rect.top - filter.bottom).abs() <= 0.5) pinned.add(rect);
+        expect(
+          rect.top,
+          greaterThanOrEqualTo(filter.bottom - 0.5),
+          reason: '日期头不许压到筛选条上，更不许两条叠在吸顶位',
+        );
+      }
+      expect(pinned, hasLength(1), reason: '同一时刻只有一个日期头吸顶');
+      final bottom = pinned.single.bottom;
+      expect(
+        bottom,
+        closeTo(136, 0.5),
+        reason: '吸顶区下沿恒为 136（56 + 46 + 34）',
+      );
+      sticky ??= bottom;
+      expect(bottom, closeTo(sticky, 0.01), reason: '滚动过程中吸顶区高度不变');
+      expect(
+        tester.getRect(find.byType(PhotoTimelineScrubber)).top,
+        closeTo(bottom, 0.01),
+        reason: '轨道顶边跟着恒定的吸顶区下沿，不随滚动漂移',
+      );
+    }
+
+    // 回到顶部：页头是展开的，吸顶区还没形成吸顶（高 216 = 展开头 136 +
+    // 筛选条 46 + 日期头 34），所以这里不要求 136，只要求「没有堆叠」。
+    position.jumpTo(0);
+    await tester.pumpAndSettle();
+    final filter = tester.getRect(find.byType(AppSegmentedBarSurface));
+    final headers = find.byType(DateHeader);
+    final atSlot = <Rect>[];
+    for (var i = 0; i < headers.evaluate().length; i++) {
+      final rect = tester.getRect(headers.at(i));
+      if ((rect.top - filter.bottom).abs() <= 0.5) atSlot.add(rect);
+    }
+    expect(atSlot, hasLength(1), reason: '展开态也只有一条日期头贴在筛选条下沿');
+    expect(atSlot.single.bottom, closeTo(216, 0.5), reason: '展开头 136 + 筛选条 46 + 日期头 34');
   });
 
   testWidgets('平铺模式没有日期头，轨道顶边正好等于筛选条底边', (tester) async {

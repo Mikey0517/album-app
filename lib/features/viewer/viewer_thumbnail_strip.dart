@@ -28,6 +28,10 @@ const double thumbnailItemSize = 36;
 const double thumbnailItemGap = 8;
 const double thumbnailStripPadding = 16;
 
+/// 缩略图条自身的上下内边距与总高度：视频控制条靠它们算「缩略图到进度条」的间距。
+const double thumbnailStripVerticalPadding = 8;
+const double thumbnailStripHeight = 52;
+
 /// 计算把第 [index] 个缩略图滚到中间需要的偏移；已经完整可见时返回 null。
 @visibleForTesting
 double? thumbnailScrollTarget({
@@ -109,13 +113,13 @@ class _ViewerThumbnailStripState extends State<ViewerThumbnailStrip> {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 52,
+      height: thumbnailStripHeight,
       child: ListView.separated(
         controller: _controller,
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(
           horizontal: _horizontalPadding,
-          vertical: 8,
+          vertical: thumbnailStripVerticalPadding,
         ),
         itemCount: widget.items.length,
         separatorBuilder: (_, __) => const SizedBox(width: _gap),

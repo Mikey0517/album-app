@@ -300,6 +300,8 @@ class _FeedPageState extends State<FeedPage> {
       items: timelinePosts,
       sliverStarts: sliverStarts,
       sliverKeys: sliverKeys,
+      // 吸顶日期头压住的那条动态不该用来报月份。
+      topInset: kFeedDateHeaderHeight,
     );
 
     if (_loadingMore) {
@@ -340,17 +342,49 @@ class _FeedPageState extends State<FeedPage> {
         // 时间轴浮在列表右侧、RefreshIndicator 之外：竖直拖拽由它自己接管，
         // 列表不会跟着下拉；jumpTo 也不产生 overscroll，不会误触下拉刷新。
         if (_showTimeline)
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            width: 30,
-            child: PhotoTimelineScrubber(
-              controller: _scrollController,
-              progressLabel: _timelineMonthLabel,
-            ),
+          FeedTimelineLayer(
+            controller: _scrollController,
+            label: _timelineMonthLabel,
           ),
       ],
+    );
+  }
+}
+
+/// 吸顶日期头的高度：动态流顶部那条「几月几日」。
+///
+/// 时间轴轨道的顶边就取它：轨道从吸顶日期头下沿一直长到视口底部，
+/// 拖到最上端时滑块贴住日期头下沿，不会浮上去盖住它；拖到最上端也正好
+/// 是第一条动态（吸顶头自己不占滚动内容）。
+const double kFeedDateHeaderHeight = 36;
+
+/// 动态流右侧时间轴：从吸顶日期头下沿到视口底部。
+///
+/// 单独成一层是为了让「轨道顶边 = 吸顶条下沿」这条几何关系可测：宿主把它
+/// 直接放进 Stack，和相册详情页一样只保留一处顶边定义。
+class FeedTimelineLayer extends StatelessWidget {
+  const FeedTimelineLayer({
+    super.key,
+    required this.controller,
+    required this.label,
+  });
+
+  final ScrollController controller;
+
+  /// 气泡文案：顶部可见那条动态的月份。
+  final String Function() label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      right: 0,
+      top: kFeedDateHeaderHeight,
+      bottom: 0,
+      width: 30,
+      child: PhotoTimelineScrubber(
+        controller: controller,
+        progressLabel: label,
+      ),
     );
   }
 }
@@ -361,15 +395,15 @@ class _FloatingDateHeaderDelegate extends SliverPersistentHeaderDelegate {
   _FloatingDateHeaderDelegate(this.text);
 
   @override
-  double get minExtent => 36;
+  double get minExtent => kFeedDateHeaderHeight;
 
   @override
-  double get maxExtent => 36;
+  double get maxExtent => kFeedDateHeaderHeight;
 
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return DateHeader(text: text);
+    return DateHeader(text: text, height: kFeedDateHeaderHeight);
   }
 
   @override
