@@ -128,6 +128,26 @@ class RetryAllResult {
   int get total => retried + missingSource;
 }
 
+/// 清理待上传副本的结果。
+class PendingCopyClearResult {
+  /// 从上传队列里移除的条目数。
+  final int removedItems;
+
+  /// 删掉的副本文件数。
+  final int deletedCopies;
+
+  /// 释放的字节数。
+  final int freedBytes;
+
+  const PendingCopyClearResult({
+    required this.removedItems,
+    required this.deletedCopies,
+    required this.freedBytes,
+  });
+
+  bool get isEmpty => deletedCopies == 0;
+}
+
 /// App 全局上传队列。页面关闭/切换 Tab 不会中断上传。
 ///
 /// 几个关键行为：
@@ -509,6 +529,38 @@ class UploadManager extends ChangeNotifier {
     _persistSoon();
     _syncWakelock();
     notifyListeners();
+  }
+
+  /// 清掉「待上传副本」：队列里没在上传中的条目连同副本一起删掉，并移出队列，
+  /// 最后再清一次队列未引用的孤儿副本。
+  ///
+  /// 必须连条目一起删：只删文件会让队列指向不存在的路径，重启后只剩一堆
+  /// 「原文件已失效」。正在上传的条目跳过——请求还在读那个文件。
+  Future<PendingCopyClearResult> clearPendingCopies() async {
+    final before = await PickedMediaCleaner.copyStats();
+    final discarded = items
+        .where((item) => !_activeTokens.containsKey(item))
+        .toList(growable: false);
+    for (final item in discarded) {
+      // 只打标记：批次按下标派发，直接删元素会让下标错位、跳过别的条目。
+      item.canceled = true;
+      items.remove(item);
+      _pausedItems.remove(item);
+      _restoredPending.remove(item);
+    }
+    // 仍在队列里的（此刻只可能是在上传中的）副本要留着。
+    await PickedMediaCleaner.deleteOrphans(items.map((item) => item.path));
+    if (items.isEmpty && !_running) _completedAwaitingAck = false;
+    await _saveNow();
+    _syncWakelock();
+    notifyListeners();
+    final after = await PickedMediaCleaner.copyStats();
+    final freed = before.bytes - after.bytes;
+    return PendingCopyClearResult(
+      removedItems: discarded.length,
+      deletedCopies: before.count - after.count,
+      freedBytes: freed > 0 ? freed : 0,
+    );
   }
 
   /// 移除一条记录（源文件失效时用“移除”代替无效的“重试”）。

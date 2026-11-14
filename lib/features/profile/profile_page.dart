@@ -26,6 +26,7 @@ import '../../widgets/loading_view.dart';
 import '../update/force_update_dialog.dart';
 import '../update/ios_update_service.dart';
 import '../update/update_service.dart';
+import 'storage_page.dart';
 
 class ProfilePage extends StatefulWidget {
   final VoidCallback onLogout;
@@ -43,7 +44,6 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
   bool _checkingUpdate = false;
   CacheUsage? _cache;
   bool _cacheLoading = true;
-  bool _cacheClearing = false;
   String _version = '';
   String _serverMode = '';
   String? _error;
@@ -90,69 +90,13 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     });
   }
 
-  Widget _cacheRow(String label, int bytes, {bool emphasized = false}) {
-    final style = emphasized
-        ? AppText.body.copyWith(fontWeight: FontWeight.w600)
-        : AppText.bodySmall;
-    return Row(
-      children: [
-        Expanded(child: Text(label, style: style)),
-        Text(
-          formatBytes(bytes),
-          style: emphasized ? style : AppText.bodySmall,
-        ),
-      ],
+  Future<void> _openStoragePage() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const StoragePage()),
     );
-  }
-
-  Future<void> _clearCache() async {
-    if (_cacheClearing) return;
-    // 先统计一次，弹窗里的数字才是最新的。
+    if (!mounted) return;
+    // 回来重新统计，别显示进去之前的旧数字。
     await _loadCache();
-    if (!mounted) return;
-    final usage = _cache;
-    if (usage == null || usage.isEmpty) {
-      _snack('没有可清理的缓存');
-      return;
-    }
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('清理缓存？', style: AppText.titleMedium),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _cacheRow('图片缓存', usage.imageBytes),
-            const SizedBox(height: 10),
-            _cacheRow('临时文件', usage.tempBytes),
-            const Divider(height: 22),
-            _cacheRow('合计可清理', usage.clearableBytes, emphasized: true),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            style: TextButton.styleFrom(
-              foregroundColor: AppColors.textSecondary,
-            ),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('清理'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-
-    setState(() => _cacheClearing = true);
-    final result = await CacheService.clear();
-    if (!mounted) return;
-    setState(() => _cacheClearing = false);
-    await _loadCache();
-    if (!mounted) return;
-    _snack('已清理 ${formatBytes(result.freedBytes)}');
   }
 
   void _onServerChanged() {
@@ -667,32 +611,22 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                 ),
                 Divider(color: AppColors.divider, height: 1),
                 ListTile(
-                  onTap: _cacheClearing ? null : _clearCache,
+                  onTap: _openStoragePage,
                   leading: Icon(
-                    Icons.cleaning_services_outlined,
+                    Icons.sd_storage_outlined,
                     color: AppColors.textSecondary,
                     size: 22,
                   ),
-                  title: const Text('缓存', style: AppText.body),
+                  title: const Text('存储空间', style: AppText.body),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      if (_cacheClearing)
-                        SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.primary,
-                          ),
-                        )
-                      else
-                        Text(
-                          _cacheLoading
-                              ? ''
-                              : formatBytes(_cache?.clearableBytes ?? 0),
-                          style: AppText.caption,
-                        ),
+                      Text(
+                        _cacheLoading || _cache == null
+                            ? ''
+                            : formatBytes(_cache!.appBytes),
+                        style: AppText.caption,
+                      ),
                       const SizedBox(width: 2),
                       Icon(
                         Icons.chevron_right,

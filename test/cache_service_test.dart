@@ -8,17 +8,21 @@ void main() {
 
   late Directory tmp;
   late Directory tempDir;
+  late Directory docsDir;
   late Directory uploadsDir;
 
   setUp(() {
     tmp = Directory.systemTemp.createTempSync('album_cache_test');
     tempDir = Directory('${tmp.path}/temp')..createSync();
-    uploadsDir = Directory('${tmp.path}/docs/picked_media')
+    docsDir = Directory('${tmp.path}/docs')..createSync(recursive: true);
+    uploadsDir = Directory('${docsDir.path}/picked_media')
       ..createSync(recursive: true);
     CacheService.dirsOverride = () async => CacheDirs(
           tempDir: tempDir.path,
-          uploadsDir: uploadsDir.path,
+          docsDir: docsDir.path,
         );
+    // 默认不把程序本体算进去，各项断言只关心磁盘上的文件。
+    CacheService.programBytesOverride = () => 0;
     CacheService.maxImageBytes = 1000;
     CacheService.keepImageBytes = 400;
     CacheService.updating = false;
@@ -26,6 +30,7 @@ void main() {
 
   tearDown(() {
     CacheService.dirsOverride = null;
+    CacheService.programBytesOverride = null;
     CacheService.maxImageBytes = 320 * 1024 * 1024;
     CacheService.keepImageBytes = 240 * 1024 * 1024;
     CacheService.updating = false;
@@ -54,13 +59,55 @@ void main() {
     expect(usage.imageBytes, 1000);
     expect(usage.tempBytes, 2000);
     expect(usage.pendingUploadBytes, 3000);
+    expect(usage.pendingUploadCount, 1);
     expect(usage.clearableBytes, 3000);
+  });
+
+  test('四项之和就是 App 总占用（含 picked_media 与 other）', () async {
+    writeFile('${tempDir.path}/album_image_cache/a.jpg', 1000);
+    writeFile('${tempDir.path}/motion_photos/b.mp4', 2000);
+    writeFile('${uploadsDir.path}/c.jpg', 3000);
+    writeFile('${uploadsDir.path}/d.jpg', 500);
+    // 私有目录里既不是缓存也不是副本的部分（数据库、配置等）。
+    writeFile('${docsDir.path}/album.db', 4000);
+    CacheService.programBytesOverride = () => 5000;
+
+    final usage = await CacheService.measure();
+
+    expect(usage.imageBytes, 1000);
+    expect(usage.tempBytes, 2000);
+    expect(usage.pendingUploadBytes, 3500);
+    expect(usage.pendingUploadCount, 2);
+    expect(usage.otherBytes, 4000 + 5000, reason: '其它私有文件 + 程序本体估算');
+    expect(
+      usage.appBytes,
+      usage.imageBytes +
+          usage.tempBytes +
+          usage.pendingUploadBytes +
+          usage.otherBytes,
+      reason: '总占用必须是四项之和',
+    );
+    expect(usage.appBytes, 1000 + 2000 + 3500 + 9000);
+    expect(usage.clearableBytes, 3000, reason: '待上传副本不计入可清理');
+  });
+
+  test('临时目录里的旧副本算待上传副本，不算临时文件', () async {
+    writeFile('${tempDir.path}/picked_media/legacy.jpg', 700);
+    writeFile('${tempDir.path}/motion_photos/b.mp4', 2000);
+
+    final usage = await CacheService.measure();
+
+    expect(usage.tempBytes, 2000);
+    expect(usage.pendingUploadBytes, 700);
+    expect(usage.pendingUploadCount, 1);
   });
 
   test('清理只删图片缓存和临时文件，保留待上传副本', () async {
     final image = writeFile('${tempDir.path}/album_image_cache/a.jpg', 1000);
     final temp = writeFile('${tempDir.path}/motion_photos/b.mp4', 2000);
     final upload = writeFile('${uploadsDir.path}/c.jpg', 3000);
+    // 1.2.48 之前放在临时目录里的旧副本同样不能被清理。
+    final legacy = writeFile('${tempDir.path}/picked_media/d.jpg', 800);
 
     final result = await CacheService.clear();
 
@@ -68,6 +115,7 @@ void main() {
     expect(image.existsSync(), isFalse);
     expect(temp.existsSync(), isFalse);
     expect(upload.existsSync(), isTrue, reason: '待上传副本不能被清理');
+    expect(legacy.existsSync(), isTrue, reason: '旧副本也是待上传数据');
     expect((await CacheService.measure()).clearableBytes, 0);
   });
 

@@ -48,6 +48,41 @@ class PickedMediaCleaner {
     return false;
   }
 
+  /// `picked_media/` 里的全部副本（两个候选目录都扫，按路径去重）。
+  static Future<List<File>> pendingCopies() async {
+    final files = <File>[];
+    final seen = <String>{};
+    for (final root in await _roots()) {
+      final dir = Directory('$root/picked_media');
+      if (!await dir.exists()) continue;
+      try {
+        await for (final entity in dir.list()) {
+          if (entity is! File) continue;
+          if (!seen.add(entity.path)) continue;
+          files.add(entity);
+        }
+      } catch (_) {
+        // 目录不可读时跳过。
+      }
+    }
+    return files;
+  }
+
+  /// 副本的条数与总字节数，用于「存储空间」统计。
+  static Future<({int count, int bytes})> copyStats() async {
+    var count = 0;
+    var bytes = 0;
+    for (final file in await pendingCopies()) {
+      try {
+        bytes += (await file.stat()).size;
+        count += 1;
+      } catch (_) {
+        // 单个文件读不到就跳过。
+      }
+    }
+    return (count: count, bytes: bytes);
+  }
+
   /// 清掉没有被队列引用的副本（崩溃、取消后残留），返回删除数量。
   static Future<int> deleteOrphans(Iterable<String> keepPaths) async {
     final keep = keepPaths.toSet();

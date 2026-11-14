@@ -5,15 +5,25 @@ import 'package:path_provider/path_provider.dart';
 
 import 'media_cache.dart';
 
-/// 缓存涉及的两个目录。
+/// 统计涉及的 App 私有目录。
 class CacheDirs {
-  /// 临时目录：图片缓存、动图临时文件、分享/下载/更新包。
+  /// 临时目录（系统缓存目录）：图片缓存、动图临时文件、分享/下载/更新包。
   final String tempDir;
 
-  /// 待上传副本（不是缓存，清理时绝对不能删）。
-  final String uploadsDir;
+  /// 文档目录：`picked_media/` 待上传副本、数据库等。
+  final String docsDir;
 
-  const CacheDirs({required this.tempDir, required this.uploadsDir});
+  /// 另一个私有目录；Android 上与 [docsDir] 相同，iOS 上不同。
+  final String? supportDir;
+
+  const CacheDirs({
+    required this.tempDir,
+    required this.docsDir,
+    this.supportDir,
+  });
+
+  /// 待上传副本目录（不是缓存，清理时绝对不能删）。
+  String get uploadsDir => '$docsDir/picked_media';
 }
 
 /// 一次统计的结果，单位字节。
@@ -24,22 +34,36 @@ class CacheUsage {
   /// 临时文件：动图提取、分享、下载、更新包等。
   final int tempBytes;
 
-  /// 待上传副本，不计入可清理。
+  /// 待上传副本（`picked_media/`），不是缓存，不计入可清理。
   final int pendingUploadBytes;
+
+  /// 待上传副本的条数。
+  final int pendingUploadCount;
+
+  /// 其它：私有目录里上述之外的部分 + 程序本体估算。
+  final int otherBytes;
 
   const CacheUsage({
     required this.imageBytes,
     required this.tempBytes,
     required this.pendingUploadBytes,
+    required this.pendingUploadCount,
+    required this.otherBytes,
   });
 
   static const CacheUsage empty = CacheUsage(
     imageBytes: 0,
     tempBytes: 0,
     pendingUploadBytes: 0,
+    pendingUploadCount: 0,
+    otherBytes: 0,
   );
 
+  /// 可清理的只有图片缓存与临时文件。
   int get clearableBytes => imageBytes + tempBytes;
+
+  /// App 在本机的总占用：四项之和。
+  int get appBytes => imageBytes + tempBytes + pendingUploadBytes + otherBytes;
 
   bool get isEmpty => clearableBytes == 0;
 }
@@ -50,7 +74,7 @@ class CacheClearResult {
   const CacheClearResult(this.freedBytes);
 }
 
-/// 缓存统计与清理。
+/// 存储统计与清理。
 ///
 /// 设计要点：
 /// - 只清理「可再生」的数据：图片缓存、临时文件；
@@ -62,6 +86,13 @@ class CacheService {
 
   @visibleForTesting
   static Future<CacheDirs> Function()? dirsOverride;
+
+  /// 程序本体估算，测试可替换。
+  @visibleForTesting
+  static int Function()? programBytesOverride;
+
+  /// 读不到安装包时的估值：Flutter 引擎 + Dart 代码 + 资源大致几十 MB。
+  static const int fallbackProgramBytes = 60 * 1024 * 1024;
 
   /// 更新包正在下载时置为 true，清理缓存会跳过 `album_updates`。
   static bool updating = false;
@@ -76,13 +107,23 @@ class CacheService {
   @visibleForTesting
   static int keepImageBytes = MediaCache.keepBytes;
 
+  /// 待上传副本目录名（临时目录里可能还留着 1.2.48 之前的旧副本）。
+  static const String pendingDirName = 'picked_media';
+
   static Future<CacheDirs> _dirs() async {
     if (dirsOverride != null) return dirsOverride!();
     final temp = await getTemporaryDirectory();
     final docs = await getApplicationDocumentsDirectory();
+    String? support;
+    try {
+      support = (await getApplicationSupportDirectory()).path;
+    } catch (_) {
+      // 桌面/测试环境可能没有该插件。
+    }
     return CacheDirs(
       tempDir: temp.path,
-      uploadsDir: '${docs.path}/picked_media',
+      docsDir: docs.path,
+      supportDir: support,
     );
   }
 
@@ -93,19 +134,37 @@ class CacheService {
         '${dirs.tempDir}/${MediaCache.cacheKey}',
         '${dirs.tempDir}/${MediaCache.legacyCacheKey}',
       ]);
+      final pendingDirs = _unique([
+        dirs.uploadsDir,
+        '${dirs.tempDir}/$pendingDirName',
+      ]);
+      var pendingBytes = 0;
+      var pendingCount = 0;
+      for (final path in pendingDirs) {
+        final stats = await _dirStats(path);
+        pendingBytes += stats.bytes;
+        pendingCount += stats.count;
+      }
       var tempBytes = 0;
       for (final entity in await _topLevel(dirs.tempDir)) {
         final name = _basename(entity.path);
-        if (name == MediaCache.cacheKey || name == MediaCache.legacyCacheKey) {
+        if (name == MediaCache.cacheKey ||
+            name == MediaCache.legacyCacheKey ||
+            name == pendingDirName) {
           continue;
         }
         tempBytes += await _sizeOf(entity);
       }
-      final uploadBytes = await _dirSize([dirs.uploadsDir]);
+      final privateBytes = await _privateBytes(dirs);
+      final programBytes = await _programBytes();
+      final other =
+          privateBytes - imageBytes - tempBytes - pendingBytes + programBytes;
       return CacheUsage(
         imageBytes: imageBytes,
         tempBytes: tempBytes,
-        pendingUploadBytes: uploadBytes,
+        pendingUploadBytes: pendingBytes,
+        pendingUploadCount: pendingCount,
+        otherBytes: other > 0 ? other : 0,
       );
     } catch (_) {
       return CacheUsage.empty;
@@ -133,7 +192,7 @@ class CacheService {
         if (name == MediaCache.cacheKey || name == MediaCache.legacyCacheKey) {
           continue;
         }
-        if (name == 'picked_media') continue;
+        if (name == pendingDirName) continue;
         if (name == 'album_updates' && updating) continue;
         await _deleteEntity(entity);
       }
@@ -167,7 +226,7 @@ class CacheService {
       final name = _basename(entity.path);
       if (name == MediaCache.cacheKey ||
           name == MediaCache.legacyCacheKey ||
-          name == 'picked_media' ||
+          name == pendingDirName ||
           (name == 'album_updates' && updating)) {
         continue;
       }
@@ -229,6 +288,93 @@ class CacheService {
     }
   }
 
+  /// 程序本体估算：Android 读安装包，iOS 读 .app bundle，读不到时用估值。
+  static Future<int> _programBytes() async {
+    final override = programBytesOverride;
+    if (override != null) return override();
+    final mobile = Platform.isAndroid || Platform.isIOS;
+    try {
+      if (Platform.isAndroid) {
+        final bytes = await _installedPackageBytes();
+        if (bytes > 0) return bytes;
+      } else if (Platform.isIOS) {
+        final bytes = await _bundleBytes();
+        if (bytes > 0) return bytes;
+      }
+    } catch (_) {
+      // 读不到就退回估值。
+    }
+    return mobile ? fallbackProgramBytes : 0;
+  }
+
+  /// 系统会把安装包映射进进程，从 /proc/self/maps 找出路径再算体积。
+  static Future<int> _installedPackageBytes() async {
+    final maps = File('/proc/self/maps');
+    if (!await maps.exists()) return 0;
+    final paths = <String>{};
+    for (final line in await maps.readAsLines()) {
+      final index = line.indexOf('/data/');
+      if (index < 0) continue;
+      final path = line.substring(index).trim();
+      if (!path.endsWith('.apk')) continue;
+      paths.add(path);
+    }
+    var total = 0;
+    for (final path in paths) {
+      total += await _sizeOf(File(path));
+    }
+    return total;
+  }
+
+  /// iOS：可执行文件所在的 .app 目录就是程序本体。
+  static Future<int> _bundleBytes() async {
+    final executable = Platform.resolvedExecutable;
+    if (executable.isEmpty) return 0;
+    return _sizeOf(File(executable).parent);
+  }
+
+  /// 私有目录总量：临时目录 + 文档目录 + 支持目录（去掉重复与被包含的）。
+  static Future<int> _privateBytes(CacheDirs dirs) async {
+    var total = 0;
+    for (final root in _privateRoots(dirs)) {
+      total += await _sizeOf(Directory(root));
+    }
+    return total;
+  }
+
+  static List<String> _privateRoots(CacheDirs dirs) {
+    final roots = _unique([
+      dirs.tempDir,
+      dirs.docsDir,
+      if (dirs.supportDir != null) dirs.supportDir!,
+    ]);
+    final separator = Platform.pathSeparator;
+    return roots
+        .where((path) => !roots.any(
+              (other) => other != path && path.startsWith('$other$separator'),
+            ))
+        .toList(growable: false);
+  }
+
+  /// 去掉结尾的分隔符并去重，避免同一个目录被统计两次。
+  static List<String> _unique(List<String> paths) {
+    final result = <String>[];
+    for (final raw in paths) {
+      if (raw.isEmpty) continue;
+      final path = _normalize(raw);
+      if (!result.contains(path)) result.add(path);
+    }
+    return result;
+  }
+
+  static String _normalize(String path) {
+    var end = path.length;
+    while (end > 1 && path[end - 1] == Platform.pathSeparator) {
+      end -= 1;
+    }
+    return path.substring(0, end);
+  }
+
   static Future<List<FileSystemEntity>> _topLevel(String dir) async {
     final directory = Directory(dir);
     if (!await directory.exists()) return const [];
@@ -249,6 +395,28 @@ class CacheService {
       total += await _sizeOf(Directory(path));
     }
     return total;
+  }
+
+  /// 目录里的文件数与总字节数。
+  static Future<({int bytes, int count})> _dirStats(String path) async {
+    var bytes = 0;
+    var count = 0;
+    final dir = Directory(path);
+    if (!await dir.exists()) return (bytes: 0, count: 0);
+    try {
+      await for (final item in dir.list(recursive: true, followLinks: false)) {
+        if (item is! File) continue;
+        try {
+          bytes += (await item.stat()).size;
+          count += 1;
+        } catch (_) {
+          // 单个文件失败跳过。
+        }
+      }
+    } catch (_) {
+      // 目录不可读时当作空。
+    }
+    return (bytes: bytes, count: count);
   }
 
   static Future<int> _sizeOf(FileSystemEntity entity) async {
