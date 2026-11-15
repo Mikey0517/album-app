@@ -546,7 +546,8 @@ class _NewAlbumCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // 相册页唯一的卡片：和朋友圈的 PostCard、我的页的卡片组走同一条材质
-    // 路径（[AppCard]：外框 = 内容 + padding，玻璃/不透明两档同一个外框）。
+    // 路径（[AppCard]：外框 = 内容 + padding，玻璃/不透明两档同一个外框），
+    // 档位也同一处（[AppGlassSurface.kCardQuality]：与底部胶囊同档的 premium）。
     // 圆角跟相册格子对齐，避免这一格比旁边「凸出来」。
     //
     // 形状是正方形，边长 = 封面边长：从上沿对齐，和同排封面逐像素重合；

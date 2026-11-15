@@ -61,6 +61,15 @@ class PostApi {
         .toList(growable: false);
   }
 
+  /// 编辑已发布动态的文案；媒体不变，返回带 edited_at 的最新动态。
+  static Future<Post> update(int id, {required String content}) async {
+    final response = await _dio.put<dynamic>(
+      '/api/posts/$id',
+      data: {'content': content},
+    );
+    return Post.fromJson(_asMap(response.data));
+  }
+
   static Future<void> delete(int id) async {
     await _dio.delete<dynamic>('/api/posts/$id');
   }

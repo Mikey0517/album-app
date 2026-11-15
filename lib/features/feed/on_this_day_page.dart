@@ -138,6 +138,12 @@ class _OnThisDayPageState extends State<OnThisDayPage> {
           key: ValueKey('on_this_day_${post.id}'),
           post: post,
           onOpenMedia: _openMedia,
+          onEdited: (updated) {
+            setState(() {
+              final index = _posts.indexWhere((e) => e.id == updated.id);
+              if (index >= 0) _posts[index] = updated;
+            });
+          },
           onDeleted: () {
             setState(() => _posts.removeWhere((e) => e.id == post.id));
           },

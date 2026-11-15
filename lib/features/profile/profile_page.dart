@@ -541,11 +541,12 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
           GestureDetector(
             onTap: _editNickname,
             behavior: HitTestBehavior.opaque,
-            // 头像卡同样是玻璃底子，和下面几组卡片保持一套质感。
+            // 头像卡同样是玻璃底子，和下面几组卡片保持一套质感
+            // （[AppGlassSurface.kCardQuality]：与底部胶囊同档的 premium）。
             child: AppGlassSurface(
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               padding: const EdgeInsets.all(20),
-              requestedQuality: GlassQuality.standard,
+              requestedQuality: AppGlassSurface.kCardQuality,
               child: Row(
                 children: [
                   CircleAvatar(

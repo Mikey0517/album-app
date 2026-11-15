@@ -23,11 +23,17 @@ import '../../core/media_picker.dart';
 import '../../core/media_store.dart';
 import '../../core/motion_photo.dart';
 import '../../core/source_media_cleanup.dart';
+import '../../models/media.dart';
+import '../../models/post.dart';
+import '../../widgets/album_thumb.dart';
 import 'preview/image_preview_page.dart';
 import 'preview/video_preview_page.dart';
 
 class ComposePage extends StatefulWidget {
-  const ComposePage({super.key});
+  /// 非空表示「编辑已发布动态」：文案编辑器同一套，媒体只读展示，不能增删。
+  final Post? editPost;
+
+  const ComposePage({super.key, this.editPost});
 
   @override
   State<ComposePage> createState() => _ComposePageState();
@@ -46,8 +52,26 @@ class _ComposePageState extends State<ComposePage> {
 
   static const int _maxMedias = 9;
 
+  bool get _isEditing => widget.editPost != null;
+
+  @override
+  void initState() {
+    super.initState();
+    // 编辑：把原标题/正文填进同一个编辑器，光标落在末尾。
+    final content = widget.editPost?.content;
+    if (content != null && content.isNotEmpty) {
+      _textCtrl.value = TextEditingValue(
+        text: content,
+        selection: TextSelection.collapsed(offset: content.length),
+      );
+    }
+  }
+
   bool get _hasContent =>
-      _textCtrl.text.trim().isNotEmpty || _medias.isNotEmpty;
+      _textCtrl.text.trim().isNotEmpty ||
+      (_isEditing
+          ? (widget.editPost?.medias.isNotEmpty ?? false)
+          : _medias.isNotEmpty);
 
   bool get _canPublish => _hasContent && !_publishing;
 
@@ -60,10 +84,17 @@ class _ComposePageState extends State<ComposePage> {
     super.dispose();
   }
 
+  bool get _dirty {
+    if (!_hasContent) return false;
+    if (!_isEditing) return true;
+    // 编辑模式下没改文案就走，别拿「放弃编辑？」拦一个什么都没改的人。
+    return _textCtrl.text.trim() != (widget.editPost?.content ?? '').trim();
+  }
+
   Future<void> _onClose() async {
     if (_publishing) return;
     FocusScope.of(context).unfocus();
-    if (!_hasContent) {
+    if (!_dirty) {
       Navigator.of(context).pop();
       return;
     }
@@ -71,9 +102,10 @@ class _ComposePageState extends State<ComposePage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('放弃发布？', style: AppText.titleMedium),
-          content: const Text(
-            '已填写的内容和选择的媒体将不会保留。',
+          title: Text(_isEditing ? '放弃编辑？' : '放弃发布？',
+              style: AppText.titleMedium),
+          content: Text(
+            _isEditing ? '已改动的文案将不会保存。' : '已填写的内容和选择的媒体将不会保留。',
             style: AppText.bodySmall,
           ),
           actions: [
@@ -239,7 +271,38 @@ class _ComposePageState extends State<ComposePage> {
     return List<SourceTarget>.unmodifiable(targets);
   }
 
+  /// 编辑模式：只提交文案，媒体原样保留，成功后把最新动态带回列表。
+  Future<void> _saveEdit() async {
+    if (_publishing || !_hasContent) return;
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _publishing = true;
+      _processingUpload = false;
+      _uploadProgress = null;
+    });
+    try {
+      final updated = await PostApi.update(
+        widget.editPost!.id,
+        content: _textCtrl.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop<Object?>(updated);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _publishing = false;
+        _processingUpload = false;
+        _uploadProgress = 0.0;
+      });
+      _toast(ApiClient.errorText(e));
+    }
+  }
+
   Future<void> _publish() async {
+    if (_isEditing) {
+      await _saveEdit();
+      return;
+    }
     if (_publishing || !_hasContent) return;
     FocusScope.of(context).unfocus();
     setState(() {
@@ -405,8 +468,14 @@ class _ComposePageState extends State<ComposePage> {
                   child: Column(
                     children: [
                       _buildTextField(),
-                      _buildMediaGrid(),
-                      _buildAiButton(),
+                      // 编辑只改文案：媒体只读展示，没有加号、没有删除角标，
+                      // 也没有拖动排序——换图等于换一条动态。
+                      if (_isEditing)
+                        _buildReadOnlyMediaGrid()
+                      else ...[
+                        _buildMediaGrid(),
+                        _buildAiButton(),
+                      ],
                     ],
                   ),
                 ),
@@ -444,7 +513,7 @@ class _ComposePageState extends State<ComposePage> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
             ),
             child: Text(
-              '发表',
+              _isEditing ? '保存' : '发表',
               style: AppText.button.copyWith(
                 fontSize: 16,
                 color: _canPublish ? AppColors.primary : AppColors.textTertiary,
@@ -485,6 +554,39 @@ class _ComposePageState extends State<ComposePage> {
           isDense: true,
           filled: false,
         ),
+      ),
+    );
+  }
+
+  /// 编辑模式下的媒体区：只读，尺寸/间距和发布时一致，位置不跳动。
+  Widget _buildReadOnlyMediaGrid() {
+    final medias = widget.editPost?.medias ?? const <Media>[];
+    if (medias.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: responsiveColumns(context, 3),
+          mainAxisSpacing: 8,
+          crossAxisSpacing: 8,
+        ),
+        itemCount: medias.length,
+        itemBuilder: (context, index) {
+          final media = medias[index];
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              return AlbumThumb(
+                media: media,
+                radius: AppRadius.sm,
+                cacheWidth:
+                    (constraints.maxWidth * MediaQuery.of(context).devicePixelRatio)
+                        .round(),
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -623,7 +725,7 @@ class _ComposePageState extends State<ComposePage> {
                 ),
                 const SizedBox(height: 20),
                 Text(
-                  '正在发布…',
+                  _isEditing ? '正在保存…' : '正在发布…',
                   style: AppText.body.copyWith(
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
@@ -631,31 +733,34 @@ class _ComposePageState extends State<ComposePage> {
                     decoration: TextDecoration.none,
                   ),
                 ),
-                const SizedBox(height: 16),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadius.pill),
-                  child: LinearProgressIndicator(
-                    value: _processingUpload ? null : _uploadProgress,
-                    minHeight: 4,
-                    backgroundColor: AppColors.primaryLight,
-                    valueColor: AlwaysStoppedAnimation(
-                      AppColors.primary,
+                // 编辑没有上传，也就没有百分比可报。
+                if (!_isEditing) ...[
+                  const SizedBox(height: 16),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(AppRadius.pill),
+                    child: LinearProgressIndicator(
+                      value: _processingUpload ? null : _uploadProgress,
+                      minHeight: 4,
+                      backgroundColor: AppColors.primaryLight,
+                      valueColor: AlwaysStoppedAnimation(
+                        AppColors.primary,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _processingUpload
-                      ? '服务器处理中…'
-                      : _uploadProgress == null
-                          ? '准备中…'
-                          : '${(_uploadProgress! * 100).toStringAsFixed(0)}%',
-                  style: AppText.caption.copyWith(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                    decoration: TextDecoration.none,
+                  const SizedBox(height: 8),
+                  Text(
+                    _processingUpload
+                        ? '服务器处理中…'
+                        : _uploadProgress == null
+                            ? '准备中…'
+                            : '${(_uploadProgress! * 100).toStringAsFixed(0)}%',
+                    style: AppText.caption.copyWith(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      decoration: TextDecoration.none,
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),

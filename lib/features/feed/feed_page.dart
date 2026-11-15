@@ -174,6 +174,14 @@ class _FeedPageState extends State<FeedPage> {
     }
   }
 
+  /// 编辑保存后只替换这一条：分页游标和滚动位置都不动。
+  void _replacePost(Post updated) {
+    final index = _posts.indexWhere((e) => e.id == updated.id);
+    if (index < 0) return;
+    setState(() => _posts[index] = updated);
+    _scheduleFloatingDateUpdate();
+  }
+
   void _openMedia(List<Media> medias, int index) {
     Navigator.of(context).push(
       MediaViewerPage.route(
@@ -297,6 +305,7 @@ class _FeedPageState extends State<FeedPage> {
                 key: postKey,
                 post: post,
                 onOpenMedia: _openMedia,
+                onEdited: _replacePost,
                 onDeleted: () {
                   setState(() => _posts.removeWhere((e) => e.id == post.id));
                   _postKeys.remove(post.id);

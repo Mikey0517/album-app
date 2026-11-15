@@ -2,6 +2,7 @@ import 'package:album_app/core/design/accent.dart';
 import 'package:album_app/core/design/colors.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
+import 'package:album_app/widgets/app_card.dart';
 import 'package:album_app/widgets/app_glass.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -232,30 +233,52 @@ void main() {
     });
   });
 
-  group('卡片仍然只吃 standard 的轻量 shader', () {
-    testWidgets('卡片要 standard，胶囊要 premium：两条路分开', (tester) async {
-      // 胶囊：premium；卡片（AppCard glass）在同一棵树里仍然是 standard。
-      await tester.pumpWidget(
-        AppGlassScope(
-          quality: GlassQuality.premium,
-          child: MaterialApp(
-            theme: buildAppTheme(),
-            home: Scaffold(
-              body: Builder(
-                builder: (context) => const Center(
-                  child: AppGlassSurface(
-                    requestedQuality: GlassQuality.standard,
-                    child: Text('卡片'),
-                  ),
-                ),
-              ),
-            ),
+  group('卡片与胶囊同档：一套 premium 参数', () {
+    Widget cardHost({GlassQuality? quality}) {
+      final app = MaterialApp(
+        theme: buildAppTheme(),
+        home: const Scaffold(
+          body: Padding(
+            padding: EdgeInsets.all(16),
+            child: AppCard(glass: true, child: Text('卡片')),
           ),
         ),
       );
+      return quality == null
+          ? app
+          : AppGlassScope(quality: quality, child: app);
+    }
 
-      expect(_container(tester).quality, GlassQuality.standard,
-          reason: '滚动列表里的卡片不能用 premium');
+    testWidgets('注入 premium：卡片的档位与光学参数和 footer 完全一致', (tester) async {
+      await tester.pumpWidget(cardHost(quality: GlassQuality.premium));
+      await tester.pump(const Duration(milliseconds: 50));
+
+      final card = _container(tester);
+      expect(card.quality, GlassQuality.premium);
+      expect(card.useOwnLayer, isFalse,
+          reason: '卡片不自建层（列表里另有 RepaintBoundary 兜着）');
+
+      // footer 那一套：thickness 28 / 折射 1.38 / 色散 0.10 / blur 3。
+      final settings = card.settings!;
+      expect(settings.thickness, 28);
+      expect(settings.refractiveIndex, 1.38);
+      expect(settings.chromaticAberration, 0.10);
+      expect(settings.blur, 3);
+      expect(settings.glassColor.a, closeTo(appGlassChromeTintColor.a, 1e-9),
+          reason: '连 tint 都是胶囊那一份（比磨砂更淡）');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('上限降到 standard：卡片退回磨砂参数，不白屏也不抛异常', (tester) async {
+      await tester.pumpWidget(cardHost(quality: GlassQuality.standard));
+
+      final card = _container(tester);
+      expect(card.quality, GlassQuality.standard);
+      expect(card.settings!.thickness, 12, reason: '磨砂那套光学参数');
+      expect(card.settings!.blur, 8);
+      expect(card.settings!.glassColor.a, closeTo(appGlassTintColor.a, 1e-9));
+      expect(find.text('卡片'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 }

@@ -312,13 +312,21 @@ void main() {
       expect(find.byKey(AppGlassSurface.strokeKey), findsNothing);
     });
 
-    testWidgets('standard 档：卡片本体是玻璃，内容还在', (tester) async {
+    testWidgets('上限降到 standard：卡片退回磨砂档，仍然是一块玻璃', (tester) async {
       await tester.pumpWidget(host(
         const AppCard(glass: true, child: Text('服务器状态')),
         GlassQuality.standard,
       ));
 
       expect(find.byType(GlassContainer), findsOneWidget);
+      expect(
+        tester
+            .widget<GlassContainer>(find.byType(GlassContainer))
+            .settings!
+            .thickness,
+        12,
+        reason: '拿不到 premium 就整块回到磨砂参数，不留半套',
+      );
       expect(find.text('服务器状态'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
@@ -431,21 +439,29 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('每张卡片复用外层 backdrop、要 standard 档，内容有 RepaintBoundary',
+    testWidgets('每张卡片复用外层 backdrop、与 footer 同档 premium，内容有 RepaintBoundary',
         (tester) async {
-      await tester.pumpWidget(host(GlassQuality.standard));
+      await tester.pumpWidget(host(GlassQuality.premium));
       await tester.pump();
 
       final surface =
           tester.widget<AppGlassSurface>(find.byType(AppGlassSurface).first);
       expect(surface.useOwnLayer, isFalse, reason: '别让每张卡片各开一层玻璃');
-      expect(surface.requestedQuality, GlassQuality.standard,
-          reason: 'premium 会每帧抓全屏纹理，列表里不能用');
+      expect(surface.wantedQuality, AppGlassSurface.kCardQuality,
+          reason: '卡片档位只有一个来源：AppGlassSurface.kCardQuality');
+      expect(AppGlassSurface.kCardQuality, AppBottomTabBar.preferredQuality,
+          reason: '卡片和 footer 是同一档（premium）');
 
       final container =
           tester.widget<GlassContainer>(find.byType(GlassContainer));
       expect(container.useOwnLayer, isFalse);
-      expect(container.quality, GlassQuality.standard);
+      expect(container.quality, GlassQuality.premium);
+      // 光学参数与 footer 完全相同：28 / 1.38 / 0.10 / 3。
+      final settings = container.settings!;
+      expect(settings.thickness, 28);
+      expect(settings.refractiveIndex, 1.38);
+      expect(settings.chromaticAberration, 0.10);
+      expect(settings.blur, 3);
       // 滚动时只重绘玻璃层，卡片内容走缓存。
       expect(
         find.descendant(
@@ -454,6 +470,19 @@ void main() {
         ),
         findsWidgets,
       );
+    });
+
+    testWidgets('上限降到 standard：卡片退回磨砂参数，仍然是玻璃', (tester) async {
+      await tester.pumpWidget(host(GlassQuality.standard));
+      await tester.pump();
+
+      final container =
+          tester.widget<GlassContainer>(find.byType(GlassContainer));
+      expect(container.quality, GlassQuality.standard);
+      expect(container.settings!.thickness, 12, reason: '磨砂那套光学参数');
+      expect(container.settings!.blur, 8);
+      expect(find.text('周末去了公园'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('minimal 档：卡片退化成不透明 bgSurface，没有模糊', (tester) async {

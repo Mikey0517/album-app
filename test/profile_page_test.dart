@@ -70,6 +70,22 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('注入 premium：「我的」页的卡片与 footer 同档、同一套参数', (tester) async {
+    await pumpProfile(tester, quality: GlassQuality.premium);
+
+    final containers =
+        tester.widgetList<GlassContainer>(find.byType(GlassContainer)).toList();
+    expect(containers.length, 3, reason: '头像卡 + 服务器存储卡 + 设置组卡');
+    for (final container in containers) {
+      expect(container.quality, GlassQuality.premium);
+      expect(container.settings!.thickness, 28);
+      expect(container.settings!.refractiveIndex, 1.38);
+      expect(container.settings!.chromaticAberration, 0.10);
+      expect(container.settings!.blur, 3);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('minimal 档：同样的卡片全部退化成不透明表面', (tester) async {
     await pumpProfile(tester, quality: GlassQuality.minimal);
 

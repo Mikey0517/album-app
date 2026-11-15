@@ -6,9 +6,11 @@ import 'app_glass.dart';
 
 /// 白底圆角卡片。默认无阴影，靠底色对比建立层次。
 ///
-/// [glass] 为 true 时卡片底子换成玻璃（[AppGlassSurface]）：玻璃不可用或
-/// 自适应档位降到 [GlassQuality.minimal] 时，自动退回不透明
-/// [AppColors.bgSurface]，圆角 / 内外边距都不变。
+/// [glass] 为 true 时卡片底子换成玻璃（[AppGlassSurface]），档位取
+/// [AppGlassSurface.kCardQuality]（现在是 premium，与底部胶囊同一套材质参数，
+/// 要整体回退磨砂只改那一个常量）：玻璃不可用或自适应档位降到
+/// [GlassQuality.minimal] 时，自动退回不透明 [AppColors.bgSurface]，
+/// 圆角 / 内外边距都不变。
 class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry? padding;
@@ -62,8 +64,9 @@ class AppCard extends StatelessWidget {
       return AppGlassSurface(
         radius: effectiveRadius.topLeft.x,
         margin: margin,
-        // 设置页/列表里的卡片：轻量 shader + 复用外层 backdrop。
-        requestedQuality: GlassQuality.standard,
+        // 卡片材质只有一个来源：跟底部胶囊同档的 premium
+        // （[AppGlassSurface.kCardQuality]，改那一行即可全量回退磨砂）。
+        requestedQuality: AppGlassSurface.kCardQuality,
         child: body,
       );
     }

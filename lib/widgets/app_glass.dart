@@ -42,12 +42,12 @@ class AppGlassScope extends InheritedWidget {
 /// 2. 注入或自适应上限已经降到 [GlassQuality.minimal] —— 低端机/过热降档；
 /// 3. 调用点自己要求 minimal。
 ///
-/// [requested] 是调用点想要的档位：列表里的卡片传 standard（包的轻量
-/// shader，文档明确推荐滚动列表用它）；底部胶囊传 premium（全屏只有这一块
-/// 静态 chrome，见 [appGlassPremiumAvailable]）。
+/// [requested] 是调用点想要的档位：底部胶囊与卡片 / 列表项 / 新建相册按钮
+/// 现在都要 premium——同一套材质参数（见 [AppGlassSurface.kCardQuality]）。
 ///
-/// **premium 只用在静态 chrome 上**：它会每帧 toImageSync 抓全屏纹理，滚动
-/// 列表里每张卡片各来一次就是掉帧。卡片永远走 standard。
+/// premium 每帧 toImageSync 抓全屏纹理，滚动列表里每张卡片各来一次有掉帧
+/// 风险。这是「先不管性能、先统一材质」阶段的已知取舍：要回退只改
+/// [AppGlassSurface.kCardQuality] 一行，卡片立刻回到 standard 的轻量 shader。
 ///
 /// [requested] 只是「想要」：[AppGlassScope] 注入的档位与自适应上限才是
 /// 「上限」，取两者更低的那个。所以注入 premium 也不会把要 standard 的卡片
@@ -144,15 +144,18 @@ bool appGlassPremiumDecision({
 Color get appGlassTintColor =>
     AppColors.isDark ? const Color(0x1AFFFFFF) : const Color(0x26D2DCF0);
 
-/// 卡片（standard 档）自己的光学参数：**透**优先，不做磨砂墙。
+/// 磨砂档的光学参数：**透**优先，不做磨砂墙。
+///
+/// 只在 standard 档用：调用点显式要 standard（比如强制更新弹窗）、
+/// [AppGlassSurface.kCardQuality] 回退成 standard，或者 premium 拿不到
+/// （[appGlassPremiumAvailable] 为假）时的整块回退。premium 那一套见
+/// [appGlassChromeSettings]。
 ///
 /// 为什么不用包的 classic 预设：classic 的 tint 只有 12% 白蓝、模糊 5，落在
 /// 纯色页面上「模糊纯色还是纯色」，整块玻璃只剩一点透明度。这里模糊提到 8
 /// 让表面有一点点磨砂质地，但 tint 压到 15%（深色 10%）、saturation 提到
 /// 1.35、lightIntensity 提到 1.0（深色 0.9），把「透亮」交给高光与饱和度，
 /// 而不是靠一层白雾。描边和顶部内高光再由 [AppGlassSurface] 叠一层。
-///
-/// 仍然只吃 standard 的轻量 shader：卡片在滚动列表里，每帧 premium 会掉帧。
 LiquidGlassSettings appGlassSettings(BuildContext context) {
   final dark = AppColors.isDark;
   return LiquidGlassSettings(
@@ -168,19 +171,21 @@ LiquidGlassSettings appGlassSettings(BuildContext context) {
   );
 }
 
-/// 底部胶囊（premium 档）的光学参数：**折射**优先。
+/// premium 档的光学参数：**折射**优先。底部胶囊与卡片 / 列表项 / 新建相册
+/// 按钮共用这一套（卡片通过 [AppGlassSurface.kCardQuality] 拿到它），所以
+/// 卡片和 footer 是同一份数字，视觉上是一套材质。
 ///
 /// 和 [appGlassSettings] 的差别都在「折射能不能看出来」这件事上：
-/// - thickness 28（卡片 12）：斜面越深，边缘的 displacement 越大，胶囊的两条
-///   长边和两个圆角能把底下的内容推歪，这才是「玻璃」而不是「毛玻璃」；
-/// - refractiveIndex 1.38（卡片 1.2）、chromaticAberration 0.10：折射率越高
+/// - thickness 28（磨砂 12）：斜面越深，边缘的 displacement 越大，胶囊的两条
+///   长边和卡片的圆角能把底下的内容推歪，这才是「玻璃」而不是「毛玻璃」；
+/// - refractiveIndex 1.38（磨砂 1.2）、chromaticAberration 0.10：折射率越高
 ///   弯折越明显，色散让边缘出现一圈彩色描边（premium 的 dispersion）；
-/// - blur 3（卡片 8）：模糊压到最低，折射才不会被糊掉——要的是「透」；
-/// - glassColor 比卡片更淡（[appGlassChromeTintColor]）：premium 表面自己
+/// - blur 3（磨砂 8）：模糊压到最低，折射才不会被糊掉——要的是「透」；
+/// - glassColor 比磨砂更淡（[appGlassChromeTintColor]）：premium 表面自己
 ///   已经会采背景色，再叠一层 tint 就回到磨砂；
 /// - lightIntensity 1.0 + rimShade/rimLight：一圈更亮的高光边。
 ///
-/// 只在 [appGlassPremiumAvailable] 为真时使用；不可用时整个胶囊退回
+/// 只在 [appGlassPremiumAvailable] 为真时使用；不可用时整块退回
 /// [appGlassSettings]（磨砂）那一套。
 LiquidGlassSettings appGlassChromeSettings(BuildContext context) {
   final dark = AppColors.isDark;
@@ -307,19 +312,21 @@ Color appGlassScrimBackplate() => AppAccent.compositeOver(
 /// 交给它的话整棵子树（含 scrim 与高光）会一起缩进 padding，外框上就留下
 /// 一条没有高光的边，看上去像「内容」和「留白」两种材质拼起来。
 ///
-/// 性能：列表里的卡片用 useOwnLayer: false（复用外层 backdrop，没有外层时由
-/// 包自己兜底），并显式要 standard 档——包的轻量单通道 shader，官方文档明确
-/// 说它适合滚动列表（premium 每帧 toImageSync 抓纹理，只能用在静态布局）。
-/// 内容再套一层 [RepaintBoundary]：滚动时只重绘玻璃层，卡片里的文字/图片走
-/// 缓存，不会每帧重建。
+/// 材质档位只有一个开关：[kCardQuality]。卡片 / 列表项 / 新建相册按钮不传
+/// [requestedQuality] 时就用它（现在是 premium，与底部胶囊同档）；把它改成
+/// [GlassQuality.standard] 就整批回到磨砂的实现，调用点一行都不用动。
 ///
-/// **两档的实现差别**（[preferPremium] = true 的调用点才有第二条）：
+/// 性能：列表里的卡片保持 useOwnLayer: false（不自建层，交给包的路径处理），
+/// 内容再套一层 [RepaintBoundary]——滚动时只重绘玻璃层，卡片里的文字/图片走
+/// 缓存，不会每帧重建。premium 本身每帧 toImageSync 抓纹理，在滚动列表里有
+/// 掉帧风险；这是「先不管性能、先统一材质」阶段的已知取舍（见 [kCardQuality]）。
+///
+/// **两档的实现差别**：
 /// - premium（[appGlassPremiumAvailable] 为真）：[appGlassChromeSettings] 的
-///   深斜面参数 + 自建渲染层（premium 的 per-widget settings 只在
-///   useOwnLayer 下生效）+ 薄 scrim（[appGlassPremiumScrimAlpha]）；
-/// - 磨砂回退（premium 不可用 / 被自适应降档 / 注入 minimal 以下）：原样
-///   保留 [appGlassSettings] + 42%/50% scrim；连档位都没有时退化成不透明
-///   [AppColors.bgSurface] 圆角块。
+///   深斜面参数 + 薄 scrim（[appGlassPremiumScrimAlpha]）；
+/// - 磨砂回退（premium 不可用 / 被自适应降档 / 开关回退成 standard / 注入
+///   minimal 以下）：原样保留 [appGlassSettings] + 42%/50% scrim；连档位都
+///   没有时退化成不透明 [AppColors.bgSurface] 圆角块。
 /// 两条路布局完全一致（同样的 margin / padding / 圆角），切档不跳版、不白屏。
 class AppGlassSurface extends StatelessWidget {
   const AppGlassSurface({
@@ -346,6 +353,23 @@ class AppGlassSurface extends StatelessWidget {
   /// 玻璃分支的顶部内高光层。
   static const Key highlightKey = Key('app-glass-highlight');
 
+  /// 卡片 / 列表项 / 新建相册按钮的材质档位：**一处回退开关**。
+  ///
+  /// 现在是 [GlassQuality.premium]：和底部胶囊同一套光学参数
+  /// （[appGlassChromeSettings]：thickness 28 / refractiveIndex 1.38 /
+  /// chromaticAberration 0.10 / blur 3），所以三处卡片的材质与 footer 一致。
+  ///
+  /// **回退**：把这一行改成 [GlassQuality.standard]，所有走 [AppCard] /
+  /// 未显式传 [requestedQuality] 的 [AppGlassSurface] 立刻回到磨砂档
+  /// （[appGlassSettings]：12 / 1.2 / 0.02~0.03 / 8）与包的轻量 shader，
+  /// 调用点一处都不用改。底部胶囊另有 [AppBottomTabBar.preferredQuality]，
+  /// 不受这里影响。
+  ///
+  /// 已知风险：premium 每帧 toImageSync 抓全屏纹理，滚动列表里每张卡片各来
+  /// 一次可能掉帧；这一阶段先不降级，只观察。非 Impeller / 自适应降档 /
+  /// 注入 minimal 时仍然整体退回磨砂或完全不透明表面（不会白屏）。
+  static const GlassQuality kCardQuality = GlassQuality.premium;
+
   final Widget child;
 
   /// 圆角半径（直角用 0）。
@@ -359,24 +383,37 @@ class AppGlassSurface extends StatelessWidget {
   /// 不传时退化分支默认给一圈 [AppColors.divider] 细边，胶囊/卡片才有边界。
   final BoxBorder? border;
 
-  /// 调用点想要的档位；见 [glassQualityFor]。
+  /// 调用点想要的档位；见 [glassQualityFor]。不传时用 [kCardQuality]
+  /// （卡片 / 列表项 / 新建相册按钮的开关）。
   final GlassQuality? requestedQuality;
 
-  /// 玻璃是否自建一层渲染上下文。默认 false = 复用外层 backdrop。
+  /// 这一处实际想要的那一档：显式传的 [requestedQuality] 优先，否则
+  /// [kCardQuality]。拿不到 premium 之前不会「降」它的值，降档发生在 build
+  /// 里（[glassQualityFor] 与 [appGlassPremiumAvailable]）。
+  GlassQuality get wantedQuality => requestedQuality ?? kCardQuality;
+
+  /// 玻璃是否自建一层渲染上下文。默认 false。
   ///
-  /// [preferPremium] 真的走成 premium 时这里会被强制打开：premium 的
-  /// per-widget settings 只有在自建层里才生效（包文档：grouped 模式下
-  /// per-widget settings 被忽略）。
+  /// **只有底部胶囊传 true**。卡片 / 列表项保持 false：本 App 没有祖先
+  /// LiquidGlassLayer（main() 只包了自适应 scope），包在没有外层时会自己兜底
+  /// 建层，per-widget settings 照样按本控件的传参生效。调用点保持 false 是为了
+  /// 留住「不自建层」的意图（将来接全局层时卡片不用改），列表滚动时也只重绘
+  /// 内容那层 [RepaintBoundary]。
+  ///
+  /// 注：真有祖先 LiquidGlassLayer 时，grouped 模式会忽略 per-widget settings
+  /// ——那时才需要打开这里。
   final bool useOwnLayer;
 
   /// 是否优先要 premium 档（折射/边缘扭曲）。
   ///
-  /// 只有**静态 chrome**（底部胶囊：全屏一块、不随内容滚动）传 true。
-  /// 传 true 不代表一定用上：拿不到 premium 时由 [appGlassPremiumAvailable]
-  /// 判定并整块退回磨砂实现（[appGlassSettings] + 重 scrim），不留半套参数。
+  /// 底部胶囊（静态 chrome：全屏一块、不随内容滚动）传 true。卡片不用传：
+  /// [kCardQuality] 本身就是 premium。传 true 不代表一定用上：拿不到 premium
+  /// 时由 [appGlassPremiumAvailable] 判定并整块退回磨砂实现
+  /// （[appGlassSettings] + 重 scrim），不留半套参数。
   final bool preferPremium;
 
-  /// 玻璃参数；null 时用 [appGlassSettings]（和 App 里其它玻璃控件同一套）。
+  /// 玻璃参数；null 时按档位取 [appGlassChromeSettings]（premium，和底部
+  /// 胶囊同一套）或 [appGlassSettings]（磨砂回退）。
   final LiquidGlassSettings? settings;
 
   /// 是否在玻璃内部叠一层低透明 scrim（[scrimKey]）。
@@ -395,15 +432,19 @@ class AppGlassSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // premium 只在「调用了 preferPremium 且这一段真的支持」时才生效；
-    // 否则一律走原来的磨砂档（requestedQuality，默认由自适应上限决定）。
-    final premium = preferPremium && appGlassPremiumAvailable(context);
+    // 想要的那一档：调用点显式传的档位优先，否则就是卡片开关 [kCardQuality]。
+    final wanted = wantedQuality;
+    // premium 只在「想要（显式 preferPremium 或档位本身是 premium）且这一段
+    // 真的支持」时才生效；否则一律走磨砂档。
+    final premium = (preferPremium || wanted == GlassQuality.premium) &&
+        appGlassPremiumAvailable(context);
     final quality = glassQualityFor(
       context,
+      // 拿不到 premium 时明确要 standard：包的轻量 shader 只有在显式 standard
+      // 时才跳过「premium 参数 → standard」的归一化，参数才是我们调的那一套。
       requested: premium
           ? GlassQuality.premium
-          : (requestedQuality ??
-              (preferPremium ? GlassQuality.standard : null)),
+          : (wanted == GlassQuality.premium ? GlassQuality.standard : wanted),
     );
     // 只有真的解析成 premium 才切换参数/scrim：降档时连 settings 一起换回来，
     // 不会留下「深斜面 + 薄 scrim」这种既不透也读不清的中间态。
@@ -437,8 +478,8 @@ class AppGlassSurface extends StatelessWidget {
       // 玻璃自己的高光边。
       shape: LiquidRoundedSuperellipse(borderRadius: radius),
       quality: quality,
-      // premium 的 per-widget settings 只在自建层里生效。
-      useOwnLayer: useOwnLayer || premiumActive,
+      // 不自建层：只有底部胶囊显式要 useOwnLayer，卡片保持 false（见字段注释）。
+      useOwnLayer: useOwnLayer,
       settings: settings ??
           (premiumActive
               ? appGlassChromeSettings(context)

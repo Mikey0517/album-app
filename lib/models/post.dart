@@ -6,6 +6,9 @@ class Post {
   final String authorNickname;
   final String? content;
   final DateTime postedAt;
+
+  /// 最后一次编辑时间；null 表示发布后没改过（服务端 edited_at 为空）。
+  final DateTime? editedAt;
   final List<Media> medias;
 
   const Post({
@@ -14,6 +17,7 @@ class Post {
     required this.authorNickname,
     required this.content,
     required this.postedAt,
+    this.editedAt,
     required this.medias,
   });
 
@@ -26,6 +30,7 @@ class Post {
       content: json['content'] as String?,
       postedAt: DateTime.tryParse(json['posted_at'] as String? ?? '') ??
           DateTime.now(),
+      editedAt: DateTime.tryParse(json['edited_at'] as String? ?? ''),
       medias: rawMedias
           .whereType<Map<String, dynamic>>()
           .map(Media.fromJson)

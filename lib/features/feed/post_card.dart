@@ -13,17 +13,22 @@ import '../../models/media.dart';
 import '../../models/post.dart';
 import '../../widgets/album_thumb.dart';
 import '../../widgets/app_glass.dart';
+import 'compose_page.dart';
 
 class PostCard extends StatefulWidget {
   final Post post;
   final void Function(List<Media> medias, int index) onOpenMedia;
   final VoidCallback onDeleted;
 
+  /// 文案改完回来了：列表拿更新后的这条动态就地替换，不用整页重拉。
+  final ValueChanged<Post>? onEdited;
+
   const PostCard({
     super.key,
     required this.post,
     required this.onOpenMedia,
     required this.onDeleted,
+    this.onEdited,
   });
 
   @override
@@ -35,6 +40,19 @@ class _PostCardState extends State<PostCard> {
   bool _deleting = false;
 
   bool get _isMine => widget.post.authorId == CurrentUser.notifier.value?.id;
+
+  /// 编辑入口复用发布页的编辑器：媒体只读，只能改文案。
+  Future<void> _openEdit() async {
+    if (_deleting) return;
+    final updated = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute<Object?>(
+        builder: (context) => ComposePage(editPost: widget.post),
+      ),
+    );
+    if (!mounted || updated is! Post) return;
+    AppEvents.notifyPostChanged();
+    widget.onEdited?.call(updated);
+  }
 
   Future<void> _confirmDelete() async {
     final confirmed = await showDialog<bool>(
@@ -93,14 +111,15 @@ class _PostCardState extends State<PostCard> {
           : Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               // 玻璃只铺在卡片本体上：列表/页面的背景保持不变。
-              // 列表里每张卡片都要一块玻璃，所以显式要 standard 档（包的轻量
-              // shader），并复用外层 backdrop；内容有 RepaintBoundary 兜着，
-              // 滚动时不会每帧重建。降到 minimal / 玻璃不可用时就是不透明的
-              // bgSurface，布局完全一致。
+              // 材质与底部胶囊同档（[AppGlassSurface.kCardQuality]：premium，
+              // 28 / 1.38 / 0.10 / 3）。premium 在滚动列表里可能掉帧，这是
+              // 「先试材质」阶段的已知风险；仍不自建层（useOwnLayer 默认
+              // false），内容有 RepaintBoundary 兜着，滚动时不会每帧重建。
+              // 降到 minimal / 玻璃不可用时就是不透明的 bgSurface，布局完全一致。
               child: AppGlassSurface(
                 radius: AppRadius.lg,
                 padding: const EdgeInsets.all(16),
-                requestedQuality: GlassQuality.standard,
+                requestedQuality: AppGlassSurface.kCardQuality,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -148,11 +167,20 @@ class _PostCardState extends State<PostCard> {
         ),
         const Spacer(),
         Text(formatPostTime(widget.post.postedAt), style: AppText.caption),
+        // 改过就标一下，不解释改了什么。
+        if (widget.post.editedAt != null) ...[
+          const SizedBox(width: 6),
+          const Text('已编辑', style: AppText.caption),
+        ],
         if (_isMine) ...[
           const SizedBox(width: 2),
           PopupMenuButton<String>(
             onSelected: (value) {
-              if (value == 'delete') _confirmDelete();
+              if (value == 'edit') {
+                _openEdit();
+              } else if (value == 'delete') {
+                _confirmDelete();
+              }
             },
             tooltip: '更多',
             padding: EdgeInsets.zero,
@@ -168,6 +196,10 @@ class _PostCardState extends State<PostCard> {
                     color: AppColors.textTertiary,
                   ),
             itemBuilder: (context) => [
+              const PopupMenuItem<String>(
+                value: 'edit',
+                child: Text('编辑'),
+              ),
               PopupMenuItem<String>(
                 value: 'delete',
                 child: Text('删除', style: TextStyle(color: AppColors.danger)),
