@@ -149,7 +149,8 @@ void main() {
     expect(FeedTimeline.monthLabel(DateTime(2024, 8, 20)), '2024年8月');
   });
 
-  testWidgets('空闲时不渲染任何时间轴视觉元素，按下才出现、松手后消失', (tester) async {
+  testWidgets('空闲时只有一条常驻轨道，滑块与月份气泡按下才出现、松手后消失',
+      (tester) async {
     final controller = ScrollController();
     addTearDown(controller.dispose);
     await tester.pumpWidget(
@@ -160,6 +161,8 @@ void main() {
     expect(find.byKey(timelineScrubberThumbKey), findsNothing);
     expect(find.byKey(timelineScrubberLabelKey), findsNothing);
     expect(find.text('2024年8月'), findsNothing);
+    // 轨道本身是常驻的（主色 → 透明的竖渐变）：空闲时也有，只是没有滑块。
+    expect(find.byKey(timelineScrubberTrackKey), findsOneWidget);
 
     final rect = tester.getRect(find.byType(PhotoTimelineScrubber));
     final gesture = await tester.startGesture(rect.center);

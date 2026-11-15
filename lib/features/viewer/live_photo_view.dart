@@ -26,6 +26,11 @@ class LivePhotoView extends StatefulWidget {
   final ValueChanged<bool> onPlayingChanged;
   final ValueChanged<bool>? onZoomChanged;
 
+  /// 仅测试用：注入替身控制器，让测试不必依赖真实平台通道就能看到
+  /// 「正在播放」这一帧的画面。
+  @visibleForTesting
+  final VideoPlayerController Function(Uri url)? controllerFactory;
+
   const LivePhotoView({
     super.key,
     required this.media,
@@ -33,6 +38,7 @@ class LivePhotoView extends StatefulWidget {
     required this.heroTag,
     required this.onPlayingChanged,
     this.onZoomChanged,
+    this.controllerFactory,
   });
 
   @override
@@ -87,10 +93,12 @@ class _LivePhotoViewState extends State<LivePhotoView> {
     try {
       final url = fullUrl(widget.media.liveVideoUrl!);
       debugPrint('动态视频 URL: $url');
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-      );
+      final uri = Uri.parse(url);
+      final controller = widget.controllerFactory?.call(uri) ??
+          VideoPlayerController.networkUrl(
+            uri,
+            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          );
       _video = controller;
       await controller.initialize();
       // 动态照片要带声音播放（和系统相册一致）。
@@ -186,6 +194,17 @@ class _LivePhotoViewState extends State<LivePhotoView> {
 
   String get _stillPath => displayUrl(widget.media.url);
 
+  /// 静态图铺出来的那块矩形的比例。视频层拿它当框：动态照片播放时画面
+  /// 必须在静态图的范围内居中，不能比静态图更大、更不能占满整屏。
+  double? get _stillAspectRatio {
+    final width = widget.media.width;
+    final height = widget.media.height;
+    if (width == null || height == null || width <= 0 || height <= 0) {
+      return null;
+    }
+    return width / height;
+  }
+
   @override
   Widget build(BuildContext context) {
     final video = _video;
@@ -216,10 +235,12 @@ class _LivePhotoViewState extends State<LivePhotoView> {
             ),
           ),
           if (showVideo)
-            // 视频层按修正后的比例 contain 摆放：静态图 4:3、视频带旋转时
-            // 也不会被拉伸或撑满，更不会溢出播放区。
+            // 两层各按自身比例居中：图片层 BoxFit.contain 铺出静态图那块矩形，
+            // 视频层在同一块矩形里 contain（frameAspectRatio），所以视频既不会
+            // 被拉伸，也不会比静态图大一圈去撑满屏幕。
             CorrectedVideoLayer(
               value: video.value,
+              frameAspectRatio: _stillAspectRatio,
               child: VideoPlayer(video),
             ),
           if (_initializing)

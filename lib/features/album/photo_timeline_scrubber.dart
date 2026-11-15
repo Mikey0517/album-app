@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/album_view_settings.dart';
+import '../../core/design/accent.dart';
 import '../../core/design/colors.dart';
 import '../../models/media.dart';
 
@@ -190,6 +191,81 @@ String albumVisibleMonthLabel(
 const Key timelineScrubberThumbKey = ValueKey<String>('timeline-scrubber-thumb');
 const Key timelineScrubberLabelKey = ValueKey<String>('timeline-scrubber-label');
 
+/// 右侧轨道的 key：轨道是常驻的（不按键也在），滑块才是拖拽时浮出的。
+const Key timelineScrubberTrackKey = ValueKey<String>('timeline-scrubber-track');
+
+// ---------------------------------------------------------------------------
+// 时间轴的色调：轨道 / 滑块 / 月份气泡三件套全部从主题色里取，**没有一处是
+// 纯白**。三处使用点（相册详情页、朋友圈相册、朋友圈动态流）都走
+// [PhotoTimelineScrubber]，所以颜色只在这里定义一次，不存在两边不一致。
+// ---------------------------------------------------------------------------
+
+/// 轨道顶端的不透明度：16%（要求区间 10%~18%）。
+///
+/// 轨道本身是「主色 → 透明」的竖向渐变：顶端 16%、底端 0。照片墙是浅色的，
+/// 一条纯白轨道会直接消失；压在主色上既看得出位置，也不会在深色照片上跳。
+const double timelineScrubberTrackAlpha = 0.16;
+
+/// 轨道宽度：3。滑块 6 宽，正好把它整条盖住。
+const double timelineScrubberTrackWidth = 3;
+
+/// 滑块宽度 / 圆角半径（胶囊形）。
+const double timelineScrubberThumbWidth = 6;
+const double timelineScrubberThumbHeight = 44;
+
+/// 滑块离轨道框右边的距离；轨道在滑块后面居中（见
+/// [_timelineScrubberTrackRight]）。
+const double timelineScrubberThumbRight = 6;
+
+/// 轨道在 [_TimelineTrack] 里离右边的距离：滑块居中压住轨道。
+double get _timelineScrubberTrackRight =>
+    timelineScrubberThumbRight +
+    (timelineScrubberThumbWidth - timelineScrubberTrackWidth) / 2;
+
+/// 轨道：主色 → 透明 的竖向渐变（顶端 [timelineScrubberTrackAlpha]）。
+LinearGradient timelineScrubberTrackGradient() => LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [
+        AppColors.primary.withValues(alpha: timelineScrubberTrackAlpha),
+        AppColors.primary.withValues(alpha: 0.0),
+      ],
+      stops: const [0, 1],
+    );
+
+/// 滑块的轻微高光：主体是 [AppColors.primary] 实色，这层白色 28% → 0 盖在
+/// 上沿 55%（[BoxDecoration] 先画 color 再画 gradient，所以底仍是实色）。
+LinearGradient timelineScrubberThumbGradient() => LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [
+        Colors.white.withValues(alpha: 0.28),
+        Colors.white.withValues(alpha: 0.0),
+      ],
+      stops: const [0, 0.55],
+    );
+
+/// 月份气泡的文字与背景之间的最小对比度（WCAG AA 正文）。
+const double timelineMonthBubbleMinContrast = 4.5;
+
+/// 月份气泡背景：主题色的**深色版**（朝黑色压 45%，不够 4.5 就继续压）。
+///
+/// 气泡里是白字，浅色主色（琥珀、暖橙）压 45% 已经够；深色模式的主色被抬亮
+/// 过一档，同样压 45% 落在 4.5 附近，循环再兜一步。所以这里不是写死一个
+/// 十六进制数，而是保证「任意主题色 × 任意明暗」都过 4.5 的那一个。
+Color timelineMonthBubbleColor() {
+  final primary = AppColors.primary;
+  var blend = 0.45;
+  var color = Color.lerp(primary, Colors.black, blend)!;
+  while (AppAccent.contrastRatio(color, Colors.white) <
+          timelineMonthBubbleMinContrast &&
+      blend < 0.90) {
+    blend += 0.05;
+    color = Color.lerp(primary, Colors.black, blend)!;
+  }
+  return color;
+}
+
 /// 右侧的时间轴快速拖拽条，交互对齐小米相册：
 /// 按住上下滑，列表跟手跳到对应位置，同时浮出当前月份，松手后收起。
 ///
@@ -342,10 +418,12 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
         final thumbY = (_thumbY ?? -1000).clamp(0.0, height);
         final active = _thumbY != null;
         // 滑块 44 高、以手指为中线；夹在轨道内，顶端不会露出轨道去压吸顶条。
-        final thumbTop =
-            (thumbY - 22).clamp(0.0, math.max(0.0, height - 44)).toDouble();
-        final bubbleTop =
-            (thumbY - 22).clamp(0.0, math.max(0.0, height - 48)).toDouble();
+        final thumbTop = (thumbY - timelineScrubberThumbHeight / 2)
+            .clamp(0.0, math.max(0.0, height - timelineScrubberThumbHeight))
+            .toDouble();
+        final bubbleTop = (thumbY - timelineScrubberThumbHeight / 2)
+            .clamp(0.0, math.max(0.0, height - 48))
+            .toDouble();
         return GestureDetector(
           behavior: HitTestBehavior.translucent,
           onVerticalDragStart: (details) =>
@@ -360,17 +438,37 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
             clipBehavior: Clip.none,
             alignment: Alignment.centerRight,
             children: [
+              // 常驻轨道：主色 → 透明的竖向渐变（不按也在）。它只是「位置」
+              // 提示，不参与命中测试——整条轨道的拖拽由外面的 GestureDetector
+              // 接管（translucent），所以这里不需要 IgnorePointer。
+              Positioned(
+                top: 0,
+                bottom: 0,
+                right: _timelineScrubberTrackRight,
+                width: timelineScrubberTrackWidth,
+                child: DecoratedBox(
+                  key: timelineScrubberTrackKey,
+                  decoration: BoxDecoration(
+                    borderRadius:
+                        BorderRadius.circular(timelineScrubberTrackWidth / 2),
+                    gradient: timelineScrubberTrackGradient(),
+                  ),
+                ),
+              ),
               if (active) ...[
                 Positioned(
                   top: thumbTop,
-                  right: 6,
+                  right: timelineScrubberThumbRight,
                   child: Container(
                     key: timelineScrubberThumbKey,
-                    width: 6,
-                    height: 44,
+                    width: timelineScrubberThumbWidth,
+                    height: timelineScrubberThumbHeight,
                     decoration: BoxDecoration(
+                      // 主题色实色 + 一道轻微高光（gradient 画在 color 之上）。
                       color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(3),
+                      borderRadius:
+                          BorderRadius.circular(timelineScrubberThumbWidth / 2),
+                      gradient: timelineScrubberThumbGradient(),
                     ),
                   ),
                 ),
@@ -391,6 +489,12 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
   }
 }
 
+/// 月份气泡：背景是主题色的深色版（[timelineMonthBubbleColor]），白字对它的
+/// 对比度恒 ≥ [timelineMonthBubbleMinContrast]。
+///
+/// 不用纯黑 78%：那和「相册」这一屏的配色没关系，浮在时间轴上像另一套 UI。
+/// 深色版主色既保持主题感，又不至于让白字掉到 4.5 以下（深色模式的亮主色也
+/// 在内，循环会继续压暗到过线）。
 class _MonthBubble extends StatelessWidget {
   const _MonthBubble({super.key, required this.text});
 
@@ -402,7 +506,7 @@ class _MonthBubble extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.78),
+        color: timelineMonthBubbleColor(),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Text(

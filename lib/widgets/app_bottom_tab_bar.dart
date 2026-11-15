@@ -51,14 +51,24 @@ List<Shadow> appTabBarHalo(Color color) => [
 /// （[InkWell] 换成了无涟漪的 [GestureDetector] + 显式 [Semantics]）。
 ///
 /// 可读性是这里唯一「加了东西」的地方，两条一起做：
-/// 1. 玻璃内部叠一层低透明 scrim（[AppGlassSurface.scrim]）：磨砂后面的
-///    内容是滚动的照片，颜色会变，未选中的灰字需要一个不跳的底衬；
+/// 1. 玻璃内部叠一层低透明 scrim（[AppGlassSurface.scrim]）：玻璃后面的
+///    内容是滚动的照片，颜色会变，未选中的灰字需要一个不跳的底衬。薄厚跟着
+///    档位走：premium 20%/24%，磨砂回退 42%/50%；
 /// 2. 未选中文字/图标带一圈同色 1px 描边（[appTabBarHalo]，10% 透明度）：
 ///    内容颜色跳到极端时，字边缘也不会糊进去。都是「刚好够」，不做发光。
 ///
-/// 玻璃不可用（没有自适应档位 / initialize 失败）或档位降到
-/// [GlassQuality.minimal] 时，退化成同尺寸、同圆角的不透明
-/// [AppColors.bgSurface] 加一圈细边——不会退回通栏。
+/// **玻璃档位**：胶囊要 premium（折射/边缘扭曲），并且自建渲染层
+/// （[usesOwnLayer]）——premium 的 per-widget settings 只在自建层里生效，
+/// 而它又确实是页面里唯一一块静态 chrome，抓一次纹理不心疼。列表里的卡片
+/// 一律还是 standard（见 [AppGlassSurface.preferPremium] 的注释）。
+/// premium 不可用（非 Impeller / 自适应降档 / initialize 失败 / minimal）时，
+/// [AppGlassSurface] 自己把整块退回磨砂实现，再不行退化成同尺寸、同圆角的
+/// 不透明 [AppColors.bgSurface] 加一圈细边——不会退回通栏，也不会白屏。
+///
+/// **三个页面共用这一份参数**：朋友圈 / 相册 / 我的都由 [HomePage] 渲染
+/// 同一个 [AppBottomTabBar] 实例（见 HomePage 的注释），页面自己不再画
+/// footer。所以「同一组件、同一组参数、同一套 scrim 与档位」是结构上成立的，
+/// [preferredQuality] / [usesOwnLayer] 这两个常量就是那份参数的唯一来源。
 class AppBottomTabBar extends StatelessWidget {
   /// 内容高度（胶囊高度，不含底部安全区与外边距）。
   static const double barHeight = 56;
@@ -94,8 +104,19 @@ class AppBottomTabBar extends StatelessWidget {
   /// 格子。
   static Key tabKey(int index) => ValueKey<String>('bottom-tab-$index');
 
-  /// 想用的玻璃档位；null = 跟随自适应上限。
+  /// 想用的玻璃档位；null = [preferredQuality]（premium），拿不到时由
+  /// [AppGlassSurface] 回退到磨砂档。
   final GlassQuality? requestedQuality;
+
+  /// 胶囊想要的玻璃档位：premium（Impeller 全管线，折射/边缘扭曲）。
+  ///
+  /// 三个页面共用这一个数，改档位只改这里。
+  static const GlassQuality preferredQuality = GlassQuality.premium;
+
+  /// 胶囊自建渲染层：premium 的 per-widget settings 只在自建层里生效。
+  ///
+  /// 只有这一块静态 chrome 值得开；卡片仍然是 useOwnLayer: false。
+  static const bool usesOwnLayer = true;
 
   const AppBottomTabBar({
     super.key,
@@ -135,10 +156,13 @@ class AppBottomTabBar extends StatelessWidget {
       ),
       child: AppGlassSurface(
         radius: radius,
-        requestedQuality: GlassQuality.standard,
-        useOwnLayer: false,
-        // 磨砂后面是滚动的照片：内部再叠一层 42%/50% 的页面底色 scrim，
-        // 未选中的灰字才有一块不随内容跳的底衬（见 appGlassScrimColor）。
+        requestedQuality: requestedQuality ?? preferredQuality,
+        // 静态 chrome 优先 premium（折射）；拿不到时 AppGlassSurface 自己
+        // 退回磨砂档 + 重 scrim，这里不用分支。
+        preferPremium: true,
+        useOwnLayer: usesOwnLayer,
+        // 玻璃后面是滚动的照片：内部叠一层页面底色 scrim，未选中的灰字才有
+        // 一块不随内容跳的底衬。厚度按档位取（premium 20%/24%，回退 42%/50%）。
         scrim: true,
         child: content,
       ),

@@ -22,6 +22,43 @@ import '../../core/media_cache.dart';
 /// 相册页的两个列表：家庭相册 / 私人相册（含别人分享给我的）。
 enum AlbumScope { family, private }
 
+/// 网格水平内边距（16）与列间距（12）：封面边长按它们算，别处不要再写死。
+const double _gridHPadding = 16;
+const double _gridColumnSpacing = 12;
+const double _gridRowSpacing = 16;
+
+/// 相册封面所在格子的 key：封面必须是「一格宽的正方形」。
+/// 「新建相册」按钮用同一个 key 前缀的尺寸，测试据此断言两者一样大。
+const Key albumCoverKey = Key('album-tile-cover');
+
+/// 「新建相册」按钮的 key。
+const Key newAlbumCardKey = Key('new-album-card');
+
+/// 封面下方那两行文字（标题 + 「N 张照片」）的实际高度。
+///
+/// 封面要做成正方形，格子高度就得显式等于「封面边长 + 这段文字高度」；
+/// 继续用 childAspectRatio 的话，网格会反过来把封面压成长方形。这里用
+/// TextPainter 按真实字体度量取高度，文字放大时格子跟着长高，不会溢出。
+double _tileTextBlockHeight(BuildContext context) {
+  final scaler = MediaQuery.textScalerOf(context);
+  double lineHeight(TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(text: '相册名', style: style),
+      textDirection: Directionality.of(context),
+      textScaler: scaler,
+      maxLines: 1,
+    )..layout();
+    return painter.height;
+  }
+
+  // 间距：标题前 8、张数前 2；多留 0.5 兜住亚像素取整。
+  return AppSpacing.sm +
+      lineHeight(AppText.body) +
+      2 +
+      lineHeight(AppText.caption) +
+      0.5;
+}
+
 class CustomAlbumsPage extends StatefulWidget {
   final AlbumScope scope;
 
@@ -299,52 +336,68 @@ class _CustomAlbumsPageState extends State<CustomAlbumsPage> {
     }
 
     final dpr = MediaQuery.of(context).devicePixelRatio;
-    final coverWidth = (MediaQuery.of(context).size.width - 44) / 2;
-    return RefreshIndicator(
-      color: AppColors.primary,
-      onRefresh: _load,
-      child: GridView.builder(
-        // 末尾余量只留半个胶囊高：相册封面一直铺到悬浮胶囊底下，滚到底时
-        // 最后一行能滑出胶囊下沿。
-        padding: const EdgeInsets.fromLTRB(
-          16,
-          8,
-          16,
-          24 + AppBottomTabBar.contentBottomInset,
-        ),
-        physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: _albums.length + 1,
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: responsiveColumns(context, 2),
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 12,
-          childAspectRatio: 0.78,
-        ),
-        itemBuilder: (context, index) {
-          if (index == _albums.length) {
-            return _NewAlbumCard(onTap: _create);
-          }
-          final album = _albums[index];
-          return _AlbumTile(
-            album: album,
-            cacheWidth: (coverWidth * dpr).round(),
-            onTap: () => _open(album),
-            onLongPress: () => _openMenu(album),
-          );
-        },
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 封面边长 = 一列的宽度，跟着列数和间距走；封面是正方形，
+        // 「新建相册」按钮用同一个边长，两者才能逐像素对齐。
+        final columns = responsiveColumns(context, 2);
+        final gridWidth = constraints.maxWidth - _gridHPadding * 2;
+        final coverSize =
+            (gridWidth - _gridColumnSpacing * (columns - 1)) / columns;
+        return RefreshIndicator(
+          color: AppColors.primary,
+          onRefresh: _load,
+          child: GridView.builder(
+            // 末尾余量只留半个胶囊高：相册封面一直铺到悬浮胶囊底下，滚到底时
+            // 最后一行能滑出胶囊下沿。
+            padding: const EdgeInsets.fromLTRB(
+              _gridHPadding,
+              8,
+              _gridHPadding,
+              24 + AppBottomTabBar.contentBottomInset,
+            ),
+            physics: const AlwaysScrollableScrollPhysics(),
+            itemCount: _albums.length + 1,
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: columns,
+              mainAxisSpacing: _gridRowSpacing,
+              crossAxisSpacing: _gridColumnSpacing,
+              // 格子高度 = 正方形封面 + 两行文字。这里不能用 childAspectRatio：
+              // 那个比例只认格子高宽，会把封面重新压成长方形。
+              mainAxisExtent: coverSize + _tileTextBlockHeight(context),
+            ),
+            itemBuilder: (context, index) {
+              if (index == _albums.length) {
+                return _NewAlbumCard(onTap: _create, size: coverSize);
+              }
+              final album = _albums[index];
+              return _AlbumTile(
+                album: album,
+                coverSize: coverSize,
+                cacheWidth: (coverSize * dpr).round(),
+                onTap: () => _open(album),
+                onLongPress: () => _openMenu(album),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }
 
 class _AlbumTile extends StatefulWidget {
   final Album album;
+
+  /// 封面边长（正方形），由网格列数与间距算出。
+  final double coverSize;
   final int cacheWidth;
   final VoidCallback onTap;
   final VoidCallback onLongPress;
 
   const _AlbumTile({
     required this.album,
+    required this.coverSize,
     required this.cacheWidth,
     required this.onTap,
     required this.onLongPress,
@@ -373,7 +426,11 @@ class _AlbumTileState extends State<_AlbumTile> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
+              // 封面：一格宽的正方形，和「新建相册」按钮同尺寸。
+              SizedBox(
+                key: albumCoverKey,
+                width: double.infinity,
+                height: widget.coverSize,
                 child: Container(
                   width: double.infinity,
                   decoration: BoxDecoration(
@@ -481,24 +538,42 @@ class _AlbumTileState extends State<_AlbumTile> {
 class _NewAlbumCard extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _NewAlbumCard({required this.onTap});
+  /// 正方形边长：和同排相册封面的边长是同一个值（网格列宽）。
+  final double size;
+
+  const _NewAlbumCard({required this.onTap, required this.size});
 
   @override
   Widget build(BuildContext context) {
     // 相册页唯一的卡片：和朋友圈的 PostCard、我的页的卡片组走同一条材质
     // 路径（[AppCard]：外框 = 内容 + padding，玻璃/不透明两档同一个外框）。
     // 圆角跟相册格子对齐，避免这一格比旁边「凸出来」。
-    return AppCard(
-      glass: true,
-      onTap: onTap,
-      radius: BorderRadius.circular(AppRadius.md),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.add, size: 32, color: AppColors.textTertiary),
-          const SizedBox(height: 6),
-          const Text('新建相册', style: AppText.caption),
-        ],
+    //
+    // 形状是正方形，边长 = 封面边长：从上沿对齐，和同排封面逐像素重合；
+    // 图标 + 文字在正方形里水平垂直居中。
+    return Align(
+      alignment: Alignment.topCenter,
+      child: SizedBox(
+        key: newAlbumCardKey,
+        width: size,
+        height: size,
+        child: AppCard(
+          glass: true,
+          onTap: onTap,
+          radius: BorderRadius.circular(AppRadius.md),
+          padding: EdgeInsets.zero,
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.add, size: 32, color: AppColors.textTertiary),
+                const SizedBox(height: 6),
+                const Text('新建相册', style: AppText.caption),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

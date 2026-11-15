@@ -344,13 +344,16 @@ void main() {
       expect(strokeDecoration.borderRadius,
           BorderRadius.circular(AppRadius.lg));
 
-      // 高光：白色 12% → 0 的线性渐变，IgnorePointer 盖在内容上不挡点击。
+      // 高光：白色 appGlassHighlightAlpha() → 0 的线性渐变，
+      // IgnorePointer 盖在内容上不挡点击。
       final highlight = tester.widget<DecoratedBox>(
         find.byKey(AppGlassSurface.highlightKey),
       );
       final gradient =
           (highlight.decoration as BoxDecoration).gradient! as LinearGradient;
-      expect(gradient.colors.first.a, closeTo(0.12, 0.001));
+      expect(gradient.colors.first.a, closeTo(appGlassHighlightAlpha(), 1e-9));
+      expect(gradient.colors.first.a, greaterThan(0.12),
+          reason: 'tint 压下去之后高光要更亮，玻璃才不至于「看不见」');
       expect(gradient.colors.last.a, 0.0);
       expect(gradient.begin, Alignment.topCenter);
       // 高光层最近的 IgnorePointer 一定在忽略命中（点击照样落到 tab/卡片）。

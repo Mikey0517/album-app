@@ -17,6 +17,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _index = 0;
+
+  /// 多选态的统一开关：true 时整条 footer 隐藏（三页共用一个策略，见上）。
   bool _hideNavigation = false;
   final GlobalKey<AlbumTabPageState> _albumKey = GlobalKey<AlbumTabPageState>();
 
@@ -34,6 +36,16 @@ class _HomePageState extends State<HomePage> {
   /// 底部导航：一块悬浮胶囊玻璃（见 [AppBottomTabBar]），里面三个 tab 只是
   /// 图标 + 文字，没有滑块/胶囊指示器。玻璃不可用或降到 minimal 时由它自己
   /// 退化成同样的胶囊（不透明底 + 细边），这里不需要再分支。
+  ///
+  /// **三个页面共用这一份 footer**：朋友圈 / 相册 / 我的都排在下面那个
+  /// [IndexedStack] 里，footer 只在 Stack 的最上层渲染一次——组件、参数、
+  /// scrim、玻璃档位（[AppBottomTabBar.preferredQuality] = premium，
+  /// useOwnLayer = true）因此天然是同一套，页面自己一行 footer 代码都没有。
+  /// 改 footer 只改 [AppBottomTabBar]，不存在「某个页面漏了」。
+  ///
+  /// **多选态的统一策略是「隐藏」**：任何页面进入多选态都通过
+  /// [_hideNavigation] 把整条胶囊收起来（不是变形为选择栏），相册的多选栏
+  /// 由相册页自己画在底部。三个页面走同一个标志位，所以行为一致。
   ///
   /// 它盖在页面上面（Stack 里排在 IndexedStack 之后），不占 Scaffold 的
   /// bottomNavigationBar 槽位：页面内容一直铺到屏幕底边，胶囊背后才有真实

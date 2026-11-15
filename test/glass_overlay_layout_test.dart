@@ -124,6 +124,27 @@ void main() {
     expect(scaffold.extendBody, isTrue);
     expect(find.byType(AppGlassBackdrop), findsOneWidget);
 
+    // 头部也是透明的、无底色：和朋友圈 / 我的同一套，分类标题直接浮在
+    // AppGlassBackdrop 那层渐变/背景图上，不再是一条不透明的页面底色。
+    final appBar = tester.widget<AppBar>(find.byType(AppBar));
+    expect(appBar.backgroundColor, Colors.transparent,
+        reason: '相册总页头部不许有底色（要求：背景透上来）');
+    expect(appBar.surfaceTintColor, Colors.transparent);
+    expect(appBar.scrolledUnderElevation, 0,
+        reason: '滚动时 M3 的「变色」也要关掉，背景不许被整块遮住');
+    expect(appBar.elevation, 0, reason: '头部不投阴影');
+    // 头部那一块 AppBar 自己的 Material 也不上色，背景才透得上来。
+    final headerMaterial = tester.widget<Material>(
+      find
+          .descendant(
+            of: find.byType(AppBar),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+    expect(headerMaterial.color, Colors.transparent,
+        reason: 'AppBar 的 Material 一旦上色就整块盖住背景');
+
     // 页面 body 直接就是内容分栏：多选态（胶囊隐藏）时也不会留下空隙，
     // 因为这里根本没有为胶囊预留高度的内边距。
     final body = scaffold.body!;

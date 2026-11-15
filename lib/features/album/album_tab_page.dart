@@ -64,8 +64,9 @@ class AlbumTabPageState extends State<AlbumTabPage> {
 
   @override
   Widget build(BuildContext context) {
-    // 和朋友圈 / 我的同一套底：渐变铺满整页，Scaffold 自己透明，网格从
-    // 悬浮胶囊底下穿过去，胶囊才有东西可模糊。
+    // 和朋友圈 / 我的同一套底：渐变（或用户自定义背景图）铺满整页，
+    // Scaffold 与 AppBar 都不上色，网格从悬浮胶囊底下穿过去，胶囊才有东西
+    // 可模糊、头部才有背景可透。
     return AppGlassBackdrop(
       child: Scaffold(
         backgroundColor: Colors.transparent,
@@ -74,6 +75,16 @@ class AlbumTabPageState extends State<AlbumTabPage> {
           // 相册总页的「分类」是这一页的层级，用标题 + 下拉表达；相册详情页里
           // 的「全部/照片/视频」才是页内筛选（分段条）。两者形式必须区分开。
           // 高度压到 48：标题行下面直接是内容，不再夹一条 46 高的分段条带子。
+          //
+          // 头部透明、无底色：和朋友圈 / 我的同一套写法（Scaffold 透明 +
+          // [AppGlassBackdrop] 铺满整页），分类标题直接浮在那层渐变/背景图上，
+          // 不再是一条不透明的页面底色。滚动时也不许「整块盖住」：
+          // scrolledUnderElevation 归零、surfaceTint 透明，M3 的滚动变色/阴影
+          // 两个来源都关掉，背景从头到尾透出来。
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
           toolbarHeight: _toolbarHeight,
           centerTitle: true,
           leading: _feedEditing
