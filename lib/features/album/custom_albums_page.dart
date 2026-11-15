@@ -12,6 +12,7 @@ import '../../core/url_utils.dart';
 import '../../models/album.dart';
 import '../../widgets/app_bottom_tab_bar.dart';
 import '../../widgets/app_card.dart';
+import '../../widgets/app_glass.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
 import 'album_detail_page.dart';
@@ -312,7 +313,8 @@ class _CustomAlbumsPageState extends State<CustomAlbumsPage> {
     if (_albums.isEmpty) {
       return RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: _load,
+        // 刷新期间卡片玻璃暂停（同色不透明表面），结束恢复 premium。
+        onRefresh: () => appGlassWhileRefreshing(_load),
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
@@ -346,7 +348,7 @@ class _CustomAlbumsPageState extends State<CustomAlbumsPage> {
             (gridWidth - _gridColumnSpacing * (columns - 1)) / columns;
         return RefreshIndicator(
           color: AppColors.primary,
-          onRefresh: _load,
+          onRefresh: () => appGlassWhileRefreshing(_load),
           child: GridView.builder(
             // 末尾余量只留半个胶囊高：相册封面一直铺到悬浮胶囊底下，滚到底时
             // 最后一行能滑出胶囊下沿。
@@ -568,9 +570,11 @@ class _NewAlbumCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.add, size: 32, color: AppColors.textTertiary),
+                // 图标与文字都在玻璃卡上：用「玻璃上的」深一档 token，
+                // 浅色模式下原来的 textTertiary + caption 只有 2~3:1。
+                Icon(Icons.add, size: 32, color: AppColors.textOnGlass),
                 const SizedBox(height: 6),
-                const Text('新建相册', style: AppText.caption),
+                Text('新建相册', style: AppText.captionOnGlass),
               ],
             ),
           ),

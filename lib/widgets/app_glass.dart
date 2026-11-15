@@ -1,7 +1,8 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart'
+    show kIsWeb, defaultTargetPlatform, TargetPlatform, ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
@@ -39,31 +40,33 @@ class AppGlassScope extends InheritedWidget {
 /// 三种情况一律退回不透明：
 /// 1. 拿不到任何档位 —— main() 里 initialize 失败 / 没包 wrap，此时画玻璃
 ///    只会画出一片空白（旧版 HomePage/FeedPage 就是这么判断的）；
-/// 2. 注入或自适应上限已经降到 [GlassQuality.minimal] —— 低端机/过热降档；
+/// 2. 上限是 [GlassQuality.minimal] —— 只有平台压根不支持 shader 时才会
+///    出现（见 [appGlassStaticQuality]），不再有运行时降档；
 /// 3. 调用点自己要求 minimal。
 ///
 /// [requested] 是调用点想要的档位：底部胶囊与卡片 / 列表项 / 新建相册按钮
 /// 现在都要 premium——同一套材质参数（见 [AppGlassSurface.kCardQuality]）。
 ///
-/// premium 每帧 toImageSync 抓全屏纹理，滚动列表里每张卡片各来一次有掉帧
-/// 风险。这是「先不管性能、先统一材质」阶段的已知取舍：要回退只改
-/// [AppGlassSurface.kCardQuality] 一行，卡片立刻回到 standard 的轻量 shader。
+/// premium 走的是实时 BackdropFilter 采样 + 全管线 shader，滚动列表里每张卡片
+/// 各来一次仍有掉帧风险。这是「先不管性能、先统一材质」阶段的已知取舍：要回退
+/// 只改 [AppGlassSurface.kCardQuality] 一行，卡片立刻回到 standard 的轻量 shader。
 ///
-/// [requested] 只是「想要」：[AppGlassScope] 注入的档位与自适应上限才是
-/// 「上限」，取两者更低的那个。所以注入 premium 也不会把要 standard 的卡片
-/// 顶成 premium；自适应降档也能立刻把 premium 胶囊按回 standard（包里
-/// GlassThemeHelpers.resolveQuality 对显式 quality 同样按上限封顶，这里先
-/// 算一遍是为了让本文件的参数/scrim 分支与真正的档位始终一致）。
+/// [requested] 只是「想要」：[AppGlassScope] 注入的档位才是「上限」，取两者
+/// 更低的那个。所以注入 premium 也不会把要 standard 的卡片顶成 premium；
+/// 但上限本身是**静态**的（[appGlassRoot]），不会因为掉帧/刷新被按下去
+/// （包里 GlassThemeHelpers.resolveQuality 对显式 quality 同样按上限封顶，
+/// 这里先算一遍是为了让本文件的参数/scrim 分支与真正的档位始终一致）。
 GlassQuality? glassQualityFor(
   BuildContext context, {
   GlassQuality? requested,
 }) {
   final injected = AppGlassScope.qualityOf(context);
-  final ceiling = GlassAdaptiveScopeData.maybeOf(context)?.effectiveQuality;
+  // 只认注入的静态档位。就算树里还有别处塞进来的 [GlassAdaptiveScope]（旧版
+  // wrap / 第三方页面），也不再拿它的 effectiveQuality 当上限——档位不许随
+  // 帧耗时变化。测试里那条「注入 minimal」的钩子仍然走 [AppGlassScope]。
+  final cap = injected;
   // 没有档位来源 = 玻璃不可用：不画。
-  if (injected == null && ceiling == null) return null;
-  // 注入档位与自适应上限都是「上限」：谁低听谁。
-  final cap = _lowerQuality(injected, ceiling);
+  if (cap == null) return null;
   if (cap == GlassQuality.minimal) return null;
   final quality = _lowerQuality(requested, cap);
   if (quality == null || quality == GlassQuality.minimal) return null;
@@ -94,23 +97,132 @@ GlassQuality? _lowerQuality(GlassQuality? a, GlassQuality? b) {
 bool get appGlassPremiumPlatformSupported =>
     !kIsWeb && ui.ImageFilter.isShaderFilterSupported;
 
+/// 这台机器的**静态**玻璃档位：启动时按平台能力判一次，之后再也不变。
+///
+/// 用户要求「不要让材质回退」，所以档位不再来自随帧率升降的
+/// [GlassAdaptiveScope]（见 [appGlassRoot]），只剩这一条静态判定：
+/// - shader filter 都不支持（软件光栅器 / 坏驱动）→ [GlassQuality.minimal]：
+///   连磨砂 shader 都跑不起来，只能画不透明表面；
+/// - 平台把 premium 封顶（Web / Windows / Linux）→ [GlassQuality.standard]：
+///   退回磨砂档，玻璃还在；
+/// - 其余（Impeller + shader）→ [GlassQuality.premium]。
+///
+/// 结论：只有「平台根本不支持」才退，和掉帧/刷新/过热无关。
+GlassQuality appGlassStaticQuality() => appGlassStaticQualityFor(
+      shaderFilterSupported: ui.ImageFilter.isShaderFilterSupported,
+      premiumCappedPlatform: kIsWeb ||
+          defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux,
+    );
+
+/// [appGlassStaticQuality] 的纯函数内核，便于逐条断言。
+///
+/// 判定顺序固定：**先看 shader 有没有，再看平台封不封 premium**。
+/// 两者都是静态事实，没有任何时间/性能输入——这正是「不会自动降档」的保证。
+GlassQuality appGlassStaticQualityFor({
+  required bool shaderFilterSupported,
+  required bool premiumCappedPlatform,
+}) {
+  if (!shaderFilterSupported) return GlassQuality.minimal;
+  if (premiumCappedPlatform) return GlassQuality.standard;
+  return GlassQuality.premium;
+}
+
+/// App 根节点：注入**静态**档位，并初始化过的玻璃运行时。
+///
+/// 与旧版 `LiquidGlassWidgets.wrap(adaptiveQuality: true)` 的差别只有一条，
+/// 但正是问题 A 的根因：旧版会插入一个根 [GlassAdaptiveScope]，它在 P95 光栅
+/// 耗时超过帧预算 1.5 倍（16ms → 24ms）、连续 2 个窗口（每窗 120 帧 ≈ 2 秒）后
+/// 把 premium 按到 standard/minimal，而回升要 10 个连续达标窗口（P95 < 9.6ms）
+/// 加 8 秒冷却——下拉刷新掉几帧就够跨过降档门槛，且降下去几十秒回不来，
+/// 真机表现就是「刷一下就退回磨砂」。
+///
+/// 现在：
+/// - `adaptiveQuality: false`：不再插入任何会自己升降档的 scope；
+/// - [appGlassStaticQuality] 把档位钉死（premium / standard / minimal 三选一），
+///   通过 [AppGlassScope] 注入整棵树，[glassQualityFor] 拿它当上限；
+/// - 包内 Per-widget 的显式 quality 在没有 [GlassAdaptiveScope] 时原样生效
+///   （`GlassThemeHelpers.resolveQuality`：没有 adaptive 数据就直接返回显式值）。
+/// [quality] 是给测试用的：默认走静态判定，测试里可以钉成 premium 来断言
+/// 「跑多少慢帧都不降档」，不受跑测试那台机器的 shader 能力影响。
+Widget appGlassRoot(Widget child, {GlassQuality? quality}) => AppGlassScope(
+      quality: quality ?? appGlassStaticQuality(),
+      child: LiquidGlassWidgets.wrap(
+        child: child,
+        // 关掉自适应降档：档位不许随帧耗时变化。
+        adaptiveQuality: false,
+        // 玻璃控件零 material 依赖，深色模式要靠这个回调感知 ThemeMode。
+        brightnessResolver: Theme.maybeBrightnessOf,
+      ),
+    );
+
+/// 下拉刷新期间的「玻璃暂停」开关。
+///
+/// 刷新这几百毫秒里列表整体重建、RefreshIndicator 还会在列表上方叠一层动画，
+/// 卡片 premium 采样的 backdrop 在这几帧里不稳定（真机上是卡片局部发黑 /
+/// 透明度忽明忽暗）。与其猜哪一帧是坏的，不如在这段时间把卡片换成**同色不透明
+/// 表面**：颜色 / 圆角 / 内外边距都不变，只是不画玻璃。刷新一结束立刻回到
+/// premium——档位本身从未改变，变的只是这几帧画什么。
+///
+/// 只影响「想要 premium 的卡片」（[AppGlassSurface.pauseDuringRefresh]）；
+/// 底部胶囊这类静态 chrome 不受影响。开关由 [appGlassWhileRefreshing] 包住
+/// 一次刷新任务来驱动（feed / 相册页的 RefreshIndicator.onRefresh 都走它）。
+class AppGlassRefreshHold {
+  AppGlassRefreshHold._();
+
+  static final ValueNotifier<bool> _active = ValueNotifier<bool>(false);
+
+  /// 当前是否处于刷新保持中（[AppGlassSurface] 监听它重建）。
+  static ValueListenable<bool> get active => _active;
+
+  static bool get isActive => _active.value;
+
+  /// 进入刷新保持：卡片换成不透明表面。
+  static void begin() => _active.value = true;
+
+  /// 退出刷新保持：卡片回到 premium。
+  static void end() => _active.value = false;
+
+  /// 测试用：把开关恢复成「不在刷新」，避免用例之间串味。
+  @visibleForTesting
+  static void reset() => _active.value = false;
+}
+
+/// 跑一次刷新任务，期间 [AppGlassRefreshHold] 全程生效。
+///
+/// 用法：`onRefresh: () => appGlassWhileRefreshing(() => _load(refresh: true))`。
+/// `finally` 里释放：请求抛异常、页面提前 dispose 都不会把卡片钉在不透明面上。
+///
+/// 为什么不用 RefreshIndicator.onStatusChange：Flutter 3.41 里那个回调只挂在
+/// `RefreshIndicator.noSpinner` 构造上，默认构造没有。而真正会抖的窗口就是
+/// onRefresh 这一段时间（列表重建 + 数据回来那一帧），从这里掐住刚好。
+Future<T> appGlassWhileRefreshing<T>(Future<T> Function() task) async {
+  AppGlassRefreshHold.begin();
+  try {
+    return await task();
+  } finally {
+    AppGlassRefreshHold.end();
+  }
+}
+
 /// 这一处玻璃能不能真的用 premium 档（折射/边缘扭曲）。
 ///
-/// 三个输入按优先级：
-/// 1. [AppGlassScope] 注入的档位（测试钩子）——注入什么就是什么上限；
-/// 2. 自适应上限 [GlassAdaptiveScopeData.effectiveQuality]——真机降档后
-///    premium 立刻不可用，自动回到磨砂（standard）+ 重 scrim 的实现；
-/// 3. [platformSupported]（默认 [appGlassPremiumPlatformSupported]）。
+/// 两个输入按优先级：
+/// 1. [AppGlassScope] 注入的静态档位（[appGlassRoot] 装的那个 / 测试钩子）
+///    ——注入什么就是什么上限；
+/// 2. [platformSupported]（默认 [appGlassPremiumPlatformSupported]）。
 ///
-/// 返回 false 时调用点必须走原来的磨砂实现（[appGlassSettings] + 42%/50%
-/// scrim），不允许留下「半套 premium 参数」的白板：见 [AppGlassSurface]。
+/// 不再读 [GlassAdaptiveScopeData]：运行期降档那条路已经关掉了，档位只由
+/// [appGlassStaticQuality] 决定。返回 false 时调用点必须走原来的磨砂实现
+/// （[appGlassSettings] + 42%/50% scrim），不允许留下「半套 premium 参数」的
+/// 白板：见 [AppGlassSurface]。
 bool appGlassPremiumAvailable(
   BuildContext context, {
   bool? platformSupported,
 }) =>
     appGlassPremiumDecision(
       injected: AppGlassScope.qualityOf(context),
-      ceiling: GlassAdaptiveScopeData.maybeOf(context)?.effectiveQuality,
+      ceiling: null,
       platformSupported: platformSupported ?? appGlassPremiumPlatformSupported,
     );
 
@@ -295,6 +407,20 @@ Color appGlassScrimBackplate() => AppAccent.compositeOver(
       AppAccent.compositeOver(appGlassTintColor, AppColors.bgPage),
     );
 
+/// **卡片**上文字实际落上去的底色（没有 scrim 那一层）。
+///
+/// 卡片不带 scrim（[AppGlassSurface.scrim] 默认 false），所以底衬只有「玻璃
+/// tint 叠页面底色」这一层：premium 用 [appGlassChromeTintColor]（10%/7%），
+/// 磨砂回退用 [appGlassTintColor]（15%/10%）。两者都是半透明色，单独算对比度
+/// 没有意义——先按 [AppAccent.compositeOver] 合成成不透明色再算。
+///
+/// 页面底图/渐变会让真实底衬在这个值上下浮动，所以对比度断言取这条「最典型」
+/// 的底（页面底色），和 [appGlassPremiumScrimBackplate] 是同一个约定。
+Color appGlassCardBackplate({bool premium = true}) => AppAccent.compositeOver(
+      premium ? appGlassChromeTintColor : appGlassTintColor,
+      AppColors.bgPage,
+    );
+
 /// 一块玻璃底子：卡片、底部栏这种「背景」用它，交互控件不用。
 ///
 /// 降级到不透明时只有一个 [AppColors.bgSurface] 圆角块，布局与玻璃分支
@@ -318,16 +444,18 @@ Color appGlassScrimBackplate() => AppAccent.compositeOver(
 ///
 /// 性能：列表里的卡片保持 useOwnLayer: false（不自建层，交给包的路径处理），
 /// 内容再套一层 [RepaintBoundary]——滚动时只重绘玻璃层，卡片里的文字/图片走
-/// 缓存，不会每帧重建。premium 本身每帧 toImageSync 抓纹理，在滚动列表里有
-/// 掉帧风险；这是「先不管性能、先统一材质」阶段的已知取舍（见 [kCardQuality]）。
+/// 缓存，不会每帧重建。premium 每帧采样 backdrop 走全管线 shader，在滚动列表
+/// 里有掉帧风险；这是「先不管性能、先统一材质」阶段的已知取舍
+/// （见 [kCardQuality]），但掉帧**不会**再让它降档（见 [appGlassRoot]）。
 ///
-/// **两档的实现差别**：
+/// **三档的实现差别**：
 /// - premium（[appGlassPremiumAvailable] 为真）：[appGlassChromeSettings] 的
 ///   深斜面参数 + 薄 scrim（[appGlassPremiumScrimAlpha]）；
-/// - 磨砂回退（premium 不可用 / 被自适应降档 / 开关回退成 standard / 注入
-///   minimal 以下）：原样保留 [appGlassSettings] + 42%/50% scrim；连档位都
-///   没有时退化成不透明 [AppColors.bgSurface] 圆角块。
-/// 两条路布局完全一致（同样的 margin / padding / 圆角），切档不跳版、不白屏。
+/// - 磨砂回退（premium 不可用 / 开关回退成 standard / 注入 standard）：原样
+///   保留 [appGlassSettings] + 42%/50% scrim；
+/// - 不透明（平台不支持 shader / 注入 minimal / 下拉刷新保持）：不透明
+///   [AppColors.bgSurface] 圆角块，见 [pauseDuringRefresh]。
+/// 三条路布局完全一致（同样的 margin / padding / 圆角），切档不跳版、不白屏。
 class AppGlassSurface extends StatelessWidget {
   const AppGlassSurface({
     super.key,
@@ -342,6 +470,7 @@ class AppGlassSurface extends StatelessWidget {
     this.settings,
     this.scrim = false,
     this.scrimColor,
+    this.pauseDuringRefresh = true,
   });
 
   /// 玻璃分支的前景描边层。
@@ -365,9 +494,10 @@ class AppGlassSurface extends StatelessWidget {
   /// 调用点一处都不用改。底部胶囊另有 [AppBottomTabBar.preferredQuality]，
   /// 不受这里影响。
   ///
-  /// 已知风险：premium 每帧 toImageSync 抓全屏纹理，滚动列表里每张卡片各来
-  /// 一次可能掉帧；这一阶段先不降级，只观察。非 Impeller / 自适应降档 /
-  /// 注入 minimal 时仍然整体退回磨砂或完全不透明表面（不会白屏）。
+  /// 已知风险：premium 每帧采样 backdrop，滚动列表里每张卡片各来一次可能掉帧；
+  /// 这一阶段先不降级，只观察——掉帧也不会自动降档（[appGlassRoot] 关掉了那条
+  /// 路）。只有平台不支持 shader（静态档位 minimal）/ 注入 minimal 时才整体退回
+  /// 不透明表面，平台封顶 premium 时退回磨砂（不会白屏）。
   static const GlassQuality kCardQuality = GlassQuality.premium;
 
   final Widget child;
@@ -395,7 +525,7 @@ class AppGlassSurface extends StatelessWidget {
   /// 玻璃是否自建一层渲染上下文。默认 false。
   ///
   /// **只有底部胶囊传 true**。卡片 / 列表项保持 false：本 App 没有祖先
-  /// LiquidGlassLayer（main() 只包了自适应 scope），包在没有外层时会自己兜底
+  /// LiquidGlassLayer（main() 只注入静态档位，不建层），包在没有外层时会自己兜底
   /// 建层，per-widget settings 照样按本控件的传参生效。调用点保持 false 是为了
   /// 留住「不自建层」的意图（将来接全局层时卡片不用改），列表滚动时也只重绘
   /// 内容那层 [RepaintBoundary]。
@@ -430,22 +560,51 @@ class AppGlassSurface extends StatelessWidget {
   /// [appGlassPremiumScrimColor]（20%/24%）。
   final Color? scrimColor;
 
+  /// 下拉刷新期间是否临时换成**同色不透明表面**（见 [AppGlassRefreshHold]）。
+  ///
+  /// 默认 true，但只对「想要 premium、又不是静态 chrome」的表面生效：
+  /// [preferPremium] 为 true 的底部胶囊不受影响（它背后是页面底图，刷新时也
+  /// 不跟着变）。刷新那几帧卡片本来就要整体重建、premium 采样的 backdrop 不
+  /// 稳定（真机表现是局部发黑/透明度跳），换成 bgSurface 圆角块最稳——布局、
+  /// 圆角、内外边距一模一样，刷新一结束立刻回到 premium。
+  final bool pauseDuringRefresh;
+
   @override
   Widget build(BuildContext context) {
+    // 刷新开关一变就重建：开关只在真刷新期间变，平时没有额外开销。
+    return ValueListenableBuilder<bool>(
+      valueListenable: AppGlassRefreshHold.active,
+      builder: (context, refreshHeld, _) =>
+          _buildSurface(context, refreshHeld: refreshHeld),
+    );
+  }
+
+  /// 真正画表面的地方；[refreshHeld] 来自 [AppGlassRefreshHold]。
+  Widget _buildSurface(BuildContext context, {required bool refreshHeld}) {
     // 想要的那一档：调用点显式传的档位优先，否则就是卡片开关 [kCardQuality]。
     final wanted = wantedQuality;
     // premium 只在「想要（显式 preferPremium 或档位本身是 premium）且这一段
     // 真的支持」时才生效；否则一律走磨砂档。
     final premium = (preferPremium || wanted == GlassQuality.premium) &&
         appGlassPremiumAvailable(context);
-    final quality = glassQualityFor(
-      context,
-      // 拿不到 premium 时明确要 standard：包的轻量 shader 只有在显式 standard
-      // 时才跳过「premium 参数 → standard」的归一化，参数才是我们调的那一套。
-      requested: premium
-          ? GlassQuality.premium
-          : (wanted == GlassQuality.premium ? GlassQuality.standard : wanted),
-    );
+    // 刷新保持：想要 premium 的卡片这几帧先不画玻璃（档位本身不动）。
+    final refreshPaused = refreshHeld &&
+        pauseDuringRefresh &&
+        !preferPremium &&
+        wanted == GlassQuality.premium;
+    final quality = refreshPaused
+        ? null
+        : glassQualityFor(
+            context,
+            // 拿不到 premium 时明确要 standard：包的轻量 shader 只有在显式
+            // standard 时才跳过「premium 参数 → standard」的归一化，参数才是
+            // 我们调的那一套。
+            requested: premium
+                ? GlassQuality.premium
+                : (wanted == GlassQuality.premium
+                    ? GlassQuality.standard
+                    : wanted),
+          );
     // 只有真的解析成 premium 才切换参数/scrim：降档时连 settings 一起换回来，
     // 不会留下「深斜面 + 薄 scrim」这种既不透也读不清的中间态。
     final premiumActive = premium && quality == GlassQuality.premium;
@@ -461,6 +620,8 @@ class AppGlassSurface extends StatelessWidget {
       // 用 DecoratedBox 而不是 Container：Container 会把 decoration 的
       // 描边宽度算进布局，底部栏那条 1px 描边会让整条栏高变成 57。
       // 退化分支的底子已经不透明（[AppColors.bgSurface]），不需要 scrim。
+      // 刷新保持（[refreshPaused]）走的就是这条分支：同色不透明表面、布局
+      // 一模一样，刷新一结束立刻回到 premium（档位从未被改过）。
       Widget opaque = DecoratedBox(
         decoration: BoxDecoration(
           color: AppColors.bgSurface,

@@ -22,6 +22,7 @@ import 'core/patch/patch_service.dart';
 import 'core/server_config.dart';
 import 'core/upload_manager.dart';
 import 'core/video_orientation.dart';
+import 'widgets/app_glass.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/upload_status_overlay.dart';
 import 'features/auth/login_page.dart';
@@ -72,14 +73,11 @@ Future<void> main() async {
   }
   runApp(
     glassReady
-        ? LiquidGlassWidgets.wrap(
-            child: const AlbumApp(),
-            // 按真机 P75 光栅耗时自动升降玻璃质量；降到 minimal 时
-            // HomePage/FeedPage 各自回退成普通控件。
-            adaptiveQuality: true,
-            // 玻璃控件零 material 依赖，深色模式要靠这个回调感知 ThemeMode。
-            brightnessResolver: Theme.maybeBrightnessOf,
-          )
+        // 档位是**静态**的（appGlassRoot → appGlassStaticQuality）：只有平台
+        // 压根不支持 shader 时才退回磨砂/不透明，不再按帧耗时自动升降档。
+        // 旧版这里传 adaptiveQuality: true，下拉刷新掉几帧就会把 premium 按到
+        // standard（回升还要 20 秒），真机上就是「刷一下就退回磨砂」。
+        ? appGlassRoot(const AlbumApp())
         : const AlbumApp(),
   );
 }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -30,10 +31,17 @@ import 'preview/image_preview_page.dart';
 import 'preview/video_preview_page.dart';
 
 class ComposePage extends StatefulWidget {
-  /// 非空表示「编辑已发布动态」：文案编辑器同一套，媒体只读展示，不能增删。
+  /// 非空表示「编辑已发布动态」：文案编辑器和媒体选择都同一套，
+  /// 媒体可以删、可以加、可以拖动排序，保存后发布时间不变。
   final Post? editPost;
 
   const ComposePage({super.key, this.editPost});
+
+  /// 选图入口的测试注入点：桌面上 Platform.isAndroid 恒为 false，
+  /// 走不到系统相册通道，单测用它喂固定的选中文件。
+  @visibleForTesting
+  static Future<PickedMediaResult> Function({int limit}) pickMediaFiles =
+      pickMultipleMediaFiles;
 
   @override
   State<ComposePage> createState() => _ComposePageState();
@@ -41,7 +49,19 @@ class ComposePage extends StatefulWidget {
 
 class _ComposePageState extends State<ComposePage> {
   final TextEditingController _textCtrl = TextEditingController();
+
+  /// 发布模式下待上传的本地媒体。
   final List<_PickedMedia> _medias = [];
+
+  /// 编辑模式下的媒体列表：已有的（服务端）和新选的（本地）混在一条列表里，
+  /// 列表顺序就是保存后动态里的顺序。
+  final List<_EditMedia> _editItems = [];
+
+  /// 点过「保存」才上传；上传成功的 id 记在这里，重试时不会重复上传。
+  final Map<_EditMedia, int> _uploadedIds = {};
+
+  /// 编辑模式下有没有动过媒体（删/加/排序）。只改文案时不该提示「放弃编辑」。
+  bool _editMediaTouched = false;
 
   bool _publishing = false;
   bool _processingUpload = false;
@@ -65,13 +85,16 @@ class _ComposePageState extends State<ComposePage> {
         selection: TextSelection.collapsed(offset: content.length),
       );
     }
+    // 编辑：已发布的媒体直接进可编辑列表，缩略图、顺序都用同一套 UI。
+    final editMedias = widget.editPost?.medias ?? const <Media>[];
+    for (final media in editMedias) {
+      _editItems.add(_EditMedia.remote(media));
+    }
   }
 
   bool get _hasContent =>
       _textCtrl.text.trim().isNotEmpty ||
-      (_isEditing
-          ? (widget.editPost?.medias.isNotEmpty ?? false)
-          : _medias.isNotEmpty);
+      (_isEditing ? _editItems.isNotEmpty : _medias.isNotEmpty);
 
   bool get _canPublish => _hasContent && !_publishing;
 
@@ -87,7 +110,8 @@ class _ComposePageState extends State<ComposePage> {
   bool get _dirty {
     if (!_hasContent) return false;
     if (!_isEditing) return true;
-    // 编辑模式下没改文案就走，别拿「放弃编辑？」拦一个什么都没改的人。
+    // 编辑模式下没改文案、也没动媒体就走，别拿「放弃编辑？」拦一个什么都没改的人。
+    if (_editMediaTouched) return true;
     return _textCtrl.text.trim() != (widget.editPost?.content ?? '').trim();
   }
 
@@ -95,6 +119,7 @@ class _ComposePageState extends State<ComposePage> {
     if (_publishing) return;
     FocusScope.of(context).unfocus();
     if (!_dirty) {
+      _cleanupUploads();
       Navigator.of(context).pop();
       return;
     }
@@ -105,7 +130,7 @@ class _ComposePageState extends State<ComposePage> {
           title: Text(_isEditing ? '放弃编辑？' : '放弃发布？',
               style: AppText.titleMedium),
           content: Text(
-            _isEditing ? '已改动的文案将不会保存。' : '已填写的内容和选择的媒体将不会保留。',
+            _isEditing ? '已改动的文案和媒体将不会保存。' : '已填写的内容和选择的媒体将不会保留。',
             style: AppText.bodySmall,
           ),
           actions: [
@@ -126,20 +151,33 @@ class _ComposePageState extends State<ComposePage> {
       },
     );
     if (discard == true && mounted) {
+      _cleanupUploads();
       Navigator.of(context).pop();
     }
   }
 
+  /// 放弃编辑时，把「保存途中已经上传成功、但还没挂到动态上」的临时媒体删掉：
+  /// 服务端只允许删这种未挂载的媒体，删不掉也只是一条不可见的残留，不会脏朋友圈。
+  void _cleanupUploads() {
+    if (_uploadedIds.isEmpty) return;
+    final ids = _uploadedIds.values.toList(growable: false);
+    _uploadedIds.clear();
+    unawaited(PostApi.deleteUploadedMedia(ids));
+  }
+
+  /// 当前媒体数量：发布看 `_medias`，编辑看 `_editItems`，上限共用。
+  int get _mediaCount => _isEditing ? _editItems.length : _medias.length;
+
   Future<void> _pickMedias() async {
     if (_publishing) return;
-    if (_medias.length >= _maxMedias) {
+    if (_mediaCount >= _maxMedias) {
       _toast('最多选择 $_maxMedias 个媒体');
       return;
     }
     FocusScope.of(context).unfocus();
     try {
-      final pickedResult = await pickMultipleMediaFiles(
-        limit: _maxMedias - _medias.length,
+      final pickedResult = await ComposePage.pickMediaFiles(
+        limit: _maxMedias - _mediaCount,
       );
       if (!mounted) return;
       if (pickedResult.failedCount > 0) {
@@ -150,7 +188,7 @@ class _ComposePageState extends State<ComposePage> {
 
       final picked = <_PickedMedia>[];
       for (final item in items) {
-        if (_medias.length + picked.length >= _maxMedias) break;
+        if (_mediaCount + picked.length >= _maxMedias) break;
         final file = item.file;
         final type = _detectType(file.path, file.mimeType);
         if (type == null) continue;
@@ -178,7 +216,15 @@ class _ComposePageState extends State<ComposePage> {
         _toast('未识别到支持的图片或视频');
         return;
       }
-      setState(() => _medias.addAll(picked));
+      setState(() {
+        if (_isEditing) {
+          // 新选的追加在末尾：用户随后还能拖动调整顺序。
+          _editItems.addAll(picked.map(_EditMedia.local));
+          _editMediaTouched = true;
+        } else {
+          _medias.addAll(picked);
+        }
+      });
     } on PlatformException {
       // 用户取消或权限被拒绝，静默返回。
     } catch (e) {
@@ -187,12 +233,34 @@ class _ComposePageState extends State<ComposePage> {
   }
 
   void _moveMedia(int from, int to) {
-    if (from == to || from < 0 || from >= _medias.length) return;
+    setState(() => _reorder(_medias, from, to));
+  }
+
+  void _moveEditMedia(int from, int to) {
     setState(() {
-      final media = _medias.removeAt(from);
-      final target = to.clamp(0, _medias.length);
-      _medias.insert(target, media);
+      _reorder(_editItems, from, to);
+      _editMediaTouched = true;
     });
+  }
+
+  void _reorder<T>(List<T> list, int from, int to) {
+    if (from == to || from < 0 || from >= list.length) return;
+    final item = list.removeAt(from);
+    list.insert(to.clamp(0, list.length), item);
+  }
+
+  /// 编辑模式删掉一项：已经从「保存」里上传过的话顺手清掉，不留孤儿文件。
+  void _removeEditMedia(int index) {
+    if (index < 0 || index >= _editItems.length) return;
+    final item = _editItems[index];
+    final uploadedId = _uploadedIds.remove(item);
+    setState(() {
+      _editItems.removeAt(index);
+      _editMediaTouched = true;
+    });
+    if (uploadedId != null) {
+      unawaited(PostApi.deleteUploadedMedia([uploadedId]));
+    }
   }
 
   String? _detectType(String path, String? mimeType) {
@@ -230,7 +298,10 @@ class _ComposePageState extends State<ComposePage> {
   }
 
   Future<void> _previewMedia(int index) async {
-    final media = _medias[index];
+    await _previewPicked(_medias[index]);
+  }
+
+  Future<void> _previewPicked(_PickedMedia media) async {
     if (media.isMotion) {
       final info = await motionPhotoInfoFile(media.path);
       final video =
@@ -271,7 +342,11 @@ class _ComposePageState extends State<ComposePage> {
     return List<SourceTarget>.unmodifiable(targets);
   }
 
-  /// 编辑模式：只提交文案，媒体原样保留，成功后把最新动态带回列表。
+  /// 编辑模式：先上传新增媒体拿到 id，再把「最终媒体顺序 + 文案」一起 PUT 提交。
+  ///
+  /// 上传只发生在点「保存」之后：用户在编辑页里增删媒体、最后取消，都不会
+  /// 产生任何上传，也就没有孤儿文件；只有「上传成功但 PUT 失败」这一种情况
+  /// 会留下临时媒体，它由 [_cleanupUploads]（取消/关闭时）兜底删掉。
   Future<void> _saveEdit() async {
     if (_publishing || !_hasContent) return;
     FocusScope.of(context).unfocus();
@@ -281,11 +356,16 @@ class _ComposePageState extends State<ComposePage> {
       _uploadProgress = null;
     });
     try {
+      final mediaIds = await _resolveEditMediaIds();
+      if (!mounted) return;
       final updated = await PostApi.update(
         widget.editPost!.id,
         content: _textCtrl.text.trim(),
+        mediaIds: mediaIds,
       );
       if (!mounted) return;
+      // 已经挂到动态上了，不再是「待清理的临时媒体」。
+      _uploadedIds.clear();
       Navigator.of(context).pop<Object?>(updated);
     } catch (e) {
       if (!mounted) return;
@@ -296,6 +376,48 @@ class _ComposePageState extends State<ComposePage> {
       });
       _toast(ApiClient.errorText(e));
     }
+  }
+
+  /// 上传还没传过的新增媒体，返回按当前编辑顺序排好的媒体 id 列表。
+  Future<List<int>> _resolveEditMediaIds() async {
+    final pending = _editItems
+        .where((item) => item.local != null && !_uploadedIds.containsKey(item))
+        .toList(growable: false);
+    if (pending.isNotEmpty) {
+      final files = pending
+          .map((item) => XFile(item.local!.path, name: item.local!.filename))
+          .toList(growable: false);
+      final uploaded = await PostApi.uploadForEdit(
+        files,
+        onSendProgress: (sent, total) {
+          if (!mounted) return;
+          final progress = total > 0 ? sent / total : null;
+          setState(() {
+            _uploadProgress = progress;
+            _processingUpload = progress != null && progress >= 0.999;
+          });
+        },
+      );
+      if (uploaded.isEmpty) {
+        throw StateError('上传新媒体失败');
+      }
+      for (var i = 0; i < pending.length; i++) {
+        // 服务端按顺序返回；数量对不上时后面的留空，重试会补传。
+        if (i >= uploaded.length) break;
+        _uploadedIds[pending[i]] = uploaded[i].id;
+      }
+    }
+    final ids = <int>[];
+    for (final item in _editItems) {
+      final remote = item.remote;
+      if (remote != null) {
+        ids.add(remote.id);
+        continue;
+      }
+      final uploadedId = _uploadedIds[item];
+      if (uploadedId != null) ids.add(uploadedId);
+    }
+    return ids;
   }
 
   Future<void> _publish() async {
@@ -457,6 +579,10 @@ class _ComposePageState extends State<ComposePage> {
       ),
       child: PopScope(
         canPop: !_publishing,
+        // 系统返回键也会离开页面：已经上传但还没挂上去的临时媒体在这里兜底清掉。
+        onPopInvokedWithResult: (didPop, result) {
+          if (didPop) _cleanupUploads();
+        },
         child: Stack(
           children: [
             AbsorbPointer(
@@ -468,10 +594,10 @@ class _ComposePageState extends State<ComposePage> {
                   child: Column(
                     children: [
                       _buildTextField(),
-                      // 编辑只改文案：媒体只读展示，没有加号、没有删除角标，
-                      // 也没有拖动排序——换图等于换一条动态。
+                      // 编辑：媒体和发布时一样能加、能删、能拖动排序。
+                      // AI 帮写只对本次新选的本地媒体生效，编辑页不提供。
                       if (_isEditing)
-                        _buildReadOnlyMediaGrid()
+                        _buildEditableMediaGrid()
                       else ...[
                         _buildMediaGrid(),
                         _buildAiButton(),
@@ -558,10 +684,8 @@ class _ComposePageState extends State<ComposePage> {
     );
   }
 
-  /// 编辑模式下的媒体区：只读，尺寸/间距和发布时一致，位置不跳动。
-  Widget _buildReadOnlyMediaGrid() {
-    final medias = widget.editPost?.medias ?? const <Media>[];
-    if (medias.isEmpty) return const SizedBox.shrink();
+  /// 编辑模式下的媒体区：可删、可加、可拖动排序，尺寸/间距和发布时一致。
+  Widget _buildEditableMediaGrid() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       child: GridView.builder(
@@ -572,17 +696,41 @@ class _ComposePageState extends State<ComposePage> {
           mainAxisSpacing: 8,
           crossAxisSpacing: 8,
         ),
-        itemCount: medias.length,
+        itemCount: _editItems.length >= _maxMedias
+            ? _editItems.length
+            : _editItems.length + 1,
         itemBuilder: (context, index) {
-          final media = medias[index];
+          if (index == _editItems.length && _editItems.length < _maxMedias) {
+            return _AddMediaTile(onTap: _pickMedias);
+          }
+          final item = _editItems[index];
+          final remote = item.remote;
+          final local = item.local;
           return LayoutBuilder(
             builder: (context, constraints) {
-              return AlbumThumb(
-                media: media,
-                radius: AppRadius.sm,
-                cacheWidth:
-                    (constraints.maxWidth * MediaQuery.of(context).devicePixelRatio)
-                        .round(),
+              final cacheWidth = (constraints.maxWidth *
+                      MediaQuery.of(context).devicePixelRatio)
+                  .round();
+              final Widget tile = remote != null
+                  ? _ExistingMediaTile(
+                      key: ObjectKey(remote),
+                      media: remote,
+                      cacheWidth: cacheWidth,
+                      onRemove: () => _removeEditMedia(index),
+                    )
+                  : _MediaPreviewTile(
+                      key: ObjectKey(local),
+                      media: local!,
+                      onRemove: () => _removeEditMedia(index),
+                      onTap: () => _previewPicked(local),
+                    );
+              return _DraggableMediaTile(
+                index: index,
+                feedback: remote != null
+                    ? _DragExistingFeedback(media: remote)
+                    : _DragMediaFeedback(media: local!),
+                onMove: (from) => _moveEditMedia(from, index),
+                child: tile,
               );
             },
           );
@@ -609,37 +757,16 @@ class _ComposePageState extends State<ComposePage> {
             return _AddMediaTile(onTap: _pickMedias);
           }
           final media = _medias[index];
-          return DragTarget<int>(
-            onWillAcceptWithDetails: (details) => details.data != index,
-            onAcceptWithDetails: (details) {
-              _moveMedia(details.data, index);
-            },
-            builder: (context, candidates, rejected) {
-              final tile = _MediaPreviewTile(
-                key: ObjectKey(media),
-                media: media,
-                onRemove: () => setState(() => _medias.removeAt(index)),
-                onTap: () => _previewMedia(index),
-              );
-              return LongPressDraggable<int>(
-                data: index,
-                feedback: _DragMediaFeedback(media: media),
-                childWhenDragging: Opacity(opacity: 0.25, child: tile),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 140),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(AppRadius.sm),
-                    border: candidates.isEmpty
-                        ? null
-                        : Border.all(
-                            color: AppColors.primary,
-                            width: 2,
-                          ),
-                  ),
-                  child: tile,
-                ),
-              );
-            },
+          return _DraggableMediaTile(
+            index: index,
+            feedback: _DragMediaFeedback(media: media),
+            onMove: (from) => _moveMedia(from, index),
+            child: _MediaPreviewTile(
+              key: ObjectKey(media),
+              media: media,
+              onRemove: () => setState(() => _medias.removeAt(index)),
+              onTap: () => _previewMedia(index),
+            ),
           );
         },
       ),
@@ -733,8 +860,8 @@ class _ComposePageState extends State<ComposePage> {
                     decoration: TextDecoration.none,
                   ),
                 ),
-                // 编辑没有上传，也就没有百分比可报。
-                if (!_isEditing) ...[
+                // 发布、以及编辑时上传新增媒体，都有百分比可报；纯改文案没有。
+                if (!_isEditing || _uploadProgress != null) ...[
                   const SizedBox(height: 16),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(AppRadius.pill),
@@ -821,6 +948,159 @@ class _DragMediaFeedback extends StatelessWidget {
   }
 }
 
+/// 可拖动排序的媒体格子：发布和编辑共用同一套手势与落点高亮。
+class _DraggableMediaTile extends StatelessWidget {
+  final int index;
+  final Widget feedback;
+  final Widget child;
+  final void Function(int from) onMove;
+
+  const _DraggableMediaTile({
+    required this.index,
+    required this.feedback,
+    required this.child,
+    required this.onMove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (details) => details.data != index,
+      onAcceptWithDetails: (details) => onMove(details.data),
+      builder: (context, candidates, rejected) {
+        return LongPressDraggable<int>(
+          data: index,
+          feedback: feedback,
+          childWhenDragging: Opacity(opacity: 0.25, child: child),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 140),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              border: candidates.isEmpty
+                  ? null
+                  : Border.all(
+                      color: AppColors.primary,
+                      width: 2,
+                    ),
+            ),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 编辑模式下已经发布在动态里的媒体：缩略图 + 右上角移除角标，可拖动排序。
+class _ExistingMediaTile extends StatelessWidget {
+  final Media media;
+  final int cacheWidth;
+  final VoidCallback onRemove;
+
+  const _ExistingMediaTile({
+    super.key,
+    required this.media,
+    required this.cacheWidth,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        AlbumThumb(
+          media: media,
+          radius: AppRadius.sm,
+          cacheWidth: cacheWidth,
+        ),
+        if (media.isVideo)
+          Positioned(
+            left: 4,
+            bottom: 4,
+            child: _MediaBadge(
+              icon: Icons.play_arrow_rounded,
+              label: mediaDurationLabel(media.durationMs),
+            ),
+          ),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: GestureDetector(
+            onTap: onRemove,
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.6),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.close,
+                size: 14,
+                color: AppColors.textInverse,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 拖动已发布媒体时的跟手浮层。
+class _DragExistingFeedback extends StatelessWidget {
+  final Media media;
+
+  const _DragExistingFeedback({required this.media});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      elevation: 8,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        child: SizedBox(
+          width: 104,
+          height: 104,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              AlbumThumb(media: media, radius: AppRadius.sm, cacheWidth: 240),
+              const Positioned(
+                left: 4,
+                bottom: 4,
+                child: _MediaBadge(
+                  icon: Icons.drag_indicator,
+                  label: '拖动排序',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 编辑模式下的一项媒体：已发布的（remote）或本次新选的（local）。
+///
+/// 两种混在同一条列表里，列表顺序就是保存后动态里的媒体顺序。
+class _EditMedia {
+  final Media? remote;
+  final _PickedMedia? local;
+
+  const _EditMedia.remote(Media media)
+      : remote = media,
+        local = null;
+
+  const _EditMedia.local(_PickedMedia media)
+      : remote = null,
+        local = media;
+}
+
 class _PickedMedia {
   final String path;
   final String type;
@@ -844,18 +1124,21 @@ class _PickedMedia {
     return name.isEmpty ? 'upload' : name;
   }
 
-  String get durationLabel {
-    final ms = durationMs;
-    if (ms == null || ms <= 0) return '0:00';
-    final total = (ms / 1000).round();
-    final hours = total ~/ 3600;
-    final minutes = (total % 3600) ~/ 60;
-    final seconds = (total % 60).toString().padLeft(2, '0');
-    if (hours > 0) {
-      return '$hours:${minutes.toString().padLeft(2, '0')}:$seconds';
-    }
-    return '$minutes:$seconds';
+  String get durationLabel => mediaDurationLabel(durationMs);
+}
+
+/// 视频时长文案：3:07 / 1:02:03；时长缺失时退回 0:00。
+String mediaDurationLabel(int? durationMs) {
+  final ms = durationMs;
+  if (ms == null || ms <= 0) return '0:00';
+  final total = (ms / 1000).round();
+  final hours = total ~/ 3600;
+  final minutes = (total % 3600) ~/ 60;
+  final seconds = (total % 60).toString().padLeft(2, '0');
+  if (hours > 0) {
+    return '$hours:${minutes.toString().padLeft(2, '0')}:$seconds';
   }
+  return '$minutes:$seconds';
 }
 
 class _AddMediaTile extends StatelessWidget {

@@ -238,12 +238,12 @@ void main() {
     expect(field.controller?.text, '旧的正文');
     expect(field.decoration?.hintText, '这一刻的想法…');
 
-    // 媒体只读：有缩略图，没有加号、没有删除角标、没有拖动排序、没有 AI 帮写。
+    // 媒体可编辑：有缩略图、有加号、有移除角标、有拖动排序；AI 帮写仍不提供。
     expect(find.byType(AlbumThumb), findsOneWidget);
-    expect(find.byIcon(Icons.add), findsNothing);
-    expect(find.byIcon(Icons.close), findsOneWidget,
-        reason: '只剩左上角关闭；媒体上没有移除角标');
-    expect(find.byType(LongPressDraggable<int>), findsNothing);
+    expect(find.byIcon(Icons.add), findsOneWidget);
+    expect(find.byIcon(Icons.close), findsNWidgets(2),
+        reason: '左上角关闭 + 媒体上的移除角标');
+    expect(find.byType(LongPressDraggable<int>), findsOneWidget);
     expect(find.text('AI 帮写'), findsNothing);
 
     // 保存按钮的文案换成了「保存」，空文案时不可点。
@@ -257,7 +257,7 @@ void main() {
     final puts = fake.requests.where((r) => r.method == 'PUT').toList();
     expect(puts, hasLength(1));
     expect(puts.single.path, '/api/posts/7');
-    expect(puts.single.data, {'content': '新的正文'});
+    expect(puts.single.data, {'content': '新的正文', 'media_ids': [101]});
 
     expect(find.byType(ComposePage), findsNothing, reason: '保存后返回列表');
     expect(edited, isNotNull);

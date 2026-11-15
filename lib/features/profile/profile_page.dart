@@ -573,7 +573,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                           style: AppText.titleMedium,
                         ),
                         const SizedBox(height: 4),
-                        Text('@${user.userId}', style: AppText.caption),
+                        Text('@${user.userId}', style: AppText.captionOnGlass),
                       ],
                     ),
                   ),
@@ -605,7 +605,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                     children: [
                       Text(
                         _serverMode.isEmpty ? '未连接' : _serverMode,
-                        style: AppText.caption,
+                        style: AppText.captionOnGlass,
                       ),
                       Icon(
                         Icons.chevron_right,
@@ -632,7 +632,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                         children: [
                           Text(
                             AppThemeController.label(mode),
-                            style: AppText.caption,
+                            style: AppText.captionOnGlass,
                           ),
                           Icon(
                             Icons.chevron_right,
@@ -698,7 +698,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                         children: [
                           Text(
                             custom ? '自定义' : '默认渐变',
-                            style: AppText.caption,
+                            style: AppText.captionOnGlass,
                           ),
                           Icon(
                             Icons.chevron_right,
@@ -726,7 +726,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                         _cacheLoading || _cache == null
                             ? ''
                             : formatBytes(_cache!.appBytes),
-                        style: AppText.caption,
+                        style: AppText.captionOnGlass,
                       ),
                       const SizedBox(width: 2),
                       Icon(
@@ -751,7 +751,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                     children: [
                       Text(
                         'v${_version.isEmpty ? '—' : _version}',
-                        style: AppText.caption,
+                        style: AppText.captionOnGlass,
                       ),
                       const SizedBox(width: 2),
                       if (_checkingUpdate)

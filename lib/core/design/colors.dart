@@ -43,6 +43,15 @@ class AppColors {
       _dark ? const Color(0xFFA8B0C0) : const Color(0xFF6B7280);
   static Color get textTertiary =>
       _dark ? const Color(0xFF7F889B) : const Color(0xFF9CA3AF);
+
+  /// **玻璃表面上的**小字/小图标（时间戳、版本号、相册张数、「新建相册」）。
+  ///
+  /// [textSecondary]/[textTertiary] 是按纯色卡片挑的：浅色 #9CA3AF/#6B7280 落在
+  /// 玻璃合成底色上只有 2.8~4.4:1，真机上就是「小字看不清」。这里浅色压到
+  /// #555E6E（对玻璃底衬 ≈6.0:1），深色直接用 [textSecondary]（≈7.3:1）。
+  /// 对比度断言见 test/glass_stability_test.dart（浅色/深色各一条）。
+  static Color get textOnGlass =>
+      _dark ? const Color(0xFFA8B0C0) : const Color(0xFF555E6E);
   static Color get textInverse =>
       _dark ? const Color(0xFFFFFFFF) : const Color(0xFFFFFFFF);
   static Color get divider =>

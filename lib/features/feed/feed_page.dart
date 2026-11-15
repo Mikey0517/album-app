@@ -253,7 +253,10 @@ class _FeedPageState extends State<FeedPage> {
     if (_posts.isEmpty) {
       return RefreshIndicator(
         color: AppColors.primary,
-        onRefresh: () => _load(refresh: true),
+        // 刷新这几帧把卡片玻璃暂停成同色不透明表面：premium 采样的 backdrop
+        // 在列表重建时不稳定（真机上是局部发黑/透明度跳），刷新一结束立刻
+        // 恢复。档位本身不变（见 AppGlassRefreshHold）。
+        onRefresh: () => appGlassWhileRefreshing(() => _load(refresh: true)),
         child: CustomScrollView(
           controller: _scrollController,
           physics: const AlwaysScrollableScrollPhysics(),
@@ -357,7 +360,7 @@ class _FeedPageState extends State<FeedPage> {
       children: [
         RefreshIndicator(
           color: AppColors.primary,
-          onRefresh: () => _load(refresh: true),
+          onRefresh: () => appGlassWhileRefreshing(() => _load(refresh: true)),
           child: CustomScrollView(
             key: _scrollViewKey,
             controller: _scrollController,
