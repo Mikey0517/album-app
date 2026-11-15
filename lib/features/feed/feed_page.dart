@@ -253,9 +253,11 @@ class _FeedPageState extends State<FeedPage> {
     if (_posts.isEmpty) {
       return RefreshIndicator(
         color: AppColors.primary,
-        // 刷新这几帧把卡片玻璃暂停成同色不透明表面：premium 采样的 backdrop
-        // 在列表重建时不稳定（真机上是局部发黑/透明度跳），刷新一结束立刻
-        // 恢复。档位本身不变（见 AppGlassRefreshHold）。
+        // 刷新这几帧把卡片玻璃暂停成同色不透明表面（第二层保险）：黑卡的
+        // 根因是卡片走 premium 的 capture，未就绪帧会整块发黑——那条已经在
+        // AppGlassSurface.kCardQuality = standard 拆掉（见
+        // test/feed_refresh_glass_test.dart）。刷新一结束立刻恢复玻璃，档位
+        // 本身不变（见 AppGlassRefreshHold）。
         onRefresh: () => appGlassWhileRefreshing(() => _load(refresh: true)),
         child: CustomScrollView(
           controller: _scrollController,

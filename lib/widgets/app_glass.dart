@@ -44,12 +44,15 @@ class AppGlassScope extends InheritedWidget {
 ///    出现（见 [appGlassStaticQuality]），不再有运行时降档；
 /// 3. 调用点自己要求 minimal。
 ///
-/// [requested] 是调用点想要的档位：底部胶囊与卡片 / 列表项 / 新建相册按钮
-/// 现在都要 premium——同一套材质参数（见 [AppGlassSurface.kCardQuality]）。
+/// [requested] 是调用点想要的档位：现在**只有静态 chrome（底部胶囊）**要
+/// premium；卡片 / 列表项 / 新建相册按钮固定在 standard（见
+/// [AppGlassSurface.kCardQuality]）。
 ///
-/// premium 走的是实时 BackdropFilter 采样 + 全管线 shader，滚动列表里每张卡片
-/// 各来一次仍有掉帧风险。这是「先不管性能、先统一材质」阶段的已知取舍：要回退
-/// 只改 [AppGlassSurface.kCardQuality] 一行，卡片立刻回到 standard 的轻量 shader。
+/// 卡片为什么不许要 premium：premium 是「全管线」路径，形状遮罩与背景都靠
+/// capture（toImageSync / BackdropGroup）。滚动列表某次重建（下拉刷新、数据
+/// 替换、滚出缓存区）会换掉玻璃层，新层在 capture 还没就绪的那一帧照样画一遍，
+/// 采到空纹理就是一块近黑——真机上的「下拉刷新黑卡」。standard 只做
+/// BackdropFilter，不抓 capture，没有这一帧。
 ///
 /// [requested] 只是「想要」：[AppGlassScope] 注入的档位才是「上限」，取两者
 /// 更低的那个。所以注入 premium 也不会把要 standard 的卡片顶成 premium；
@@ -159,12 +162,15 @@ Widget appGlassRoot(Widget child, {GlassQuality? quality}) => AppGlassScope(
 /// 下拉刷新期间的「玻璃暂停」开关。
 ///
 /// 刷新这几百毫秒里列表整体重建、RefreshIndicator 还会在列表上方叠一层动画，
-/// 卡片 premium 采样的 backdrop 在这几帧里不稳定（真机上是卡片局部发黑 /
-/// 透明度忽明忽暗）。与其猜哪一帧是坏的，不如在这段时间把卡片换成**同色不透明
-/// 表面**：颜色 / 圆角 / 内外边距都不变，只是不画玻璃。刷新一结束立刻回到
-/// premium——档位本身从未改变，变的只是这几帧画什么。
+/// 玻璃采样的 backdrop 在这几帧里不稳定。与其猜哪一帧是坏的，不如在这段时间
+/// 把卡片换成**同色不透明表面**：颜色 / 圆角 / 内外边距都不变，只是不画玻璃。
+/// 刷新一结束立刻回到玻璃——档位本身从未改变，变的只是这几帧画什么。
 ///
-/// 只影响「想要 premium 的卡片」（[AppGlassSurface.pauseDuringRefresh]）；
+/// 这是**第二层保险**：黑卡的根因（premium 的 capture 未就绪帧）已经由
+/// [AppGlassSurface.kCardQuality] = standard 拆掉了，刷新保持只是让这几帧连
+/// BackdropFilter 都不做，理论上更稳。
+///
+/// 影响所有非静态 chrome 的玻璃表面（[AppGlassSurface.pauseDuringRefresh]）；
 /// 底部胶囊这类静态 chrome 不受影响。开关由 [appGlassWhileRefreshing] 包住
 /// 一次刷新任务来驱动（feed / 相册页的 RefreshIndicator.onRefresh 都走它）。
 class AppGlassRefreshHold {
@@ -258,10 +264,10 @@ Color get appGlassTintColor =>
 
 /// 磨砂档的光学参数：**透**优先，不做磨砂墙。
 ///
-/// 只在 standard 档用：调用点显式要 standard（比如强制更新弹窗）、
-/// [AppGlassSurface.kCardQuality] 回退成 standard，或者 premium 拿不到
-/// （[appGlassPremiumAvailable] 为假）时的整块回退。premium 那一套见
-/// [appGlassChromeSettings]。
+/// 就是 standard 档用的那一套：卡片 / 列表项 / 新建相册按钮（
+/// [AppGlassSurface.kCardQuality]）、调用点显式要 standard 的表面（强制更新
+/// 弹窗），以及 premium 拿不到（[appGlassPremiumAvailable] 为假）时的整块回退。
+/// premium 那一套见 [appGlassChromeSettings]。
 ///
 /// 为什么不用包的 classic 预设：classic 的 tint 只有 12% 白蓝、模糊 5，落在
 /// 纯色页面上「模糊纯色还是纯色」，整块玻璃只剩一点透明度。这里模糊提到 8
@@ -283,9 +289,9 @@ LiquidGlassSettings appGlassSettings(BuildContext context) {
   );
 }
 
-/// premium 档的光学参数：**折射**优先。底部胶囊与卡片 / 列表项 / 新建相册
-/// 按钮共用这一套（卡片通过 [AppGlassSurface.kCardQuality] 拿到它），所以
-/// 卡片和 footer 是同一份数字，视觉上是一套材质。
+/// premium 档的光学参数：**折射**优先。现在只有静态 chrome（底部胶囊，见
+/// [AppGlassSurface.preferPremium]）用这一套——卡片走 standard，见
+/// [AppGlassSurface.kCardQuality] 里「premium 会抓 capture，列表重建时会黑」。
 ///
 /// 和 [appGlassSettings] 的差别都在「折射能不能看出来」这件事上：
 /// - thickness 28（磨砂 12）：斜面越深，边缘的 displacement 越大，胶囊的两条
@@ -410,9 +416,11 @@ Color appGlassScrimBackplate() => AppAccent.compositeOver(
 /// **卡片**上文字实际落上去的底色（没有 scrim 那一层）。
 ///
 /// 卡片不带 scrim（[AppGlassSurface.scrim] 默认 false），所以底衬只有「玻璃
-/// tint 叠页面底色」这一层：premium 用 [appGlassChromeTintColor]（10%/7%），
-/// 磨砂回退用 [appGlassTintColor]（15%/10%）。两者都是半透明色，单独算对比度
-/// 没有意义——先按 [AppAccent.compositeOver] 合成成不透明色再算。
+/// tint 叠页面底色」这一层：standard（卡片现在的档位，见
+/// [AppGlassSurface.kCardQuality]）用 [appGlassTintColor]（15%/10%），
+/// premium（静态 chrome 才用）用 [appGlassChromeTintColor]（10%/7%）。
+/// 两者都是半透明色，单独算对比度没有意义——先按 [AppAccent.compositeOver]
+/// 合成成不透明色再算。
 ///
 /// 页面底图/渐变会让真实底衬在这个值上下浮动，所以对比度断言取这条「最典型」
 /// 的底（页面底色），和 [appGlassPremiumScrimBackplate] 是同一个约定。
@@ -439,20 +447,20 @@ Color appGlassCardBackplate({bool premium = true}) => AppAccent.compositeOver(
 /// 一条没有高光的边，看上去像「内容」和「留白」两种材质拼起来。
 ///
 /// 材质档位只有一个开关：[kCardQuality]。卡片 / 列表项 / 新建相册按钮不传
-/// [requestedQuality] 时就用它（现在是 premium，与底部胶囊同档）；把它改成
-/// [GlassQuality.standard] 就整批回到磨砂的实现，调用点一行都不用动。
+/// [requestedQuality] 时就用它，现在是 [GlassQuality.standard]——**故意不是
+/// premium**：premium 要抓 capture，列表重建那一帧会黑，见 [kCardQuality]。
 ///
 /// 性能：列表里的卡片保持 useOwnLayer: false（不自建层，交给包的路径处理），
 /// 内容再套一层 [RepaintBoundary]——滚动时只重绘玻璃层，卡片里的文字/图片走
-/// 缓存，不会每帧重建。premium 每帧采样 backdrop 走全管线 shader，在滚动列表
-/// 里有掉帧风险；这是「先不管性能、先统一材质」阶段的已知取舍
-/// （见 [kCardQuality]），但掉帧**不会**再让它降档（见 [appGlassRoot]）。
+/// 缓存，不会每帧重建。standard 只有一层 BackdropFilter，滚动列表里是包自己
+/// 推荐的档位；档位是静态的，掉帧**不会**让它降档（见 [appGlassRoot]）。
 ///
 /// **三档的实现差别**：
-/// - premium（[appGlassPremiumAvailable] 为真）：[appGlassChromeSettings] 的
-///   深斜面参数 + 薄 scrim（[appGlassPremiumScrimAlpha]）；
-/// - 磨砂回退（premium 不可用 / 开关回退成 standard / 注入 standard）：原样
-///   保留 [appGlassSettings] + 42%/50% scrim；
+/// - premium（[preferPremium] 为真且 [appGlassPremiumAvailable] 为真，只有
+///   静态 chrome 走）：[appGlassChromeSettings] 的深斜面参数 + 薄 scrim
+///   （[appGlassPremiumScrimAlpha]）；
+/// - standard（卡片 / 显式要 standard 的表面）：[appGlassSettings] 的磨砂参数，
+///   纯 BackdropFilter，**不抓 capture**；
 /// - 不透明（平台不支持 shader / 注入 minimal / 下拉刷新保持）：不透明
 ///   [AppColors.bgSurface] 圆角块，见 [pauseDuringRefresh]。
 /// 三条路布局完全一致（同样的 margin / padding / 圆角），切档不跳版、不白屏。
@@ -482,23 +490,29 @@ class AppGlassSurface extends StatelessWidget {
   /// 玻璃分支的顶部内高光层。
   static const Key highlightKey = Key('app-glass-highlight');
 
-  /// 卡片 / 列表项 / 新建相册按钮的材质档位：**一处回退开关**。
+  /// 卡片 / 列表项 / 新建相册按钮的材质档位：**一处开关**。
   ///
-  /// 现在是 [GlassQuality.premium]：和底部胶囊同一套光学参数
-  /// （[appGlassChromeSettings]：thickness 28 / refractiveIndex 1.38 /
-  /// chromaticAberration 0.10 / blur 3），所以三处卡片的材质与 footer 一致。
+  /// 现在是 [GlassQuality.standard]：[appGlassSettings] 的磨砂参数
+  /// （thickness 12 / refractiveIndex 1.2 / chromaticAberration 0.03 / blur 8），
+  /// 纯 BackdropFilter + 包的轻量 shader。
   ///
-  /// **回退**：把这一行改成 [GlassQuality.standard]，所有走 [AppCard] /
-  /// 未显式传 [requestedQuality] 的 [AppGlassSurface] 立刻回到磨砂档
-  /// （[appGlassSettings]：12 / 1.2 / 0.02~0.03 / 8）与包的轻量 shader，
-  /// 调用点一处都不用改。底部胶囊另有 [AppBottomTabBar.preferredQuality]，
-  /// 不受这里影响。
+  /// **为什么不是 premium（这是「下拉刷新黑卡」的根因）**：premium 在包里是
+  /// GlassContainer → AdaptiveGlass → LiquidGlass.withOwnLayer →
+  /// LiquidGlassLayer 的「全管线」路径，形状遮罩与背景都要 capture
+  /// （几何遮罩的 Picture.toImageSync、背景的 BackdropGroup/RepaintBoundary）。
+  /// 滚动列表在下拉刷新 / 数据替换 / 滚出缓存区时会换掉玻璃层，而新层在
+  /// capture 还没就绪的那一帧照样会画一遍：采到空纹理，叠上 tint 就是一块近黑。
+  /// 真机现象正是「下拉刷新时出现黑色卡片」，且发生在刷新回调**之外**（数据
+  /// 替换后那几帧）——所以上一轮「刷新期间暂停玻璃」挡不住它。
+  /// 卡片不抓 capture，这一帧就不存在。
   ///
-  /// 已知风险：premium 每帧采样 backdrop，滚动列表里每张卡片各来一次可能掉帧；
-  /// 这一阶段先不降级，只观察——掉帧也不会自动降档（[appGlassRoot] 关掉了那条
-  /// 路）。只有平台不支持 shader（静态档位 minimal）/ 注入 minimal 时才整体退回
-  /// 不透明表面，平台封顶 premium 时退回磨砂（不会白屏）。
-  static const GlassQuality kCardQuality = GlassQuality.premium;
+  /// premium 只留给静态 chrome：底部胶囊（[AppBottomTabBar.preferredQuality]）
+  /// 位置固定、不随列表重建，capture 稳定，折射才有意义。
+  ///
+  /// 改回 premium 只需改这一行（所有 [AppCard] / 未显式传 [requestedQuality] 的
+  /// [AppGlassSurface] 一起变），但黑卡会一起回来：见
+  /// test/feed_refresh_glass_test.dart。
+  static const GlassQuality kCardQuality = GlassQuality.standard;
 
   final Widget child;
 
@@ -536,9 +550,10 @@ class AppGlassSurface extends StatelessWidget {
 
   /// 是否优先要 premium 档（折射/边缘扭曲）。
   ///
-  /// 底部胶囊（静态 chrome：全屏一块、不随内容滚动）传 true。卡片不用传：
-  /// [kCardQuality] 本身就是 premium。传 true 不代表一定用上：拿不到 premium
-  /// 时由 [appGlassPremiumAvailable] 判定并整块退回磨砂实现
+  /// **只有静态 chrome 传 true**（底部胶囊：位置固定、不随列表重建，capture
+  /// 稳定）。卡片不用传、也不该传：[kCardQuality] 是 standard，卡片走 premium
+  /// 的 capture 路径就是黑卡的来源（见 [kCardQuality]）。传 true 不代表一定用
+  /// 上：拿不到 premium 时由 [appGlassPremiumAvailable] 判定并整块退回磨砂实现
   /// （[appGlassSettings] + 重 scrim），不留半套参数。
   final bool preferPremium;
 
@@ -562,11 +577,14 @@ class AppGlassSurface extends StatelessWidget {
 
   /// 下拉刷新期间是否临时换成**同色不透明表面**（见 [AppGlassRefreshHold]）。
   ///
-  /// 默认 true，但只对「想要 premium、又不是静态 chrome」的表面生效：
-  /// [preferPremium] 为 true 的底部胶囊不受影响（它背后是页面底图，刷新时也
-  /// 不跟着变）。刷新那几帧卡片本来就要整体重建、premium 采样的 backdrop 不
-  /// 稳定（真机表现是局部发黑/透明度跳），换成 bgSurface 圆角块最稳——布局、
-  /// 圆角、内外边距一模一样，刷新一结束立刻回到 premium。
+  /// 默认 true，对所有非静态 chrome 的玻璃表面生效（卡片现在虽然是 standard，
+  /// 也在其中）；[preferPremium] 为 true 的底部胶囊不受影响（它背后是页面底图，
+  /// 刷新时也不跟着变）。刷新那几帧卡片本来就要整体重建、backdrop 采样不稳，
+  /// 换成 bgSurface 圆角块最稳——布局、圆角、内外边距一模一样，刷新一结束立刻
+  /// 回到玻璃。
+  ///
+  /// 这是黑卡修好之后的**第二层保险**：根因在 [kCardQuality]（premium 的
+  /// capture 未就绪帧），暂停只负责让刷新这几帧更钝一点。
   final bool pauseDuringRefresh;
 
   @override
@@ -581,24 +599,23 @@ class AppGlassSurface extends StatelessWidget {
 
   /// 真正画表面的地方；[refreshHeld] 来自 [AppGlassRefreshHold]。
   Widget _buildSurface(BuildContext context, {required bool refreshHeld}) {
-    // 想要的那一档：调用点显式传的档位优先，否则就是卡片开关 [kCardQuality]。
+    // 想要的那一档：调用点显式传的档位优先，否则就是卡片开关 [kCardQuality]
+    // （standard，见那里的「premium 抓 capture → 黑卡」）。
     final wanted = wantedQuality;
     // premium 只在「想要（显式 preferPremium 或档位本身是 premium）且这一段
-    // 真的支持」时才生效；否则一律走磨砂档。
+    // 真的支持」时才生效；否则一律走 standard（磨砂参数，不抓 capture）。
     final premium = (preferPremium || wanted == GlassQuality.premium) &&
         appGlassPremiumAvailable(context);
-    // 刷新保持：想要 premium 的卡片这几帧先不画玻璃（档位本身不动）。
-    final refreshPaused = refreshHeld &&
-        pauseDuringRefresh &&
-        !preferPremium &&
-        wanted == GlassQuality.premium;
+    // 刷新保持（第二层保险）：非静态 chrome 的玻璃这几帧一律先不画玻璃，
+    // 换成同色不透明表面；档位本身不动，刷新一结束就回来。
+    final refreshPaused = refreshHeld && pauseDuringRefresh && !preferPremium;
     final quality = refreshPaused
         ? null
         : glassQualityFor(
             context,
             // 拿不到 premium 时明确要 standard：包的轻量 shader 只有在显式
             // standard 时才跳过「premium 参数 → standard」的归一化，参数才是
-            // 我们调的那一套。
+            // 我们调的那一套。卡片想要的本来就是 standard（[kCardQuality]）。
             requested: premium
                 ? GlassQuality.premium
                 : (wanted == GlassQuality.premium
@@ -621,7 +638,7 @@ class AppGlassSurface extends StatelessWidget {
       // 描边宽度算进布局，底部栏那条 1px 描边会让整条栏高变成 57。
       // 退化分支的底子已经不透明（[AppColors.bgSurface]），不需要 scrim。
       // 刷新保持（[refreshPaused]）走的就是这条分支：同色不透明表面、布局
-      // 一模一样，刷新一结束立刻回到 premium（档位从未被改过）。
+      // 一模一样，刷新一结束立刻回到玻璃（档位从未被改过）。
       Widget opaque = DecoratedBox(
         decoration: BoxDecoration(
           color: AppColors.bgSurface,

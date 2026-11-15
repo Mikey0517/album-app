@@ -13,7 +13,6 @@ import 'package:album_app/features/profile/profile_page.dart';
 import 'package:album_app/models/app_user.dart';
 import 'package:album_app/models/post.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
-import 'package:album_app/widgets/app_card.dart';
 import 'package:album_app/widgets/app_glass.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -26,7 +25,8 @@ import 'support/glass_contrast.dart';
 
 // 问题 A / B 的回归测试：
 // A - 材质不许自动回退：档位是静态的，跑慢帧也不降；刷新期间卡片换同色不透明
-//     表面、刷新一结束回到 premium（档位本身不变）。
+//     表面、刷新一结束回到 standard 玻璃（档位本身不变）。卡片固定 standard =
+//     不抓 capture，黑卡的根因见 test/feed_refresh_glass_test.dart。
 // B - 玻璃上的小字对玻璃合成底色 ≥ 4.5:1（浅色/深色各一条），并且两处已知
 //     位置（「新建相册」、我的页右侧数值）真的用了那个 token。
 
@@ -131,13 +131,21 @@ void main() {
 
     testWidgets('根节点不再插入自适应 scope：连跑 60 帧慢帧仍是 premium',
         (tester) async {
+      // 拿一块**静态 chrome**（preferPremium）当被测表面：卡片已经固定在
+      // standard（见 AppGlassSurface.kCardQuality），premium 只剩胶囊这一档，
+      // 「档位不随慢帧降」要验的就是这一档。
       await tester.pumpWidget(appGlassRoot(
         MaterialApp(
           theme: buildAppTheme(),
           home: const Scaffold(
             body: Padding(
               padding: EdgeInsets.all(16),
-              child: AppCard(glass: true, child: Text('卡片')),
+              child: AppGlassSurface(
+                preferPremium: true,
+                radius: 28,
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                child: Text('胶囊'),
+              ),
             ),
           ),
         ),
@@ -167,8 +175,8 @@ void main() {
     });
   });
 
-  group('A2 刷新期间：卡片换同色不透明表面，结束回 premium', () {
-    testWidgets('PostCard：刷新保持期间没有玻璃，释放后回到 premium', (tester) async {
+  group('A2 刷新期间：卡片换同色不透明表面，结束回 standard 玻璃', () {
+    testWidgets('PostCard：刷新保持期间没有玻璃，释放后回到 standard 玻璃', (tester) async {
       await tester.pumpWidget(_markApp(
         GlassQuality.premium,
         Scaffold(
@@ -185,7 +193,7 @@ void main() {
       ));
       await tester.pump();
 
-      expect(_glass(tester).quality, GlassQuality.premium);
+      expect(_glass(tester).quality, GlassQuality.standard);
 
       AppGlassRefreshHold.begin();
       await tester.pump();
@@ -208,8 +216,9 @@ void main() {
       await tester.pump();
 
       final restored = _glass(tester);
-      expect(restored.quality, GlassQuality.premium, reason: '刷新结束回到 premium');
-      expect(restored.settings!.thickness, 28, reason: '同一套 premium 参数');
+      expect(restored.quality, GlassQuality.standard,
+          reason: '刷新结束回到 standard 玻璃（不抓 capture，黑卡根因）');
+      expect(restored.settings!.thickness, 12, reason: '磨砂那套光学参数');
       expect(tester.takeException(), isNull);
     });
 
@@ -253,7 +262,7 @@ void main() {
       expect(AppGlassRefreshHold.isActive, isFalse, reason: '异常也要释放，别把卡片钉在不透明面上');
     });
 
-    testWidgets('FeedPage 的 onRefresh：刷新全程暂停卡片玻璃，结束后 premium',
+    testWidgets('FeedPage 的 onRefresh：刷新全程暂停卡片玻璃，结束后 standard',
         (tester) async {
       tester.view.physicalSize = const Size(360, 780);
       tester.view.devicePixelRatio = 1.0;
@@ -265,7 +274,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(PostCard), findsWidgets);
-      expect(_glass(tester).quality, GlassQuality.premium);
+      expect(_glass(tester).quality, GlassQuality.standard,
+          reason: '卡片固定 standard（不做 capture）');
 
       // 用 RefreshIndicator 真正会调用的那个回调，等于走一遍下拉刷新的刷新段。
       final refresh =
@@ -285,8 +295,8 @@ void main() {
       await future;
 
       expect(AppGlassRefreshHold.isActive, isFalse);
-      expect(_glass(tester).quality, GlassQuality.premium,
-          reason: '刷新前后档位不变，仍是 premium');
+      expect(_glass(tester).quality, GlassQuality.standard,
+          reason: '刷新前后档位不变，仍是 standard');
       expect(tester.takeException(), isNull);
     });
   });

@@ -22,6 +22,9 @@ extension AlbumMediaFilterEmptyIcon on AlbumMediaFilter {
 /// 两页的差异只有摆法：详情页套在页头下（或 AppBar.bottom），朋友圈相册
 /// 套在 [AlbumMediaFilterSliver] 里吸顶。文案、数量口径、选中样式都从
 /// [AppSegmentedBar] 这一层取，页面上不会出现第二套视觉。
+///
+/// 底子也在那一层：整条是一枚玻璃胶囊（与底部 footer 同一套材质参数），
+/// 选中段只换文字颜色、不加填充块。
 class AlbumMediaFilterBar extends StatelessWidget {
   final AlbumMediaCounts counts;
   final AlbumMediaFilter selected;

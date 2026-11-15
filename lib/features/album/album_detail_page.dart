@@ -12,7 +12,6 @@ import '../../core/api_client.dart';
 import '../../core/app_events.dart';
 import '../../core/design/colors.dart';
 import '../../core/design/radius.dart';
-import '../../core/design/shadow.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/media_cache.dart';
 import '../../core/media_picker.dart';
@@ -25,6 +24,8 @@ import '../../core/url_utils.dart';
 import '../../models/album.dart';
 import '../../models/media.dart';
 import '../../widgets/album_thumb.dart';
+import '../../widgets/app_bottom_tab_bar.dart';
+import '../../widgets/app_glass.dart';
 import '../../widgets/app_segmented_bar.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
@@ -363,13 +364,20 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
           if (!didPop && _selecting) _exitSelection();
         },
         child: Scaffold(
+          // 上传按钮浮在右下角：平移由 [AlbumUploadFabLocation] 负责让开右侧
+          // 时间轴的轨道区（默认 endFloat 的 16 会让按钮压在轨道上）。
+          floatingActionButtonLocation: const AlbumUploadFabLocation(),
           // 空相册的入口在空状态里，右下角就不再叠一个同样的按钮。
           floatingActionButton: _selecting || !_canEdit || _items.isEmpty
               ? null
-              : _DetailFab(onPressed: _upload),
+              : AlbumUploadFab(onPressed: _upload),
           // 没选中任何一项时不出操作条，屏幕只留内容。
           bottomNavigationBar:
               _selecting && _selected.isNotEmpty ? _buildSelectionBar() : null,
+          // 多选底栏和底部 footer 一样是**浮**在内容上的胶囊：body 一直铺到
+          // 屏幕底边，照片从玻璃底下穿过，折射才有东西可采。没有操作条时
+          // bottomNavigationBar 为 null，布局和以前完全一样。
+          extendBody: true,
           body: _buildBody(),
         ),
       ),
@@ -939,6 +947,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
           SelectionFooterAction(
             icon: Icons.delete_outline,
             label: _batchDeleting ? '删除中' : '删除',
+            // 危险动作：用现有语义色（AppColors.danger），不是正文色。
+            danger: true,
             onTap: _selected.isEmpty || _busy ? null : _deleteSelected,
           ),
         SelectionFooterAction(
@@ -1375,23 +1385,54 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
   }
 }
 
-class _DetailFab extends StatefulWidget {
+/// 「上传照片」按钮：相册页右下角的**玻璃胶囊**，和多选底栏 / footer 同一套材质。
+///
+/// 形状：pill（圆角 = 高度/2），高度 [height]，宽度由内容撑开（图标 + 文字），
+/// 不再是一个纯图标圆钮。图标与文字都用主题色，玻璃自己给底衬。
+///
+/// 材质：走 [AppGlassSurface]——档位取 [preferredQuality]（与底部胶囊同档，
+/// [AppBottomTabBar.preferredQuality]）、[preferPremium]，所以光学参数
+/// （thickness 28 / refractiveIndex 1.38 / chromaticAberration 0.10 / blur 3）
+/// 和 footer 是同一份；内部叠一层 scrim，浮在照片上文字也不跳。
+///
+/// 降级：premium 拿不到退回磨砂档；连磨砂都跑不了（注入 minimal / 平台不支持
+/// shader）时退成同尺寸、同圆角的不透明 [AppColors.bgSurface] + 1px 细边，
+/// 布局一模一样，不跳版也不白屏。
+class AlbumUploadFab extends StatefulWidget {
+  /// 胶囊高度（不含外边距）。圆角 = 它的一半。
+  static const double height = 48;
+
+  /// 胶囊圆角 = 高度/2，正好是 pill。
+  static const double radius = height / 2;
+
+  /// 按钮右缘到时间轴轨道**左缘**的最小间距（见 [AlbumUploadFabLocation]）。
+  static const double trackGap = 8;
+
+  /// 按钮下缘离底部安全区的间距。
+  static const double bottomGap = 16;
+
+  /// 与底部胶囊同档：premium（拿不到时由 [AppGlassSurface] 自己退档）。
+  static const GlassQuality preferredQuality = AppBottomTabBar.preferredQuality;
+
+  /// 玻璃表面自己的 key：测试用它量「按钮矩形不与时间轴轨道相交」。
+  static const Key surfaceKey = ValueKey<String>('album-upload-fab');
+
   final VoidCallback onPressed;
 
-  const _DetailFab({required this.onPressed});
+  const AlbumUploadFab({super.key, required this.onPressed});
 
   @override
-  State<_DetailFab> createState() => _DetailFabState();
+  State<AlbumUploadFab> createState() => _AlbumUploadFabState();
 }
 
-class _DetailFabState extends State<_DetailFab> {
+class _AlbumUploadFabState extends State<AlbumUploadFab> {
   bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: '添加媒体',
+      label: '上传照片',
       child: Listener(
         onPointerDown: (_) => setState(() => _pressed = true),
         onPointerUp: (_) => setState(() => _pressed = false),
@@ -1400,24 +1441,39 @@ class _DetailFabState extends State<_DetailFab> {
           scale: _pressed ? 0.95 : 1.0,
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOutCubic,
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.primary,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              boxShadow: AppShadow.fab,
-            ),
-            child: Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(AppRadius.pill),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
+          child: AppGlassSurface(
+            key: AlbumUploadFab.surfaceKey,
+            radius: AlbumUploadFab.radius,
+            requestedQuality: AlbumUploadFab.preferredQuality,
+            // 静态 chrome：优先 premium（折射），拿不到时自己退回磨砂档。
+            preferPremium: true,
+            // 后面是滚动的照片墙：叠一层 scrim 给图标和文字一块稳定底衬。
+            scrim: true,
+            child: SizedBox(
+              height: AlbumUploadFab.height,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
                 onTap: widget.onPressed,
-                child: const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Icon(
-                    Icons.add_a_photo_outlined,
-                    size: 24,
-                    color: Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.add_a_photo_outlined,
+                        size: 20,
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '上传照片',
+                        style: AppText.caption.copyWith(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1426,5 +1482,29 @@ class _DetailFabState extends State<_DetailFab> {
         ),
       ),
     );
+  }
+}
+
+/// 上传按钮的落点：右下角，但整枚按钮让开右侧时间轴的轨道区。
+///
+/// 默认的 [FloatingActionButtonLocation.endFloat] 只留 16：按钮右缘会压在
+/// [kTimelineTrackWidth] 宽的那条轨道上——轨道下半段既拖不到也看不清。这里
+/// 右缘固定停在「轨道左缘再往左 [AlbumUploadFab.trackGap]」，底部与 endFloat
+/// 同一个口径（16 + 安全区）。
+class AlbumUploadFabLocation extends FloatingActionButtonLocation {
+  const AlbumUploadFabLocation();
+
+  @override
+  Offset getOffset(ScaffoldPrelayoutGeometry geometry) {
+    final size = geometry.floatingActionButtonSize;
+    final left = geometry.scaffoldSize.width -
+        kTimelineTrackWidth -
+        AlbumUploadFab.trackGap -
+        size.width;
+    final top = geometry.contentBottom -
+        size.height -
+        AlbumUploadFab.bottomGap -
+        geometry.minInsets.bottom;
+    return Offset(left, top);
   }
 }

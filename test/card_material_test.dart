@@ -32,8 +32,9 @@ Post _post() => Post(
       medias: const [],
     );
 
-// 默认注入 premium：卡片现在与底部胶囊同档，几何断言必须在 premium 这条路上
-// 也成立。minimal / 无档位的退化用例自己显式传档位。
+// 默认注入 premium（上限放到最高）：卡片自己固定在 standard、不抓 capture
+// （见 AppGlassSurface.kCardQuality），几何断言在 standard 这条路上成立。
+// minimal / 无档位的退化用例自己显式传档位。
 Widget _host(Widget child, {GlassQuality? quality = GlassQuality.premium}) {
   final app = MaterialApp(theme: buildAppTheme(), home: child);
   if (quality == null) return app;
@@ -133,15 +134,14 @@ void main() {
 
     // 玻璃（GlassContainer）和外框同尺寸：留白处也是玻璃，不是页面底色。
     expect(tester.getRect(find.byType(GlassContainer)), tester.getRect(surface));
-    // 材质与底部胶囊同档：premium 的深斜面参数（28 / 1.38 / 0.10 / 3）。
+    // 卡片固定 standard：磨砂参数（12 / 1.2 / 8），不做 premium 的 capture。
     final container =
         tester.widget<GlassContainer>(find.byType(GlassContainer));
-    expect(container.quality, GlassQuality.premium);
-    expect(container.settings!.thickness, 28,
-        reason: 'PostCard 和 footer 用同一套 premium 参数');
-    expect(container.settings!.refractiveIndex, 1.38);
-    expect(container.settings!.chromaticAberration, 0.10);
-    expect(container.settings!.blur, 3);
+    expect(container.quality, GlassQuality.standard,
+        reason: 'premium 的 capture 会在列表重建那一帧画出黑块');
+    expect(container.settings!.thickness, 12, reason: '磨砂那套光学参数');
+    expect(container.settings!.blur, 8);
+    expect(container.useOwnLayer, isFalse);
     _expectLayersCoverFrame(tester, surface);
     _expectNoOpaqueBoxBetween(tester, frame: surface, content: content);
   });

@@ -70,18 +70,19 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('注入 premium：「我的」页的卡片与 footer 同档、同一套参数', (tester) async {
+  testWidgets('注入 premium：卡片仍然固定在 standard（不抓 capture）', (tester) async {
     await pumpProfile(tester, quality: GlassQuality.premium);
 
     final containers =
         tester.widgetList<GlassContainer>(find.byType(GlassContainer)).toList();
     expect(containers.length, 3, reason: '头像卡 + 服务器存储卡 + 设置组卡');
     for (final container in containers) {
-      expect(container.quality, GlassQuality.premium);
-      expect(container.settings!.thickness, 28);
-      expect(container.settings!.refractiveIndex, 1.38);
-      expect(container.settings!.chromaticAberration, 0.10);
-      expect(container.settings!.blur, 3);
+      // 卡片档位只有一处来源（AppGlassSurface.kCardQuality = standard）：
+      // premium 要抓 capture，列表重建那一帧会整块发黑，所以上限给到 premium
+      // 也不改变卡片。
+      expect(container.quality, GlassQuality.standard);
+      expect(container.settings!.thickness, 12);
+      expect(container.settings!.blur, 8);
     }
     expect(tester.takeException(), isNull);
   });

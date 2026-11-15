@@ -111,10 +111,13 @@ class _PostCardState extends State<PostCard> {
           : Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               // 玻璃只铺在卡片本体上：列表/页面的背景保持不变。
-              // 材质与底部胶囊同档（[AppGlassSurface.kCardQuality]：premium，
-              // 28 / 1.38 / 0.10 / 3）。premium 在滚动列表里可能掉帧，这是
-              // 「先试材质」阶段的已知风险；仍不自建层（useOwnLayer 默认
-              // false），内容有 RepaintBoundary 兜着，滚动时不会每帧重建。
+              // 档位固定用 [AppGlassSurface.kCardQuality]，现在是 standard：
+              // 纯 BackdropFilter，**不抓 capture**。这不是性能取舍，是黑卡的
+              // 修法——premium 的 capture 在列表重建/刷新那一帧还没就绪，会画
+              // 出一块近黑（见 kCardQuality 的注释与
+              // test/feed_refresh_glass_test.dart）。折射留给底部胶囊那种静态
+              // chrome；卡片仍不自建层（useOwnLayer 默认 false），内容有
+              // RepaintBoundary 兜着，滚动时不会每帧重建。
               // 降到 minimal / 玻璃不可用时就是不透明的 bgSurface，布局完全一致。
               child: AppGlassSurface(
                 radius: AppRadius.lg,

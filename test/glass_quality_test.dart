@@ -439,7 +439,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('每张卡片复用外层 backdrop、与 footer 同档 premium，内容有 RepaintBoundary',
+    testWidgets('每张卡片固定 standard（不抓 capture），内容有 RepaintBoundary',
         (tester) async {
       await tester.pumpWidget(host(GlassQuality.premium));
       await tester.pump();
@@ -449,19 +449,20 @@ void main() {
       expect(surface.useOwnLayer, isFalse, reason: '别让每张卡片各开一层玻璃');
       expect(surface.wantedQuality, AppGlassSurface.kCardQuality,
           reason: '卡片档位只有一个来源：AppGlassSurface.kCardQuality');
-      expect(AppGlassSurface.kCardQuality, AppBottomTabBar.preferredQuality,
-          reason: '卡片和 footer 是同一档（premium）');
+      // 卡片和 footer 不再是同一档：premium 要抓 capture，列表重建会黑。
+      expect(AppGlassSurface.kCardQuality, GlassQuality.standard,
+          reason: '卡片必须 standard：premium 的 capture 未就绪帧会整块发黑');
+      expect(AppBottomTabBar.preferredQuality, GlassQuality.premium,
+          reason: 'footer 是静态 chrome，继续 premium');
 
       final container =
           tester.widget<GlassContainer>(find.byType(GlassContainer));
       expect(container.useOwnLayer, isFalse);
-      expect(container.quality, GlassQuality.premium);
-      // 光学参数与 footer 完全相同：28 / 1.38 / 0.10 / 3。
+      expect(container.quality, GlassQuality.standard);
+      // standard 的光学参数：12 / 1.2 / 8。
       final settings = container.settings!;
-      expect(settings.thickness, 28);
-      expect(settings.refractiveIndex, 1.38);
-      expect(settings.chromaticAberration, 0.10);
-      expect(settings.blur, 3);
+      expect(settings.thickness, 12);
+      expect(settings.blur, 8);
       // 滚动时只重绘玻璃层，卡片内容走缓存。
       expect(
         find.descendant(

@@ -233,7 +233,7 @@ void main() {
     });
   });
 
-  group('卡片与胶囊同档：一套 premium 参数', () {
+  group('卡片固定在 standard：不跟胶囊一起走 premium（避免 capture 黑卡）', () {
     Widget cardHost({GlassQuality? quality}) {
       final app = MaterialApp(
         theme: buildAppTheme(),
@@ -249,23 +249,30 @@ void main() {
           : AppGlassScope(quality: quality, child: app);
     }
 
-    testWidgets('注入 premium：卡片的档位与光学参数和 footer 完全一致', (tester) async {
+    testWidgets('注入 premium：卡片仍然是 standard，胶囊才是 premium', (tester) async {
       await tester.pumpWidget(cardHost(quality: GlassQuality.premium));
       await tester.pump(const Duration(milliseconds: 50));
 
+      // 档位上限给到 premium 也不改变卡片：premium 要抓 capture（几何遮罩
+      // toImageSync / BackdropGroup 背景），列表重建的那一帧还没就绪就会整块
+      // 发黑——这就是「朋友圈下拉刷新黑卡」的根因。折射只留给静态 chrome。
+      expect(AppGlassSurface.kCardQuality, GlassQuality.standard,
+          reason: '卡片档位只有一个来源，必须是 standard');
+      expect(AppBottomTabBar.preferredQuality, GlassQuality.premium,
+          reason: '底部胶囊是静态 chrome，继续 premium');
+
       final card = _container(tester);
-      expect(card.quality, GlassQuality.premium);
+      expect(card.quality, GlassQuality.standard);
       expect(card.useOwnLayer, isFalse,
           reason: '卡片不自建层（列表里另有 RepaintBoundary 兜着）');
 
-      // footer 那一套：thickness 28 / 折射 1.38 / 色散 0.10 / blur 3。
+      // standard 那一套：thickness 12 / 折射 1.2 / blur 8。
       final settings = card.settings!;
-      expect(settings.thickness, 28);
-      expect(settings.refractiveIndex, 1.38);
-      expect(settings.chromaticAberration, 0.10);
-      expect(settings.blur, 3);
-      expect(settings.glassColor.a, closeTo(appGlassChromeTintColor.a, 1e-9),
-          reason: '连 tint 都是胶囊那一份（比磨砂更淡）');
+      expect(settings.thickness, 12);
+      expect(settings.refractiveIndex, 1.2);
+      expect(settings.blur, 8);
+      expect(settings.glassColor.a, closeTo(appGlassTintColor.a, 1e-9),
+          reason: '磨砂那一份 tint（卡片不再用胶囊的 chrome tint）');
       expect(tester.takeException(), isNull);
     });
 
