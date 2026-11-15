@@ -199,6 +199,8 @@ class _FeedPageState extends State<FeedPage> {
     return AppGlassBackdrop(
       child: Scaffold(
         backgroundColor: Colors.transparent,
+        // body 一直铺到屏幕底边：悬浮胶囊是叠在列表上的，不给它留槽位。
+        extendBody: true,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
@@ -217,14 +219,10 @@ class _FeedPageState extends State<FeedPage> {
             ),
           ],
         ),
-        // 胶囊浮在页面上：底部留出「胶囊 + 间距 + 安全区」，最后一条动态
-        // 滚到底时不会被压住。
-        body: Padding(
-          padding: EdgeInsets.only(
-            bottom: AppBottomTabBar.overlayInset(context),
-          ),
-          child: _buildBody(),
-        ),
+        // 列表一直滚到屏幕底边、从胶囊底下穿过：磨砂后面是真实的照片。
+        // 不能在这里给 body 加 Padding——那会把视口整体抬高到胶囊上沿，
+        // 胶囊正下方又变回一片空底色（末尾的留白由列表自己的尾条提供）。
+        body: _buildBody(),
       ),
     );
   }
@@ -342,6 +340,9 @@ class _FeedPageState extends State<FeedPage> {
       );
     }
 
+    // 末尾余量不用另外加：底部的「已经到底啦」自己带 36 的留白，已经比
+    // 半个胶囊高（[AppBottomTabBar.contentBottomInset] = 28）多一点。再加
+    // 一层会让滚到底时整条列表又缩回胶囊上方，胶囊底下变回空底。
     return Stack(
       clipBehavior: Clip.none,
       children: [
@@ -361,6 +362,8 @@ class _FeedPageState extends State<FeedPage> {
           FeedTimelineLayer(
             controller: _scrollController,
             label: _timelineMonthLabel,
+            // 轨道停在胶囊上沿：它是要手指拖的控件，不该藏到玻璃底下。
+            bottomInset: AppBottomTabBar.overlayInset(context),
           ),
       ],
     );
@@ -383,6 +386,7 @@ class FeedTimelineLayer extends StatelessWidget {
     super.key,
     required this.controller,
     required this.label,
+    this.bottomInset = 0,
   });
 
   final ScrollController controller;
@@ -390,12 +394,16 @@ class FeedTimelineLayer extends StatelessWidget {
   /// 气泡文案：顶部可见那条动态的月份。
   final String Function() label;
 
+  /// 轨道离视口底边的距离。列表现在从悬浮胶囊底下穿过，轨道要按胶囊高度
+  /// 抬起来，否则滑块会滑进玻璃后面拖不到。
+  final double bottomInset;
+
   @override
   Widget build(BuildContext context) {
     return Positioned(
       right: 0,
       top: kFeedDateHeaderHeight,
-      bottom: 0,
+      bottom: bottomInset,
       width: 30,
       child: PhotoTimelineScrubber(
         controller: controller,
@@ -428,4 +436,3 @@ class _FloatingDateHeaderDelegate extends SliverPersistentHeaderDelegate {
     return true;
   }
 }
-

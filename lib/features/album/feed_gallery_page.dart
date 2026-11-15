@@ -13,6 +13,7 @@ import '../../core/responsive.dart';
 import '../../models/media.dart';
 import '../../models/paged.dart';
 import '../../widgets/album_thumb.dart';
+import '../../widgets/app_bottom_tab_bar.dart';
 import '../../widgets/app_segmented_bar.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
@@ -614,6 +615,8 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
           }
         }
 
+        // 末尾余量同样不用另加：「时间轴到底了」自己带 36 的留白，已经够
+        // 半个胶囊高。再叠一层，滚到底时照片就整体缩回胶囊上方了。
         final showScrubber = !_selecting && displayItems.length > 12;
         return Stack(
           clipBehavior: Clip.none,
@@ -639,6 +642,8 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
                   displayItems,
                   AlbumViewSettings.sort.value,
                 ),
+                bottomInset:
+                    _selecting ? 0 : AppBottomTabBar.overlayInset(context),
               ),
           ],
         );

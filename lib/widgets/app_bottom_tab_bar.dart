@@ -45,10 +45,17 @@ class AppBottomTabBar extends StatelessWidget {
 
   /// 悬浮胶囊盖住页面内容的实际高度：胶囊 + 离安全区的间距 + 安全区本身。
   ///
-  /// 页面（朋友圈 / 相册 / 我的）按它给列表留底部 padding，滚到底时最后
-  /// 一条内容不会藏在胶囊下面。
+  /// 只给「必须完整露在胶囊上方」的东西用（右侧时间轴轨道、气泡这类不能被
+  /// 玻璃压住的手势控件）。滚动内容**不用**它——见 [contentBottomInset]。
   static double overlayInset(BuildContext context) =>
       barHeight + bottomGap + MediaQuery.viewPaddingOf(context).bottom;
+
+  /// 滚动内容自己的末尾留白：半个胶囊高（28）。
+  ///
+  /// 页面不再为胶囊整体让出 [overlayInset]：那样胶囊正下方永远是一块空
+  /// 底色，磨砂没有可模糊的东西。留半个胶囊高就够——最后一项能滑到胶囊
+  /// 下沿附近，滚的过程中内容一直从胶囊底下穿过。
+  static const double contentBottomInset = barHeight / 2;
 
   final List<AppBottomTabItem> items;
   final int selectedIndex;

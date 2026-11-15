@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/album_view_settings.dart';
 import '../../core/design/colors.dart';
-import '../../widgets/app_bottom_tab_bar.dart';
 import '../../widgets/app_category_menu.dart';
+import '../../widgets/app_glass.dart';
 import 'custom_albums_page.dart';
 import 'feed_gallery_page.dart';
 
@@ -64,84 +64,87 @@ class AlbumTabPageState extends State<AlbumTabPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        // 相册总页的「分类」是这一页的层级，用标题 + 下拉表达；相册详情页里
-        // 的「全部/照片/视频」才是页内筛选（分段条）。两者形式必须区分开。
-        // 高度压到 48：标题行下面直接是内容，不再夹一条 46 高的分段条带子。
-        toolbarHeight: _toolbarHeight,
-        centerTitle: true,
-        leading: _feedEditing
-            ? IconButton(
-                onPressed: () => _feedGalleryKey.currentState?.exitSelection(),
-                icon: const Icon(Icons.close),
-                tooltip: '退出选择',
-              )
-            : null,
-        title: _feedEditing
-            ? Text('已选 $_feedSelected 项')
-            : AppCategoryMenu(
-                items: [
-                  for (var i = 0; i < _categories.length; i++)
-                    AppCategoryItem(
-                      _categories[i],
-                      count: _tabCounts[i],
+    // 和朋友圈 / 我的同一套底：渐变铺满整页，Scaffold 自己透明，网格从
+    // 悬浮胶囊底下穿过去，胶囊才有东西可模糊。
+    return AppGlassBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        extendBody: true,
+        appBar: AppBar(
+          // 相册总页的「分类」是这一页的层级，用标题 + 下拉表达；相册详情页里
+          // 的「全部/照片/视频」才是页内筛选（分段条）。两者形式必须区分开。
+          // 高度压到 48：标题行下面直接是内容，不再夹一条 46 高的分段条带子。
+          toolbarHeight: _toolbarHeight,
+          centerTitle: true,
+          leading: _feedEditing
+              ? IconButton(
+                  onPressed: () =>
+                      _feedGalleryKey.currentState?.exitSelection(),
+                  icon: const Icon(Icons.close),
+                  tooltip: '退出选择',
+                )
+              : null,
+          title: _feedEditing
+              ? Text('已选 $_feedSelected 项')
+              : AppCategoryMenu(
+                  items: [
+                    for (var i = 0; i < _categories.length; i++)
+                      AppCategoryItem(
+                        _categories[i],
+                        count: _tabCounts[i],
+                      ),
+                  ],
+                  selectedIndex: _selected,
+                  onChanged: (index) {
+                    if (_feedEditing) return;
+                    _select(index);
+                  },
+                ),
+          actions: _feedEditing
+              ? [
+                  TextButton(
+                    onPressed: () => _feedGalleryKey.currentState?.toggleAll(),
+                    child: Text(
+                      _feedSelected == _feedTotal ? '取消全选' : '全选',
+                    ),
+                  ),
+                ]
+              : [
+                  if (_selected == 0)
+                    IconButton(
+                      onPressed: () => showAlbumViewMenu(context),
+                      tooltip: '排序与视图',
+                      icon: Icon(
+                        Icons.tune_rounded,
+                        size: 22,
+                        color: AppColors.textPrimary,
+                      ),
                     ),
                 ],
-                selectedIndex: _selected,
-                onChanged: (index) {
-                  if (_feedEditing) return;
-                  _select(index);
-                },
-              ),
-        actions: _feedEditing
-            ? [
-                TextButton(
-                  onPressed: () => _feedGalleryKey.currentState?.toggleAll(),
-                  child: Text(
-                    _feedSelected == _feedTotal ? '取消全选' : '全选',
-                  ),
-                ),
-              ]
-            : [
-                if (_selected == 0)
-                  IconButton(
-                    onPressed: () => showAlbumViewMenu(context),
-                    tooltip: '排序与视图',
-                    icon: Icon(
-                      Icons.tune_rounded,
-                      size: 22,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-              ],
-      ),
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onHorizontalDragEnd: (details) {
-          if (_feedEditing) return;
-          final velocity = details.primaryVelocity ?? 0;
-          if (velocity.abs() < 260) return;
-          if (velocity < 0) {
-            if (_selected < 2) {
-              _select(_selected + 1);
+        ),
+        body: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onHorizontalDragEnd: (details) {
+            if (_feedEditing) return;
+            final velocity = details.primaryVelocity ?? 0;
+            if (velocity.abs() < 260) return;
+            if (velocity < 0) {
+              if (_selected < 2) {
+                _select(_selected + 1);
+              } else {
+                widget.onSwipeLeft?.call();
+              }
             } else {
-              widget.onSwipeLeft?.call();
+              if (_selected > 0) {
+                _select(_selected - 1);
+              } else {
+                widget.onSwipeRight?.call();
+              }
             }
-          } else {
-            if (_selected > 0) {
-              _select(_selected - 1);
-            } else {
-              widget.onSwipeRight?.call();
-            }
-          }
-        },
-        // 底部让出悬浮胶囊：相册网格/选择栏都排在胶囊上面。进入选择态时
-        // 胶囊会被 HomePage 藏起来，这里也就不要再留空。
-        child: Padding(
-          padding: EdgeInsets.only(
-            bottom: _feedEditing ? 0 : AppBottomTabBar.overlayInset(context),
-          ),
+          },
+          // 网格一直铺到屏幕底边：末尾那半个胶囊高的余量由子页自己的滚动
+          // 内容留（AppBottomTabBar.contentBottomInset）。进入选择态时胶囊被
+          // HomePage 藏起来、选择栏接管底部，子页也就不再留那点余量。
           child: IndexedStack(
             index: _selected,
             children: [

@@ -10,6 +10,7 @@ import '../../core/design/spacing.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/url_utils.dart';
 import '../../models/album.dart';
+import '../../widgets/app_bottom_tab_bar.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
 import 'album_detail_page.dart';
@@ -302,7 +303,14 @@ class _CustomAlbumsPageState extends State<CustomAlbumsPage> {
       color: AppColors.primary,
       onRefresh: _load,
       child: GridView.builder(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        // 末尾余量只留半个胶囊高：相册封面一直铺到悬浮胶囊底下，滚到底时
+        // 最后一行能滑出胶囊下沿。
+        padding: const EdgeInsets.fromLTRB(
+          16,
+          8,
+          16,
+          24 + AppBottomTabBar.contentBottomInset,
+        ),
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: _albums.length + 1,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(

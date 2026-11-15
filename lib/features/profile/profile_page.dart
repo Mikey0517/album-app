@@ -389,9 +389,11 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     // 最底层是渐变底色（[AppGlassBackdrop]）：卡片玻璃背后得有东西可模糊。
+    // body 一直铺到屏幕底边，悬浮胶囊盖在卡片上，不给它留槽位。
     return AppGlassBackdrop(
       child: Scaffold(
         backgroundColor: Colors.transparent,
+        extendBody: true,
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
@@ -521,9 +523,10 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     }
     final user = _user!;
     return SingleChildScrollView(
-      // 底部再让出悬浮胶囊的高度：最后一张卡片不会藏在胶囊下面。
-      padding: EdgeInsets.only(
-        bottom: 24 + AppBottomTabBar.overlayInset(context),
+      // 只留半个胶囊高的余量：卡片可以从胶囊底下穿过，滚到底时最后一张
+      // 也能滑出胶囊下沿。整个让出胶囊高度会让胶囊正下方变回一片空底。
+      padding: const EdgeInsets.only(
+        bottom: 24 + AppBottomTabBar.contentBottomInset,
       ),
       child: Column(
         children: [

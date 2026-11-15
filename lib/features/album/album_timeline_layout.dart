@@ -267,11 +267,14 @@ Widget timelineScrubberLayer({
   required List<double> itemOffsets,
   required double trackTop,
   required String Function() liveLabel,
+  /// 轨道离视口底边的距离。网格现在从悬浮胶囊底下穿过，轨道得抬到胶囊
+  /// 上沿，否则滑块会滑进玻璃后面拖不到。
+  double bottomInset = 0,
 }) {
   return Positioned(
     right: 0,
     top: trackTop,
-    bottom: 0,
+    bottom: bottomInset,
     width: kTimelineTrackWidth,
     child: PhotoTimelineScrubber(
       controller: controller,

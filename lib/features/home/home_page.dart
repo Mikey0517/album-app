@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../core/design/colors.dart';
 import '../../widgets/app_bottom_tab_bar.dart';
 import '../album/album_tab_page.dart';
 import '../feed/feed_page.dart';
@@ -36,9 +35,10 @@ class _HomePageState extends State<HomePage> {
   /// 图标 + 文字，没有滑块/胶囊指示器。玻璃不可用或降到 minimal 时由它自己
   /// 退化成同样的胶囊（不透明底 + 细边），这里不需要再分支。
   ///
-  /// 它盖在页面上面（Stack 里排在 IndexedStack 之后），不再占 Scaffold 的
-  /// bottomNavigationBar 槽位：页面底色能一直铺到屏幕底边，胶囊背后才有
-  /// 东西可模糊。页面自己按 [AppBottomTabBar.overlayInset] 留底部空间。
+  /// 它盖在页面上面（Stack 里排在 IndexedStack 之后），不占 Scaffold 的
+  /// bottomNavigationBar 槽位：页面内容一直铺到屏幕底边，胶囊背后才有真实
+  /// 的照片/卡片在滚动。页面只在滚动内容末尾留 [AppBottomTabBar.contentBottomInset]
+  /// 的余量，不再整块让出胶囊高度。
   Widget _buildBottomBar(BuildContext context) {
     return AppBottomTabBar(
       selectedIndex: _index,
@@ -76,8 +76,12 @@ class _HomePageState extends State<HomePage> {
             dark ? Brightness.light : Brightness.dark,
         systemNavigationBarContrastEnforced: false,
       ),
+      // 外壳自己不上色：底色由三个页面各自的 [AppGlassBackdrop] 渐变负责，
+      // 这层只是容器。extendBody 让 body 一直铺到屏幕底边——胶囊是叠在内容
+      // 上的 overlay，任何「为它让出高度」的槽位都会让胶囊下面变回一片空底。
       child: Scaffold(
-        backgroundColor: AppColors.bgPage,
+        backgroundColor: Colors.transparent,
+        extendBody: true,
         body: Stack(
           children: [
             Positioned.fill(
@@ -109,7 +113,7 @@ class _HomePageState extends State<HomePage> {
                 ),
               ),
             ),
-            // 悬浮胶囊：盖在页面之上，页面内容按 overlayInset 留出底部空间。
+            // 悬浮胶囊：盖在页面之上，页面内容从它底下穿过。
             if (!_hideNavigation)
               Positioned(
                 left: 0,
