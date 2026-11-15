@@ -78,6 +78,22 @@ class AppAccent {
     return (hi + 0.05) / (lo + 0.05);
   }
 
+  /// 把 [over] 按自己的 alpha 叠到 [under] 上（sRGB 的 srcOver），返回不透明色。
+  ///
+  /// 半透明的东西（玻璃 tint、scrim、带 alpha 的文字色）单独算对比度没有
+  /// 意义：先逐层合成出一块不透明的底衬，再交给 [contrastRatio]。
+  static Color compositeOver(Color over, Color under) {
+    final a = over.a;
+    if (a >= 1.0) return over;
+    if (a <= 0.0) return under;
+    return Color.from(
+      alpha: 1.0,
+      red: over.r * a + under.r * (1 - a),
+      green: over.g * a + under.g * (1 - a),
+      blue: over.b * a + under.b * (1 - a),
+    );
+  }
+
   /// 运行时主色。
   ///
   /// 浅色模式尊重用户选的颜色（预设所见即所得）；深色模式把亮度抬到

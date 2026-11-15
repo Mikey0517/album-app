@@ -6,9 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/url_utils.dart';
-import '../../core/video_orientation.dart';
 import '../../models/media.dart';
 import '../../core/media_cache.dart';
+import 'corrected_video_layer.dart';
 import 'zoomable_photo.dart';
 
 /// 只有 WiFi/有线才自动播放动态照片；移动流量下保持静态图，点一下才播。
@@ -216,11 +216,11 @@ class _LivePhotoViewState extends State<LivePhotoView> {
             ),
           ),
           if (showVideo)
-            Center(
-              child: AspectRatio(
-                aspectRatio: correctedVideoAspectRatio(video.value),
-                child: VideoPlayer(video),
-              ),
+            // 视频层按修正后的比例 contain 摆放：静态图 4:3、视频带旋转时
+            // 也不会被拉伸或撑满，更不会溢出播放区。
+            CorrectedVideoLayer(
+              value: video.value,
+              child: VideoPlayer(video),
             ),
           if (_initializing)
             const Center(

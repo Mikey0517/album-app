@@ -17,6 +17,29 @@ class AppBottomTabItem {
   });
 }
 
+/// 未选中项的颜色：在 [AppColors.textSecondary] 上往 [AppColors.textPrimary]
+/// 压 18%。
+///
+/// 胶囊里是磨砂玻璃 + 42%/50% 的 scrim，底衬已经拉回页面底色附近，但
+/// 中性灰 textSecondary（#6B7280）对这块底衬只有约 4.4:1——差一点点过不了
+/// 4.5。压深这一档把余量做到约 5.3:1；深色模式同一条公式自动变亮（约 7.8:1）。
+const double appTabBarInactiveContrastStep = 0.18;
+
+/// 当前明暗模式下未选中项的颜色。
+Color get appTabBarInactiveColor => Color.lerp(
+      AppColors.textSecondary,
+      AppColors.textPrimary,
+      appTabBarInactiveContrastStep,
+    )!;
+
+/// 未选中项的对比保护：同色 1px 描边的不透明度（上限 12%，再高就成发光字）。
+const double appTabBarHaloAlpha = 0.10;
+
+/// 文字/图标的极轻描边：同色、10%、0 偏移 1px 模糊，不发光、不加底色。
+List<Shadow> appTabBarHalo(Color color) => [
+      Shadow(color: color.withValues(alpha: appTabBarHaloAlpha), blurRadius: 1),
+    ];
+
 /// 悬浮胶囊式底部 tab：等宽三格、图标 + 文字。
 ///
 /// 不再是贴边通栏：整条栏浮在页面底部，左右各留 [sideInset]，底部离安全区
@@ -24,8 +47,14 @@ class AppBottomTabItem {
 /// 同形状（[AppGlassSurface] 收到同一个 radius）。
 ///
 /// 选中态只改颜色：实心 / 线框图标切换 + [AppColors.primary] /
-/// [AppColors.textSecondary]，点下去没有涟漪、没有底色、没有 hover 高亮
+/// [appTabBarInactiveColor]，点下去没有涟漪、没有底色、没有 hover 高亮
 /// （[InkWell] 换成了无涟漪的 [GestureDetector] + 显式 [Semantics]）。
+///
+/// 可读性是这里唯一「加了东西」的地方，两条一起做：
+/// 1. 玻璃内部叠一层低透明 scrim（[AppGlassSurface.scrim]）：磨砂后面的
+///    内容是滚动的照片，颜色会变，未选中的灰字需要一个不跳的底衬；
+/// 2. 未选中文字/图标带一圈同色 1px 描边（[appTabBarHalo]，10% 透明度）：
+///    内容颜色跳到极端时，字边缘也不会糊进去。都是「刚好够」，不做发光。
 ///
 /// 玻璃不可用（没有自适应档位 / initialize 失败）或档位降到
 /// [GlassQuality.minimal] 时，退化成同尺寸、同圆角的不透明
@@ -108,6 +137,9 @@ class AppBottomTabBar extends StatelessWidget {
         radius: radius,
         requestedQuality: GlassQuality.standard,
         useOwnLayer: false,
+        // 磨砂后面是滚动的照片：内部再叠一层 42%/50% 的页面底色 scrim，
+        // 未选中的灰字才有一块不随内容跳的底衬（见 appGlassScrimColor）。
+        scrim: true,
         child: content,
       ),
     );
@@ -128,7 +160,9 @@ class _TabButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppColors.primary : AppColors.textSecondary;
+    final color = selected ? AppColors.primary : appTabBarInactiveColor;
+    // 同色极轻描边：两档同等清晰度，不做发光、不加背景块。
+    final halo = appTabBarHalo(color);
     // 选中只改颜色（图标实心化 + 主色），不加水波纹、不加背景块。
     return Semantics(
       button: true,
@@ -146,6 +180,7 @@ class _TabButton extends StatelessWidget {
               selected ? item.selectedIcon : item.icon,
               size: 22,
               color: color,
+              shadows: halo,
             ),
             const SizedBox(height: 2),
             Text(
@@ -157,6 +192,7 @@ class _TabButton extends StatelessWidget {
                 height: 1.1,
                 fontWeight: FontWeight.w500,
                 color: color,
+                shadows: halo,
               ),
             ),
           ],

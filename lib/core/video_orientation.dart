@@ -83,3 +83,28 @@ double correctedVideoAspectRatio(VideoPlayerValue value) {
   if (ratio <= 0) return 1;
   return value.rotationCorrection % 180 == 0 ? ratio : 1 / ratio;
 }
+
+/// 在 [container] 里按 contain 语义摆一块 [aspectRatio] 的矩形：
+/// 只缩小不放大，比例恒等于 [aspectRatio]，永远不会溢出容器。
+///
+/// 视频层不能用「撑满容器」：`Texture`（`VideoPlayer` 内部）会铺满父级
+/// 给的盒子，父级尺寸的比例和视频比例不一致时画面就被拉伸。
+/// 约束无界时（宽或高为 infinite）按已知的那一边算，两边都无界时返回
+/// [Size.zero]，由调用点兜底。
+Size containSizeForAspectRatio(Size container, double aspectRatio) {
+  if (!aspectRatio.isFinite || aspectRatio <= 0) return Size.zero;
+  final maxWidth = container.width;
+  final maxHeight = container.height;
+  final widthBounded = maxWidth.isFinite && maxWidth > 0;
+  final heightBounded = maxHeight.isFinite && maxHeight > 0;
+  if (!widthBounded && !heightBounded) return Size.zero;
+  if (!widthBounded) return Size(maxHeight * aspectRatio, maxHeight);
+  if (!heightBounded) return Size(maxWidth, maxWidth / aspectRatio);
+  var width = maxWidth;
+  var height = width / aspectRatio;
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = height * aspectRatio;
+  }
+  return Size(width, height);
+}

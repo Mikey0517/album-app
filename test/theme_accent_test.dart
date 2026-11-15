@@ -201,11 +201,13 @@ void main() {
 
       final idleIcon =
           tester.widget<Icon>(find.byIcon(Icons.photo_library_outlined));
-      expect(idleIcon.color, AppColors.textSecondary);
+      // 未选中是「中性灰压深一档」的胶囊专用色（玻璃上要过 4.5:1），
+      // 不再是裸的 textSecondary——见 appTabBarInactiveColor。
+      expect(idleIcon.color, appTabBarInactiveColor);
       expect(idleIcon.color, isNot(AppColors.primary));
       final idleText = tester.widget<Text>(find.text('相册'));
       expect(idleText.style!.color, isNot(AppColors.primary));
-      expect(idleText.style!.color, AppColors.textSecondary);
+      expect(idleText.style!.color, appTabBarInactiveColor);
 
       expect(selectedText.style!.fontSize, inInclusiveRange(10, 11));
       expect(idleText.style!.fontSize, inInclusiveRange(10, 11));

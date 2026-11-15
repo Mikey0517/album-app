@@ -7,7 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/url_utils.dart';
 import '../../models/media.dart';
-import '../../core/video_orientation.dart';
+import 'corrected_video_layer.dart';
 import 'viewer_bottom_controls.dart';
 import '../../core/media_cache.dart';
 
@@ -166,11 +166,9 @@ class _VideoViewState extends State<VideoView> {
               ),
             ),
           if (initialized)
-            Center(
-              child: AspectRatio(
-                aspectRatio: correctedVideoAspectRatio(controller.value),
-                child: VideoPlayer(controller),
-              ),
+            CorrectedVideoLayer(
+              value: controller.value,
+              child: VideoPlayer(controller),
             ),
           if (_loading)
             const Center(

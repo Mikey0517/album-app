@@ -187,9 +187,9 @@ void main() {
           AppColors.primary);
       expect(
           tester.widget<Icon>(find.byIcon(Icons.photo_library_outlined)).color,
-          AppColors.textSecondary);
+          appTabBarInactiveColor);
       expect(tester.widget<Text>(find.text('相册')).style!.color,
-          AppColors.textSecondary);
+          appTabBarInactiveColor);
       // 未选中是线框，不会同时出现实心变体。
       expect(find.byIcon(Icons.photo_library), findsNothing);
 
@@ -199,7 +199,7 @@ void main() {
           AppColors.primary);
       expect(
           tester.widget<Icon>(find.byIcon(Icons.people_outline)).color,
-          AppColors.textSecondary);
+          appTabBarInactiveColor);
       // 选中态只动颜色与图标变体，不叠任何背景层。
       expect(
         find.descendant(

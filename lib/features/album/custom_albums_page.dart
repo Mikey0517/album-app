@@ -11,6 +11,7 @@ import '../../core/design/text_styles.dart';
 import '../../core/url_utils.dart';
 import '../../models/album.dart';
 import '../../widgets/app_bottom_tab_bar.dart';
+import '../../widgets/app_card.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
 import 'album_detail_page.dart';
@@ -484,23 +485,20 @@ class _NewAlbumCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
+    // 相册页唯一的卡片：和朋友圈的 PostCard、我的页的卡片组走同一条材质
+    // 路径（[AppCard]：外框 = 内容 + padding，玻璃/不透明两档同一个外框）。
+    // 圆角跟相册格子对齐，避免这一格比旁边「凸出来」。
+    return AppCard(
+      glass: true,
       onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.bgElevated,
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          border: Border.all(color: AppColors.borderLight),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.add, size: 32, color: AppColors.textTertiary),
-            const SizedBox(height: 6),
-            const Text('新建相册', style: AppText.caption),
-          ],
-        ),
+      radius: BorderRadius.circular(AppRadius.md),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.add, size: 32, color: AppColors.textTertiary),
+          const SizedBox(height: 6),
+          const Text('新建相册', style: AppText.caption),
+        ],
       ),
     );
   }

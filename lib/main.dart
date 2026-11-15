@@ -17,6 +17,7 @@ import 'core/design/colors.dart';
 import 'core/design/text_styles.dart';
 import 'core/design/theme.dart';
 import 'core/network_monitor.dart';
+import 'core/page_backdrop_controller.dart';
 import 'core/patch/patch_service.dart';
 import 'core/server_config.dart';
 import 'core/upload_manager.dart';
@@ -54,6 +55,8 @@ Future<void> main() async {
   await ServerConfig.init();
   await AppThemeController.init();
   await AppAccentController.init();
+  // 自定义页面背景：只读回文件路径，文件丢了内部会清 key 回退渐变。
+  await PageBackdropController.init();
   ApiClient.install();
   // 读回上次没传完的队列：登录态确认后自动续传。
   await UploadManager.instance.restore();

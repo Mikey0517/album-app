@@ -17,6 +17,7 @@ import '../../core/design/colors.dart';
 import '../../core/design/radius.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/formatters.dart';
+import '../../core/page_backdrop_controller.dart';
 import '../../core/server_config.dart';
 import '../../core/server_settings_dialog.dart';
 import '../../models/app_user.dart';
@@ -29,6 +30,7 @@ import '../../widgets/loading_view.dart';
 import '../update/force_update_dialog.dart';
 import '../update/ios_update_service.dart';
 import '../update/update_service.dart';
+import 'page_backdrop_sheet.dart';
 import 'storage_page.dart';
 import 'theme_accent_sheet.dart';
 
@@ -170,6 +172,12 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
 
   Future<void> _openAccentPicker() async {
     await showThemeAccentSheet(context);
+  }
+
+  /// 页面背景（三个 tab 共用一张图）：弹层里选图/恢复默认都只是改
+  /// [PageBackdropController] 的全局状态。
+  Future<void> _openPageBackdrop() async {
+    await showPageBackdropSheet(context);
   }
 
   Future<void> _loadVersion() async {
@@ -668,6 +676,38 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                       ),
                     );
                   },
+                ),
+                Divider(color: AppColors.divider, height: 1),
+                ListTile(
+                  key: const Key('profile-page-backdrop'),
+                  onTap: _openPageBackdrop,
+                  leading: Icon(
+                    Icons.wallpaper_outlined,
+                    color: AppColors.textSecondary,
+                    size: 22,
+                  ),
+                  title: const Text('页面背景', style: AppText.body),
+                  trailing: ValueListenableBuilder<String?>(
+                    valueListenable: PageBackdropController.path,
+                    builder: (context, saved, _) {
+                      final custom =
+                          PageBackdropController.imageFileOrNull(saved) != null;
+                      return Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            custom ? '自定义' : '默认渐变',
+                            style: AppText.caption,
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            color: AppColors.textTertiary,
+                            size: 18,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
                 Divider(color: AppColors.divider, height: 1),
                 ListTile(
