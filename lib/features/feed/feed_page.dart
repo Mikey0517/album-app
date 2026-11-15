@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../../api/post_api.dart';
 import '../../core/api_client.dart';
@@ -211,8 +210,6 @@ class _FeedPageState extends State<FeedPage> {
         ],
       ),
       body: _buildBody(),
-      // 玻璃「发动态」胶囊，右下角悬浮。行为与原 AppBar 里的相机按钮一致。
-      floatingActionButton: _ComposeFab(onPressed: _compose),
     );
   }
 
@@ -416,56 +413,3 @@ class _FloatingDateHeaderDelegate extends SliverPersistentHeaderDelegate {
   }
 }
 
-/// 右下角的「发动态」玻璃胶囊。
-///
-/// 玻璃容器自己不做点击（外层不套 InkWell）：点击交给容器内部的按钮，
-/// 这样玻璃只当背景，不会和 InkWell 的水波纹抢手势。
-class _ComposeFab extends StatelessWidget {
-  const _ComposeFab({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final quality = GlassAdaptiveScopeData.maybeOf(context)?.effectiveQuality;
-    // 玻璃不可用（initialize 失败 / 自适应降到 minimal）时用普通实心胶囊，
-    // 位置与尺寸保持一致，只是没有玻璃质感。
-    if (quality == null || quality == GlassQuality.minimal) {
-      return FilledButton.icon(
-        onPressed: onPressed,
-        icon: const Icon(Icons.add_rounded, size: 20),
-        label: const Text('发动态'),
-      );
-    }
-    return GlassContainer(
-      // 这个 FAB 不在任何 LiquidGlassLayer 之下，grouped 模式没有渲染上下文，
-      // 必须显式开自己的一层。
-      useOwnLayer: true,
-      shape: const LiquidRoundedSuperellipse(borderRadius: 28),
-      child: Material(
-        type: MaterialType.transparency,
-        child: InkWell(
-          onTap: onPressed,
-          customBorder: const StadiumBorder(),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add_rounded, size: 20, color: AppColors.primary),
-                const SizedBox(width: 6),
-                Text(
-                  '发动态',
-                  style: AppText.bodySmall.copyWith(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

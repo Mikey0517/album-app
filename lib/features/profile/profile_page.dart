@@ -22,6 +22,7 @@ import '../../core/server_settings_dialog.dart';
 import '../../models/app_user.dart';
 import '../../models/storage_info.dart';
 import '../../widgets/app_card.dart';
+import '../../widgets/app_glass.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
 import '../update/force_update_dialog.dart';
@@ -396,6 +397,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     final storage = _storage;
     if (_storageLoading) {
       return AppCard(
+        glass: true,
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
         child: Row(
           children: [
@@ -416,6 +418,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     }
     if (storage == null) {
       return AppCard(
+        glass: true,
         margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
         onTap: () => _loadStorage(silent: _storage != null),
         child: Row(
@@ -443,6 +446,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     final percent = (ratio * 100).round();
     final color = ratio >= 0.9 ? AppColors.danger : AppColors.primary;
     return AppCard(
+      glass: true,
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       onTap: () => _loadStorage(silent: true),
       child: Column(
@@ -514,13 +518,11 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
           GestureDetector(
             onTap: _editNickname,
             behavior: HitTestBehavior.opaque,
-            child: Container(
+            // 头像卡同样是玻璃底子，和下面几组卡片保持一套质感。
+            child: AppGlassSurface(
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppColors.bgSurface,
-                borderRadius: BorderRadius.circular(AppRadius.lg),
-              ),
+              requestedQuality: GlassQuality.standard,
               child: Row(
                 children: [
                   CircleAvatar(
@@ -558,7 +560,10 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
             ),
           ),
           _buildStorageCard(),
+          // 服务器状态/主题/主题色/存储空间/检查更新/退出登录这一组：整张
+          // 卡片底子换成玻璃，分组结构不变。
           AppCard(
+            glass: true,
             margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             padding: EdgeInsets.zero,
             child: Column(

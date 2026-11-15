@@ -12,6 +12,7 @@ import '../../core/formatters.dart';
 import '../../models/media.dart';
 import '../../models/post.dart';
 import '../../widgets/album_thumb.dart';
+import '../../widgets/app_glass.dart';
 
 class PostCard extends StatefulWidget {
   final Post post;
@@ -91,33 +92,31 @@ class _PostCardState extends State<PostCard> {
           ? const SizedBox(width: double.infinity)
           : Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: AppColors.bgSurface,
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(AppRadius.lg),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildHeader(),
-                        if ((widget.post.content ?? '').trim().isNotEmpty) ...[
-                          const SizedBox(height: AppSpacing.md),
-                          Text(
-                            widget.post.content!,
-                            style: AppText.body,
-                          ),
-                        ],
-                        if (widget.post.medias.isNotEmpty) ...[
-                          const SizedBox(height: AppSpacing.md),
-                          _buildMediaGrid(),
-                        ],
-                      ],
-                    ),
-                  ),
+              // 玻璃只铺在卡片本体上：列表/页面的背景保持不变。
+              // 列表里每张卡片都要一块玻璃，所以显式要 standard 档（包的轻量
+              // shader），并复用外层 backdrop；内容有 RepaintBoundary 兜着，
+              // 滚动时不会每帧重建。降到 minimal / 玻璃不可用时就是不透明的
+              // bgSurface，布局完全一致。
+              child: AppGlassSurface(
+                radius: AppRadius.lg,
+                padding: const EdgeInsets.all(16),
+                requestedQuality: GlassQuality.standard,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeader(),
+                    if ((widget.post.content ?? '').trim().isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      Text(
+                        widget.post.content!,
+                        style: AppText.body,
+                      ),
+                    ],
+                    if (widget.post.medias.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      _buildMediaGrid(),
+                    ],
+                  ],
                 ),
               ),
             ),
