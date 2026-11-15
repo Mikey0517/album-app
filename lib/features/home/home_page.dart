@@ -32,9 +32,13 @@ class _HomePageState extends State<HomePage> {
     setState(() => _index = value);
   }
 
-  /// 底部导航：整条栏自己就是玻璃底子（见 [AppBottomTabBar]），里面三个
-  /// tab 只是图标 + 文字，没有滑块/胶囊指示器。玻璃不可用或降到 minimal 时
-  /// 由它自己退化成不透明表面，这里不需要再分支。
+  /// 底部导航：一块悬浮胶囊玻璃（见 [AppBottomTabBar]），里面三个 tab 只是
+  /// 图标 + 文字，没有滑块/胶囊指示器。玻璃不可用或降到 minimal 时由它自己
+  /// 退化成同样的胶囊（不透明底 + 细边），这里不需要再分支。
+  ///
+  /// 它盖在页面上面（Stack 里排在 IndexedStack 之后），不再占 Scaffold 的
+  /// bottomNavigationBar 槽位：页面底色能一直铺到屏幕底边，胶囊背后才有
+  /// 东西可模糊。页面自己按 [AppBottomTabBar.overlayInset] 留底部空间。
   Widget _buildBottomBar(BuildContext context) {
     return AppBottomTabBar(
       selectedIndex: _index,
@@ -74,34 +78,47 @@ class _HomePageState extends State<HomePage> {
       ),
       child: Scaffold(
         backgroundColor: AppColors.bgPage,
-        body: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onHorizontalDragEnd: (details) {
-            if (_index == 1 || _hideNavigation) return;
-            final velocity = details.primaryVelocity ?? 0;
-            if (velocity.abs() < 260) return;
-            _goTo(velocity < 0 ? _index + 1 : _index - 1);
-          },
-          child: IndexedStack(
-            index: _index,
-            children: [
-              // 非 const：主题切换时需要重建整个朋友圈页面。
-              // ignore: prefer_const_constructors
-              FeedPage(),
-              AlbumTabPage(
-                key: _albumKey,
-                onEditingChanged: (editing) {
-                  if (!mounted || _hideNavigation == editing) return;
-                  setState(() => _hideNavigation = editing);
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onHorizontalDragEnd: (details) {
+                  if (_index == 1 || _hideNavigation) return;
+                  final velocity = details.primaryVelocity ?? 0;
+                  if (velocity.abs() < 260) return;
+                  _goTo(velocity < 0 ? _index + 1 : _index - 1);
                 },
-                onSwipeLeft: () => _goTo(2),
-                onSwipeRight: () => _goTo(0),
+                child: IndexedStack(
+                  index: _index,
+                  children: [
+                    // 非 const：主题切换时需要重建整个朋友圈页面。
+                    // ignore: prefer_const_constructors
+                    FeedPage(),
+                    AlbumTabPage(
+                      key: _albumKey,
+                      onEditingChanged: (editing) {
+                        if (!mounted || _hideNavigation == editing) return;
+                        setState(() => _hideNavigation = editing);
+                      },
+                      onSwipeLeft: () => _goTo(2),
+                      onSwipeRight: () => _goTo(0),
+                    ),
+                    ProfilePage(onLogout: widget.onLogout),
+                  ],
+                ),
               ),
-              ProfilePage(onLogout: widget.onLogout),
-            ],
-          ),
+            ),
+            // 悬浮胶囊：盖在页面之上，页面内容按 overlayInset 留出底部空间。
+            if (!_hideNavigation)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _buildBottomBar(context),
+              ),
+          ],
         ),
-        bottomNavigationBar: _hideNavigation ? null : _buildBottomBar(context),
       ),
     );
   }

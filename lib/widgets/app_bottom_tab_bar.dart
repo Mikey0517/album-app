@@ -17,22 +17,46 @@ class AppBottomTabItem {
   });
 }
 
-/// 微信式底部 tab：等宽分格、图标 + 文字。
+/// 悬浮胶囊式底部 tab：等宽三格、图标 + 文字。
 ///
-/// 玻璃用在「底子」上：整条底部栏是一块玻璃（满宽直角，铺满 56 + 安全区），
-/// 里面三个 tab 只是普通图标 + 文字，选中=主题色实心图标，未选中=中性灰线框，
-/// 没有滑块/胶囊指示器，也没有跟手动画。
+/// 不再是贴边通栏：整条栏浮在页面底部，左右各留 [sideInset]，底部离安全区
+/// 再留 [bottomGap]，四角是半径 [radius]（= 高度/2）的胶囊。玻璃底子和胶囊
+/// 同形状（[AppGlassSurface] 收到同一个 radius）。
+///
+/// 选中态只改颜色：实心 / 线框图标切换 + [AppColors.primary] /
+/// [AppColors.textSecondary]，点下去没有涟漪、没有底色、没有 hover 高亮
+/// （[InkWell] 换成了无涟漪的 [GestureDetector] + 显式 [Semantics]）。
 ///
 /// 玻璃不可用（没有自适应档位 / initialize 失败）或档位降到
-/// [GlassQuality.minimal] 时，退化成原来那块不透明 [AppColors.bgSurface]
-/// 加顶部 1px 最浅分隔线——布局一模一样，只是没有玻璃质感。
+/// [GlassQuality.minimal] 时，退化成同尺寸、同圆角的不透明
+/// [AppColors.bgSurface] 加一圈细边——不会退回通栏。
 class AppBottomTabBar extends StatelessWidget {
-  /// 内容高度（不含底部安全区）。
+  /// 内容高度（胶囊高度，不含底部安全区与外边距）。
   static const double barHeight = 56;
+
+  /// 胶囊离屏幕左右两边的边距。
+  static const double sideInset = 18;
+
+  /// 胶囊离底部安全区的间距。
+  static const double bottomGap = 8;
+
+  /// 胶囊圆角 = 高度/2，正好是 pill。
+  static const double radius = barHeight / 2;
+
+  /// 悬浮胶囊盖住页面内容的实际高度：胶囊 + 离安全区的间距 + 安全区本身。
+  ///
+  /// 页面（朋友圈 / 相册 / 我的）按它给列表留底部 padding，滚到底时最后
+  /// 一条内容不会藏在胶囊下面。
+  static double overlayInset(BuildContext context) =>
+      barHeight + bottomGap + MediaQuery.viewPaddingOf(context).bottom;
 
   final List<AppBottomTabItem> items;
   final int selectedIndex;
   final ValueChanged<int> onSelected;
+
+  /// 单个 tab 的 key。没有 InkWell 可找了，测试用它在整条栏里定位三个等宽
+  /// 格子。
+  static Key tabKey(int index) => ValueKey<String>('bottom-tab-$index');
 
   /// 想用的玻璃档位；null = 跟随自适应上限。
   final GlassQuality? requestedQuality;
@@ -47,35 +71,38 @@ class AppBottomTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 安全区放在玻璃里面，玻璃自己铺满到屏幕底边。
-    final content = SafeArea(
-      top: false,
-      child: SizedBox(
-        height: barHeight,
-        child: Row(
-          children: [
-            for (var index = 0; index < items.length; index++)
-              Expanded(
-                child: _TabButton(
-                  item: items[index],
-                  selected: index == selectedIndex,
-                  onTap: () => onSelected(index),
-                ),
+    // 安全区算进外间距：胶囊自己浮在安全区上面，不贴屏幕底边。
+    final safeBottom = MediaQuery.viewPaddingOf(context).bottom;
+    final content = SizedBox(
+      height: barHeight,
+      child: Row(
+        children: [
+          for (var index = 0; index < items.length; index++)
+            Expanded(
+              child: _TabButton(
+                key: tabKey(index),
+                item: items[index],
+                selected: index == selectedIndex,
+                onTap: () => onSelected(index),
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
 
-    // 静态 chrome，独此一块：自己开一层渲染上下文（它上面没有任何
-    // LiquidGlassLayer 可以复用 backdrop）。
-    return AppGlassSurface(
-      radius: 0,
-      requestedQuality: requestedQuality,
-      useOwnLayer: true,
-      // 退化到不透明表面时保留顶部那条 1px 最浅分隔线。
-      border: Border(top: BorderSide(color: AppColors.divider, width: 1)),
-      child: content,
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        sideInset,
+        0,
+        sideInset,
+        bottomGap + safeBottom,
+      ),
+      child: AppGlassSurface(
+        radius: radius,
+        requestedQuality: GlassQuality.standard,
+        useOwnLayer: false,
+        child: content,
+      ),
     );
   }
 }
@@ -86,6 +113,7 @@ class _TabButton extends StatelessWidget {
   final VoidCallback onTap;
 
   const _TabButton({
+    super.key,
     required this.item,
     required this.selected,
     required this.onTap,
@@ -94,39 +122,37 @@ class _TabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected ? AppColors.primary : AppColors.textSecondary;
-    return Material(
-      type: MaterialType.transparency,
-      child: InkWell(
+    // 选中只改颜色（图标实心化 + 主色），不加水波纹、不加背景块。
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: item.label,
+      onTap: onTap,
+      excludeSemantics: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: onTap,
-        splashColor: AppColors.primary.withValues(alpha: 0.08),
-        highlightColor: AppColors.primary.withValues(alpha: 0.04),
-        child: Semantics(
-          button: true,
-          selected: selected,
-          label: item.label,
-          excludeSemantics: true,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                selected ? item.selectedIcon : item.icon,
-                size: 22,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              selected ? item.selectedIcon : item.icon,
+              size: 22,
+              color: color,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              item.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: AppText.caption.copyWith(
+                fontSize: 10.5,
+                height: 1.1,
+                fontWeight: FontWeight.w500,
                 color: color,
               ),
-              const SizedBox(height: 2),
-              Text(
-                item.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: AppText.caption.copyWith(
-                  fontSize: 10.5,
-                  height: 1.1,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                  color: color,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

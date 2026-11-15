@@ -151,21 +151,29 @@ void main() {
       );
     }
 
-    testWidgets('等宽分格、56 高、顶部 1px 最浅分隔线，没有填充胶囊', (tester) async {
+    testWidgets('等宽三格、胶囊 56 高、无涟漪，退化后仍是细边胶囊', (tester) async {
       await pumpBar(tester);
 
+      // 整条栏 = 胶囊 56 + 离底边距 8（这个 host 没有底部安全区）。
       final bar = tester.getSize(find.byType(AppBottomTabBar));
-      expect(bar.height, AppBottomTabBar.barHeight);
-      expect(bar.height, 56);
+      expect(bar.height, AppBottomTabBar.barHeight + AppBottomTabBar.bottomGap);
+      expect(AppBottomTabBar.barHeight, 56);
       expect(find.byType(NavigationBar), findsNothing);
 
-      final cells = find.byType(InkWell);
+      // 三格等宽，但没有 InkWell：点下去不该有水波纹。
+      expect(find.byType(InkWell), findsNothing);
+      expect(find.byType(InkResponse), findsNothing);
+      final cells = find.byType(GestureDetector);
       expect(cells, findsNWidgets(3));
+      final pillWidth =
+          bar.width - AppBottomTabBar.sideInset * 2;
       final widths = [
-        for (final element in cells.evaluate()) tester.getSize(find.byWidget(element.widget)).width,
+        for (final element in cells.evaluate())
+          tester.getSize(find.byWidget(element.widget)).width,
       ];
-      expect(widths, [bar.width / 3, bar.width / 3, bar.width / 3]);
+      expect(widths, [pillWidth / 3, pillWidth / 3, pillWidth / 3]);
 
+      // 这个 host 没有玻璃档位 → 退化分支：不透明底 + 一圈 1px 细边。
       final decorated = tester.widget<DecoratedBox>(
         find
             .descendant(
@@ -174,7 +182,11 @@ void main() {
             )
             .first,
       );
-      final border = (decorated.decoration as BoxDecoration).border! as Border;
+      final decoration = decorated.decoration as BoxDecoration;
+      expect(decoration.color, AppColors.bgSurface);
+      expect(decoration.borderRadius,
+          BorderRadius.circular(AppBottomTabBar.radius));
+      final border = decoration.border! as Border;
       expect(border.top.width, 1);
       expect(border.top.color, AppColors.divider);
     });

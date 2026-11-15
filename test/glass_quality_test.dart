@@ -1,4 +1,5 @@
 import 'package:album_app/core/design/colors.dart';
+import 'package:album_app/core/design/radius.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/features/feed/post_card.dart';
 import 'package:album_app/models/post.dart';
@@ -8,7 +9,12 @@ import 'package:album_app/widgets/app_glass.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'
-    show AnimatedGlassIndicator, GlassContainer, GlassQuality, GlassTabBar;
+    show
+        AnimatedGlassIndicator,
+        GlassContainer,
+        GlassQuality,
+        GlassTabBar,
+        LiquidRoundedSuperellipse;
 
 const List<AppBottomTabItem> _tabs = [
   AppBottomTabItem(
@@ -80,7 +86,7 @@ void main() {
         _tabBar(GlassQuality.standard, onSelected: tapped.add),
       );
 
-      // 玻璃铺满整条栏：只有一块玻璃表面，且不属于任何一个 tab。
+      // 玻璃铺满整个胶囊：只有一块玻璃表面，且不属于任何一个 tab。
       expect(find.byType(GlassContainer), findsOneWidget);
       expect(
         find.descendant(
@@ -94,21 +100,82 @@ void main() {
       expect(find.byType(GlassTabBar), findsNothing);
       expect(find.byType(AnimatedGlassIndicator), findsNothing);
 
-      final bar = tester.getSize(find.byType(AppBottomTabBar));
-      expect(bar.height, AppBottomTabBar.barHeight);
-      expect(bar.height, 56);
+      // 胶囊本身还是 56 高；整条栏多出来的是离底边距。
+      final pill = tester.getSize(find.byType(AppGlassSurface).first);
+      expect(pill.height, AppBottomTabBar.barHeight);
+      expect(pill.height, 56);
+      expect(tester.getSize(find.byType(AppBottomTabBar)).height,
+          AppBottomTabBar.barHeight + AppBottomTabBar.bottomGap);
 
-      final cells = find.byType(InkWell);
-      expect(cells, findsNWidgets(3));
+      // 点下去只有颜色变化：没有 InkWell / InkResponse 就没有水波纹。
+      expect(
+        find.descendant(
+          of: find.byType(AppBottomTabBar),
+          matching: find.byType(InkWell),
+        ),
+        findsNothing,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(AppBottomTabBar),
+          matching: find.byType(InkResponse),
+        ),
+        findsNothing,
+      );
+
       final widths = [
-        for (final element in cells.evaluate())
-          tester.getSize(find.byWidget(element.widget)).width,
+        for (var index = 0; index < _tabs.length; index++)
+          tester.getSize(find.byKey(AppBottomTabBar.tabKey(index))).width,
       ];
-      expect(widths, [bar.width / 3, bar.width / 3, bar.width / 3]);
+      final pillWidth = pill.width;
+      expect(widths, [pillWidth / 3, pillWidth / 3, pillWidth / 3]);
 
       await tester.tap(find.text('相册'));
       await tester.tap(find.text('我的'));
       expect(tapped, [1, 2]);
+      // 点完也没有多出涟漪/高亮层。
+      expect(find.byType(InkWell), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('胶囊几何：左右 16~20、圆角 = 高度/2、底部离安全区 8~12',
+        (tester) async {
+      tester.view.physicalSize = const Size(360, 780);
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.padding = const FakeViewPadding(bottom: 34);
+      tester.view.viewPadding = const FakeViewPadding(bottom: 34);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPadding);
+      addTearDown(tester.view.resetViewPadding);
+
+      await tester.pumpWidget(_tabBar(GlassQuality.standard));
+
+      final barRect = tester.getRect(find.byType(AppBottomTabBar));
+      final pillRect = tester.getRect(find.byType(AppGlassSurface).first);
+
+      // 左右各留边距，不再贴边通栏。
+      final leftGap = pillRect.left - barRect.left;
+      final rightGap = barRect.right - pillRect.right;
+      expect(leftGap, greaterThan(0));
+      expect(rightGap, greaterThan(0));
+      expect(leftGap, inInclusiveRange(16, 20));
+      expect(rightGap, leftGap);
+      // 圆角 = 高度/2，四角是 pill。
+      expect(pillRect.height, 56);
+      expect(AppBottomTabBar.radius, AppBottomTabBar.barHeight / 2);
+      final surface =
+          tester.widget<AppGlassSurface>(find.byType(AppGlassSurface).first);
+      expect(surface.radius, pillRect.height / 2);
+      final shape = tester
+          .widget<GlassContainer>(find.byType(GlassContainer))
+          .shape as LiquidRoundedSuperellipse;
+      expect(shape.borderRadius, pillRect.height / 2);
+      // 底部：离安全区还有 8~12，安全区自身不算在胶囊里。
+      final bottomGap = barRect.bottom - pillRect.bottom - 34;
+      expect(bottomGap, inInclusiveRange(8, 12));
+      expect(barRect.bottom - pillRect.bottom,
+          AppBottomTabBar.bottomGap + 34);
     });
 
     testWidgets('选中=主题色实心图标，未选中=中性灰线框', (tester) async {
@@ -133,28 +200,48 @@ void main() {
       expect(
           tester.widget<Icon>(find.byIcon(Icons.people_outline)).color,
           AppColors.textSecondary);
+      // 选中态只动颜色与图标变体，不叠任何背景层。
+      expect(
+        find.descendant(
+          of: find.byType(AppBottomTabBar),
+          matching: find.byType(Material),
+        ),
+        findsNothing,
+      );
     });
 
-    testWidgets('minimal 档：整条栏退化成不透明 bgSurface + 顶部 1px 分隔线',
-        (tester) async {
+    testWidgets('minimal 档：退化成同圆角的不透明胶囊 + 1px 细边', (tester) async {
       await tester.pumpWidget(_tabBar(GlassQuality.minimal));
 
       expect(find.byType(GlassContainer), findsNothing);
       expect(find.byType(BackdropFilter), findsNothing, reason: 'minimal 不加模糊');
+      // 玻璃分支的两层装饰在 minimal 下不出现。
+      expect(find.byKey(AppGlassSurface.strokeKey), findsNothing);
+      expect(find.byKey(AppGlassSurface.highlightKey), findsNothing);
 
       final decoration = _firstDecorationUnder(tester, AppBottomTabBar);
       expect(decoration.color, AppColors.bgSurface);
+      // 退化也是胶囊：同样的圆角和边距，不退回通栏。
+      expect(decoration.borderRadius,
+          BorderRadius.circular(AppBottomTabBar.radius));
       final border = decoration.border! as Border;
       expect(border.top.width, 1);
+      expect(border.bottom.width, 1);
+      expect(border.left.width, 1);
       expect(border.top.color, AppColors.divider);
 
-      // 布局不变：还是 56 高、三个等宽 tab。
-      expect(tester.getSize(find.byType(AppBottomTabBar)).height, 56);
-      expect(find.byType(InkWell), findsNWidgets(3));
+      // 布局不变：胶囊还是 56 高，三个等宽 tab 都在。
+      expect(
+        tester.getSize(find.byKey(AppBottomTabBar.tabKey(0))).height,
+        56,
+      );
+      expect(find.byKey(AppBottomTabBar.tabKey(0)), findsOneWidget);
+      expect(find.byKey(AppBottomTabBar.tabKey(1)), findsOneWidget);
+      expect(find.byKey(AppBottomTabBar.tabKey(2)), findsOneWidget);
       expect(find.byType(GlassTabBar), findsNothing);
     });
 
-    testWidgets('玻璃不可用（没有任何档位）时同样是不透明表面', (tester) async {
+    testWidgets('玻璃不可用（没有任何档位）时同样是不透明胶囊', (tester) async {
       await tester.pumpWidget(_barHost(
         AppBottomTabBar(
           selectedIndex: 0,
@@ -164,9 +251,14 @@ void main() {
       ));
 
       expect(find.byType(GlassContainer), findsNothing);
-      expect(_firstDecorationUnder(tester, AppBottomTabBar).color,
-          AppColors.bgSurface);
-      expect(tester.getSize(find.byType(AppBottomTabBar)).height, 56);
+      final decoration = _firstDecorationUnder(tester, AppBottomTabBar);
+      expect(decoration.color, AppColors.bgSurface);
+      expect(decoration.borderRadius,
+          BorderRadius.circular(AppBottomTabBar.radius));
+      expect(
+        tester.getSize(find.byKey(AppBottomTabBar.tabKey(0))).height,
+        56,
+      );
     });
   });
 
@@ -197,6 +289,9 @@ void main() {
 
       expect(find.byType(GlassContainer), findsNothing);
       expect(find.byType(BackdropFilter), findsNothing);
+      // 描边/高光叠层只在玻璃分支出现。
+      expect(find.byKey(AppGlassSurface.strokeKey), findsNothing);
+      expect(find.byKey(AppGlassSurface.highlightKey), findsNothing);
       // 两张卡片都画的是不透明表面。
       for (final decoration in tester
           .widgetList<DecoratedBox>(find.byType(DecoratedBox))
@@ -214,6 +309,7 @@ void main() {
 
       expect(find.byType(GlassContainer), findsNothing);
       expect(_firstDecorationUnder(tester, AppCard).color, AppColors.bgSurface);
+      expect(find.byKey(AppGlassSurface.strokeKey), findsNothing);
     });
 
     testWidgets('standard 档：卡片本体是玻璃，内容还在', (tester) async {
@@ -225,6 +321,51 @@ void main() {
       expect(find.byType(GlassContainer), findsOneWidget);
       expect(find.text('服务器状态'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('玻璃表面有 1px 描边 + 顶部内高光，且不吃布局尺寸', (tester) async {
+      await tester.pumpWidget(host(
+        const AppCard(glass: true, child: Text('服务器状态')),
+        GlassQuality.standard,
+      ));
+
+      // 描边：前景 DecoratedBox，1px，圆角和卡片一致。
+      final stroke = tester.widget<DecoratedBox>(
+        find.byKey(AppGlassSurface.strokeKey),
+      );
+      expect(stroke.position, DecorationPosition.foreground);
+      final strokeDecoration = stroke.decoration as BoxDecoration;
+      final border = strokeDecoration.border! as Border;
+      expect(border.top.width, 1);
+      expect(border.right.width, 1);
+      expect(border.bottom.width, 1);
+      expect(border.left.width, 1);
+      expect(border.top.color.a, lessThan(1.0), reason: '半透明描边');
+      expect(strokeDecoration.borderRadius,
+          BorderRadius.circular(AppRadius.lg));
+
+      // 高光：白色 12% → 0 的线性渐变，IgnorePointer 盖在内容上不挡点击。
+      final highlight = tester.widget<DecoratedBox>(
+        find.byKey(AppGlassSurface.highlightKey),
+      );
+      final gradient =
+          (highlight.decoration as BoxDecoration).gradient! as LinearGradient;
+      expect(gradient.colors.first.a, closeTo(0.12, 0.001));
+      expect(gradient.colors.last.a, 0.0);
+      expect(gradient.begin, Alignment.topCenter);
+      // 高光层最近的 IgnorePointer 一定在忽略命中（点击照样落到 tab/卡片）。
+      final pointer = tester.widget<IgnorePointer>(
+        find
+            .ancestor(
+              of: find.byKey(AppGlassSurface.highlightKey),
+              matching: find.byType(IgnorePointer),
+            )
+            .first,
+      );
+      expect(pointer.ignoring, isTrue);
+
+      // 描边是前景绘制：卡片高度不受它影响，56 高的胶囊也变不成 58。
+      expect(find.text('服务器状态'), findsOneWidget);
     });
 
     testWidgets('未开 glass 的卡片仍然是不透明卡片', (tester) async {

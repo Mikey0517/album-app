@@ -21,6 +21,7 @@ import '../../core/server_config.dart';
 import '../../core/server_settings_dialog.dart';
 import '../../models/app_user.dart';
 import '../../models/storage_info.dart';
+import '../../widgets/app_bottom_tab_bar.dart';
 import '../../widgets/app_card.dart';
 import '../../widgets/app_glass.dart';
 import '../../widgets/empty_state.dart';
@@ -387,9 +388,17 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('我的')),
-      body: _buildBody(),
+    // 最底层是渐变底色（[AppGlassBackdrop]）：卡片玻璃背后得有东西可模糊。
+    return AppGlassBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          title: const Text('我的'),
+        ),
+        body: _buildBody(),
+      ),
     );
   }
 
@@ -512,7 +521,10 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
     }
     final user = _user!;
     return SingleChildScrollView(
-      padding: const EdgeInsets.only(bottom: 24),
+      // 底部再让出悬浮胶囊的高度：最后一张卡片不会藏在胶囊下面。
+      padding: EdgeInsets.only(
+        bottom: 24 + AppBottomTabBar.overlayInset(context),
+      ),
       child: Column(
         children: [
           GestureDetector(

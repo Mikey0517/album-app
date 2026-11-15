@@ -8,6 +8,8 @@ import '../../core/design/text_styles.dart';
 import '../../core/formatters.dart';
 import '../../models/media.dart';
 import '../../models/post.dart';
+import '../../widgets/app_bottom_tab_bar.dart';
+import '../../widgets/app_glass.dart';
 import '../../widgets/date_header.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
@@ -192,24 +194,38 @@ class _FeedPageState extends State<FeedPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('朋友圈'),
-        centerTitle: true,
-        actions: [
-          IconButton(
-            onPressed: _openOnThisDay,
-            tooltip: '那年今日',
-            icon: const Icon(Icons.history_rounded, size: 23),
+    // 最底层是那一层克制的渐变底色（[AppGlassBackdrop]）：卡片玻璃要模糊的
+    // 「流动」内容就在这层，Scaffold / AppBar 让出底色直接铺上去。
+    return AppGlassBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          surfaceTintColor: Colors.transparent,
+          title: const Text('朋友圈'),
+          centerTitle: true,
+          actions: [
+            IconButton(
+              onPressed: _openOnThisDay,
+              tooltip: '那年今日',
+              icon: const Icon(Icons.history_rounded, size: 23),
+            ),
+            IconButton(
+              onPressed: _compose,
+              tooltip: '发布动态',
+              icon: const Icon(Icons.add_a_photo_outlined, size: 22),
+            ),
+          ],
+        ),
+        // 胶囊浮在页面上：底部留出「胶囊 + 间距 + 安全区」，最后一条动态
+        // 滚到底时不会被压住。
+        body: Padding(
+          padding: EdgeInsets.only(
+            bottom: AppBottomTabBar.overlayInset(context),
           ),
-          IconButton(
-            onPressed: _compose,
-            tooltip: '发布动态',
-            icon: const Icon(Icons.add_a_photo_outlined, size: 22),
-          ),
-        ],
+          child: _buildBody(),
+        ),
       ),
-      body: _buildBody(),
     );
   }
 

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/album_view_settings.dart';
 import '../../core/design/colors.dart';
+import '../../widgets/app_bottom_tab_bar.dart';
 import '../../widgets/app_category_menu.dart';
 import 'custom_albums_page.dart';
 import 'feed_gallery_page.dart';
@@ -135,36 +136,43 @@ class AlbumTabPageState extends State<AlbumTabPage> {
             }
           }
         },
-        child: IndexedStack(
-          index: _selected,
-          children: [
-            FeedGalleryPage(
-              key: _feedGalleryKey,
-              onSelectionChanged: (selecting, selected, total) {
-                if (!mounted) return;
-                final wasEditing = _feedEditing;
-                setState(() {
-                  _feedSelecting = selecting;
-                  _feedSelected = selected;
-                  _feedTotal = total;
-                });
-                final editing = _selected == 0 && selecting;
-                if (editing != wasEditing) {
-                  widget.onEditingChanged?.call(editing);
-                }
-              },
-              onCountChanged: (count) => _onTabCount(0, count),
-            ),
-            // 非 const：主题切换时需要重建相册列表，还要回报数量。
-            CustomAlbumsPage(
-              scope: AlbumScope.family,
-              onCountChanged: (count) => _onTabCount(1, count),
-            ),
-            CustomAlbumsPage(
-              scope: AlbumScope.private,
-              onCountChanged: (count) => _onTabCount(2, count),
-            ),
-          ],
+        // 底部让出悬浮胶囊：相册网格/选择栏都排在胶囊上面。进入选择态时
+        // 胶囊会被 HomePage 藏起来，这里也就不要再留空。
+        child: Padding(
+          padding: EdgeInsets.only(
+            bottom: _feedEditing ? 0 : AppBottomTabBar.overlayInset(context),
+          ),
+          child: IndexedStack(
+            index: _selected,
+            children: [
+              FeedGalleryPage(
+                key: _feedGalleryKey,
+                onSelectionChanged: (selecting, selected, total) {
+                  if (!mounted) return;
+                  final wasEditing = _feedEditing;
+                  setState(() {
+                    _feedSelecting = selecting;
+                    _feedSelected = selected;
+                    _feedTotal = total;
+                  });
+                  final editing = _selected == 0 && selecting;
+                  if (editing != wasEditing) {
+                    widget.onEditingChanged?.call(editing);
+                  }
+                },
+                onCountChanged: (count) => _onTabCount(0, count),
+              ),
+              // 非 const：主题切换时需要重建相册列表，还要回报数量。
+              CustomAlbumsPage(
+                scope: AlbumScope.family,
+                onCountChanged: (count) => _onTabCount(1, count),
+              ),
+              CustomAlbumsPage(
+                scope: AlbumScope.private,
+                onCountChanged: (count) => _onTabCount(2, count),
+              ),
+            ],
+          ),
         ),
       ),
     );
