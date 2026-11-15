@@ -48,17 +48,28 @@ import kotlin.system.exitProcess
  */
 class MainActivity : FlutterFragmentActivity() {
     private companion object {
-        /** 重启用的 PendingIntent 请求码，固定值保证 FLAG_UPDATE_CURRENT 复用同一个。 */
+        /**
+         * 重启用的 PendingIntent 请求码，固定值。配合 FLAG_CANCEL_CURRENT：
+         * 同一个请求码 + 同一个启动 Intent，每次调度都会把上一次留下的
+         * PendingIntent 取消掉，不会复用旧 Intent。
+         */
         const val RELAUNCH_REQUEST_CODE = 1001
 
         /**
-         * 从调度到真正拉起新进程的延迟。必须明显大于 [EXIT_DELAY_MS]，给旧进程
-         * 留出「回执 + 退出」的时间：闹钟若在旧进程还活着时触发，新 Activity 会
-         * 落回旧进程，补丁就没被重新装载。600ms 对用户只是不到一秒的黑屏。
+         * setAlarmClock 的触发时间走墙钟（RTC），所以这里是「现在 + 900ms」。
+         * 必须明显大于 [EXIT_DELAY_MS]，给旧进程留出「回执 + 退出」的时间：
+         * 闹钟若在旧进程还活着时触发，新 Activity 会落回旧进程，补丁就没被
+         * 重新装载。900ms 对用户只是不到一秒的黑屏。
+         */
+        const val RELAUNCH_WALL_CLOCK_DELAY_MS = 900L
+
+        /**
+         * 降级用的普通闹钟走单调时钟（elapsedRealtime），同样要明显大于
+         * [EXIT_DELAY_MS]，理由同上。
          */
         const val RELAUNCH_DELAY_MS = 600L
 
-        /** 回执之后隔多久结束自己；必须小于 [RELAUNCH_DELAY_MS]。 */
+        /** 回执之后隔多久结束自己；必须小于上面两个延迟。 */
         const val EXIT_DELAY_MS = 300L
     }
 
@@ -439,7 +450,8 @@ class MainActivity : FlutterFragmentActivity() {
      * 补丁在 Application.attachBaseContext 里注入，跑着的进程换不掉，所以
      * 「重启 App」必须是「旧进程先死、新进程再起」：直接在原进程里 startActivity
      * 只会新建一个 Activity，新实例跟旧进程同生共死，旧进程一退它也一起没了。
-     * 这里把启动 Intent 交给 AlarmManager，进程退出之后再由系统拉起新进程。
+     * 这里把启动 Intent 交给 AlarmManager（setAlarmClock，见
+     * [scheduleAlarmClockRelaunch]），进程退出之后再由系统拉起新进程。
      */
     private fun registerAppControl(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "album/app")
@@ -453,56 +465,121 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     private fun restartApp(result: MethodChannel.Result) {
-        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        val intent = launchIntent()
         if (intent == null) {
             // 拿不到启动 Intent 时不在这里退出：交回 Dart 兜底。
             result.error("no_launch_intent", "系统没有返回启动 Intent", null)
             return
         }
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
-        intent.setPackage(packageName)
 
-        // 通道只能回执一次，所以先做调度：成功回 true，抛异常回 error 让 Dart 兜底。
+        // 通道只能回执一次，所以先把调度做完，再决定回什么。
+        // 首选 setAlarmClock()：普通闹钟的 PendingIntent 在 Android 10+ 的后台
+        // 启动 Activity（BAL）限制下会被系统丢掉，闹钟类的才豁免。
         val scheduled = try {
-            scheduleRelaunch(intent)
+            scheduleAlarmClockRelaunch(intent)
             true
         } catch (e: Exception) {
-            Log.w("AlbumApp", "调度重启失败，退回直接拉起", e)
+            Log.w("AlbumApp", "setAlarmClock 调度失败，退回普通闹钟", e)
             false
         }
+
         if (scheduled) {
             result.success(true)
         } else {
-            // 退回旧做法：新实例大概率跟着进程一起结束，用户掉回桌面后重开也能生效；
-            // 同时把失败告诉 Dart，让它 SystemNavigator.pop() 兜底退出。
-            try {
-                startActivity(intent)
+            // 降级：个别 ROM 会限制 setAlarmClock（安全异常 / 不支持闹钟类闹钟），
+            // 退回普通闹钟——它在 BAL 下大概率被拦，但成本为零，判定宽松时仍能拉起。
+            // 同时把失败告诉 Dart，让它在原生退出没生效时 SystemNavigator.pop() 兜底。
+            val fellBack = try {
+                schedulePlainAlarmRelaunch(intent)
+                true
             } catch (e: Exception) {
-                Log.w("AlbumApp", "直接拉起也失败", e)
+                Log.w("AlbumApp", "普通闹钟也调度失败，退回直接拉起", e)
+                false
             }
-            result.error("restart_failed", "无法调度重启，请手动重开", null)
+            if (!fellBack) {
+                // 最后的旧做法：新实例大概率跟着进程一起结束，用户掉回桌面后重开也能生效。
+                try {
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    Log.w("AlbumApp", "直接拉起也失败", e)
+                }
+            }
+            result.error("restart_failed", "无法调度闹钟重启，请手动重开", null)
         }
         // 先把回执交出去，再结束自己；闹钟在 EXIT_DELAY_MS 之后触发。
         Handler(Looper.getMainLooper()).postDelayed({ exitProcess(0) }, EXIT_DELAY_MS)
     }
 
+    /** 取启动 Intent 并补上「清掉旧任务栈、新开任务」的 flag，拿不到返回 null。 */
+    private fun launchIntent(): Intent? {
+        val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return null
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK)
+        intent.setPackage(packageName)
+        return intent
+    }
+
     /**
-     * 用 [AlarmManager] 在进程退出之后再拉起启动 Intent。
+     * 重启用的 PendingIntent。
      *
-     * 用 set() 而不是 setExactAndAllowWhileIdle()：精确闹钟在 Android 12+ 需要
-     * SCHEDULE_EXACT_ALARM 权限（Android 14 起还默认关闭、要用户手动开），为了
-     * 重启这几百毫秒去申请一个敏感权限不划算。非精确闹钟在应用刚切到后台时
-     * 基本立刻就触发（系统对前台刚退出的应用不做深度批量），最坏被延后几秒，
-     * 用户看到的只是一段稍长的黑屏；真被延后也不影响正确性，补丁一定会在新进程
-     * 的 Application.attachBaseContext 里装载。
+     * FLAG_CANCEL_CURRENT：请求码固定、启动 Intent 每次都由系统重新给，所以
+     * 系统里很可能还留着上一次调度（比如上一版被 BAL 拦下的那次）注册的
+     * PendingIntent。CANCEL_CURRENT 先取消旧的再建新的，保证这次闹钟拿到的
+     * 一定是本次 Intent（带 NEW_TASK / CLEAR_TOP），不会复用旧 Intent 里的
+     * 过期状态。代价是每次调用都会产生一个新对象，所以调用点必须只建一次、
+     * 同一个对象同时交给 operation 和 showIntent；建两次会互相取消。
+     * FLAG_IMMUTABLE：targetSdk 31+ 要求显式声明可变性，我们不需要接收方
+     * 改写 Intent，取不可变最安全（也满足 Android 14 的隐式 Intent 限制）。
      */
-    private fun scheduleRelaunch(intent: Intent) {
-        val pending = PendingIntent.getActivity(
-            this,
-            RELAUNCH_REQUEST_CODE,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    private fun relaunchPendingIntent(intent: Intent): PendingIntent = PendingIntent.getActivity(
+        this,
+        RELAUNCH_REQUEST_CODE,
+        intent,
+        PendingIntent.FLAG_CANCEL_CURRENT or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    /**
+     * 用 [AlarmManager.setAlarmClock] 在进程退出之后再拉起启动 Intent。
+     *
+     * 为什么必须是它：Android 10+ 禁止应用在后台启动 Activity（BAL）。普通
+     * AlarmManager.set() 的 PendingIntent 到点时属于「后台发送」，系统直接把
+     * 启动请求丢掉——真机上的现象就是旧进程退出、新页面起不来。setAlarmClock()
+     * 是闹钟类应用专用的豁免路径：系统把它当成用户可见的闹钟（带状态栏图标、
+     * 不受 Doze/待机批量影响），其 PendingIntent 不受 BAL 拦截。
+     *
+     * 副作用：状态栏会短暂出现一个闹钟图标（触发后由系统移除），点它也能回到 App。
+     * 代价可接受：一次重启只亮几百毫秒。
+     *
+     * 时间用墙钟：setAlarmClock 只接受 RTC 触发时间，不能传 elapsedRealtime()。
+     * 误差只来自系统时间本身（用户手动改时间时才会偏），triggerAtMillis 仍在
+     * 秒级以内，不会被批量延后。
+     */
+    private fun scheduleAlarmClockRelaunch(intent: Intent) {
+        // 同一个 PendingIntent 同时当 operation 和 showIntent：
+        // operation 到点负责拉起新进程，showIntent 供用户点闹钟图标时回到 App。
+        val operation = relaunchPendingIntent(intent)
+        val alarms = getSystemService(AlarmManager::class.java)
+            ?: throw IllegalStateException("AlarmManager 不可用")
+        alarms.setAlarmClock(
+            AlarmManager.AlarmClockInfo(
+                System.currentTimeMillis() + RELAUNCH_WALL_CLOCK_DELAY_MS,
+                operation
+            ),
+            operation
         )
+    }
+
+    /**
+     * 降级方案：普通（非精确）闹钟。
+     *
+     * 两条取舍都保留自上一版：BAL 下它大概率拉不起 Activity，排在这是给判定
+     * 宽松的 ROM / 用户恰好在前台时留后路；用 set() 而不是
+     * setExactAndAllowWhileIdle()，是因为精确闹钟在 Android 12+ 需要
+     * SCHEDULE_EXACT_ALARM（Android 14 起默认不授予），为重启这几百毫秒去申请
+     * 一个敏感权限不划算。真被延后也不影响正确性，补丁一定会在新进程的
+     * Application.attachBaseContext 里装载。
+     */
+    private fun schedulePlainAlarmRelaunch(intent: Intent) {
+        val pending = relaunchPendingIntent(intent)
         val alarms = getSystemService(AlarmManager::class.java)
             ?: throw IllegalStateException("AlarmManager 不可用")
         // ELAPSED_REALTIME 配 elapsedRealtime()：单调时钟，不受用户改系统时间影响。

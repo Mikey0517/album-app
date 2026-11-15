@@ -29,6 +29,21 @@ Media _photo(int id, DateTime takenAt) => Media(
       postId: null,
     );
 
+/// 动态图片：图片 + 服务端提取出来的动态视频。
+Media _live(int id, DateTime takenAt) => Media(
+      id: id,
+      type: 'image',
+      thumbUrl: null,
+      url: '',
+      width: 1920,
+      height: 1080,
+      durationMs: null,
+      takenAt: takenAt,
+      createdAt: takenAt,
+      postId: null,
+      liveVideoUrl: 'https://example.com/live/$id.mp4',
+    );
+
 Media _video(int id, DateTime takenAt) => Media(
       id: id,
       type: 'video',
@@ -61,6 +76,22 @@ List<Media> _mixed() => [
       _photo(7, DateTime(2020, 5, 11, 9, 3)),
       _video(8, DateTime(2020, 5, 11, 10)),
       _photo(9, DateTime(2020, 5, 12, 9)),
+      _photo(10, DateTime(2020, 5, 12, 9, 1)),
+      _video(11, DateTime(2020, 5, 12, 10)),
+      _video(12, DateTime(2020, 5, 12, 10, 1)),
+    ];
+
+/// 4 张普通照片 + 4 张动态图片 + 4 个视频，分三天：三类数量刚好都不同。
+List<Media> _mixedLive() => [
+      _photo(1, DateTime(2020, 5, 10, 9)),
+      _live(2, DateTime(2020, 5, 10, 9, 1)),
+      _video(3, DateTime(2020, 5, 10, 10)),
+      _live(4, DateTime(2020, 5, 10, 10, 1)),
+      _photo(5, DateTime(2020, 5, 11, 9)),
+      _live(6, DateTime(2020, 5, 11, 9, 1)),
+      _video(7, DateTime(2020, 5, 11, 10)),
+      _photo(8, DateTime(2020, 5, 11, 10, 1)),
+      _live(9, DateTime(2020, 5, 12, 9)),
       _photo(10, DateTime(2020, 5, 12, 9, 1)),
       _video(11, DateTime(2020, 5, 12, 10)),
       _video(12, DateTime(2020, 5, 12, 10, 1)),
@@ -170,6 +201,43 @@ void main() {
     );
   });
 
+  test('动态图片与普通照片分开计数：全部 = 照片 + 动态图片 + 视频', () {
+    final items = [
+      _photo(1, DateTime(2020, 5, 10, 9)),
+      _live(2, DateTime(2020, 5, 10, 9, 1)),
+      _live(3, DateTime(2020, 5, 10, 9, 2)),
+      _video(4, DateTime(2020, 5, 10, 10)),
+    ];
+    final counts = AlbumMediaCounts.from(items);
+    expect(counts.photos, 1, reason: '照片只剩普通静态照片');
+    expect(counts.livePhotos, 2, reason: '有动态视频的图片单独一类');
+    expect(counts.videos, 1);
+    expect(counts.images, 3, reason: '页头「N 张照片」含动态图片');
+    expect(counts.total, 4);
+    expect(counts.of(AlbumMediaFilter.photos), 1);
+    expect(counts.of(AlbumMediaFilter.livePhotos), 2);
+    expect(counts.of(AlbumMediaFilter.videos), 1);
+    expect(
+      counts.of(AlbumMediaFilter.all),
+      counts.of(AlbumMediaFilter.photos) +
+          counts.of(AlbumMediaFilter.livePhotos) +
+          counts.of(AlbumMediaFilter.videos),
+      reason: '全部 = 照片 + 动态图片 + 视频，不多算也不漏算',
+    );
+
+    expect(
+      filterAlbumMedia(items, AlbumMediaFilter.livePhotos)
+          .every((media) => media.isLivePhoto && !media.isVideo),
+      isTrue,
+    );
+    expect(
+      filterAlbumMedia(items, AlbumMediaFilter.photos)
+          .every((media) => !media.isLivePhoto && !media.isVideo),
+      isTrue,
+      reason: '普通照片不含动态图片',
+    );
+  });
+
   test('时间轴偏移扣掉吸顶区，且不会出现负偏移', () {
     final sections = [
       AlbumSection(
@@ -220,6 +288,58 @@ void main() {
     // 头部统计始终是整本相册，不随筛选变。
     expect(find.text('8 张照片 · 4 个视频'), findsOneWidget);
     expect(find.byType(AlbumThumb), findsNWidgets(12));
+  });
+
+  testWidgets('筛选条顺序：全部 / 照片 / 动态图片 / 视频，各带数量', (tester) async {
+    await _pump(tester, items: _mixedLive());
+
+    final bar = tester.widget<AppSegmentedBar>(find.byType(AppSegmentedBar));
+    expect(
+      bar.items.map((item) => item.label).toList(),
+      ['全部', '照片', '动态图片', '视频'],
+      reason: '动态图片排在照片后面、视频前面',
+    );
+    expect(bar.items.map((item) => item.count).toList(), [12, 4, 4, 4]);
+
+    // 摆出来的位置也是这个顺序：从左到右一条线。
+    final lefts = [
+      for (final label in ['全部', '照片', '动态图片', '视频'])
+        tester.getRect(find.text(label)).left,
+    ];
+    expect(lefts, orderedEquals([...lefts]..sort()));
+    expect(
+      find.text('8 张照片 · 4 个视频'),
+      findsOneWidget,
+      reason: '页头的照片数含动态图片，总数不会少 4',
+    );
+  });
+
+  testWidgets('动态图片只含 isLivePhoto，普通照片不含动态图片', (tester) async {
+    await _pump(tester, items: _mixedLive());
+
+    await _tapFilter(tester, '动态图片');
+    final live =
+        tester.widgetList<AlbumThumb>(find.byType(AlbumThumb)).toList();
+    expect(live, hasLength(4));
+    expect(live.every((thumb) => thumb.media.isLivePhoto), isTrue);
+    expect(live.every((thumb) => !thumb.media.isVideo), isTrue);
+
+    await _tapFilter(tester, '照片');
+    final photos =
+        tester.widgetList<AlbumThumb>(find.byType(AlbumThumb)).toList();
+    expect(photos, hasLength(4));
+    expect(photos.every((thumb) => !thumb.media.isVideo), isTrue);
+    expect(
+      photos.every((thumb) => !thumb.media.isLivePhoto),
+      isTrue,
+      reason: '普通照片把动态图片排除在外',
+    );
+
+    // 数量始终取全量：切来切去数字不跳。
+    expect(_chipCount(tester, '全部'), 12);
+    expect(_chipCount(tester, '照片'), 4);
+    expect(_chipCount(tester, '动态图片'), 4);
+    expect(_chipCount(tester, '视频'), 4);
   });
 
   testWidgets('只看照片 / 只看视频只留下对应类型', (tester) async {
@@ -321,6 +441,22 @@ void main() {
     expect(find.text('还没有视频'), findsOneWidget);
     expect(find.text('看全部'), findsOneWidget);
     expect(find.byType(AlbumThumb), findsNothing);
+  });
+
+  testWidgets('空状态四：筛选后没有动态图片', (tester) async {
+    await _pump(tester, items: [
+      _photo(1, DateTime(2020, 5, 10, 9)),
+      _photo(2, DateTime(2020, 5, 10, 10)),
+      _video(3, DateTime(2020, 5, 11, 9)),
+    ]);
+    await _tapFilter(tester, '动态图片');
+    expect(find.text('还没有动态图片'), findsOneWidget);
+    expect(find.text('看全部'), findsOneWidget);
+    expect(find.byType(AlbumThumb), findsNothing);
+
+    await tester.tap(find.text('看全部'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlbumThumb), findsNWidgets(3));
   });
 
   testWidgets('筛选条吸顶，日期分组头压在它下面不打架', (tester) async {

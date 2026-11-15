@@ -58,6 +58,17 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
   // 只钉当前分组的日期头：阈值表、吸顶分组都由公共组件算，
   // 和相册详情页是同一份实现（见 album_timeline_layout.dart）。
   final TimelinePinState _pin = TimelinePinState();
+  // 点按由缩略图自己处理，拖拽连选要跨格命中，所以给每格留一个 key。
+  final Map<int, GlobalKey> _tileKeys = {};
+  // 长按进入多选后不松手继续拖 = 连续选中；多选态直接横向划过 = 连选/连消。
+  // 指针簿记与命中采样都在 widgets/album_thumb.dart 的 AlbumGridDragSelect 里，
+  // 相册详情页用的是同一个——两页不各写一份。
+  late final AlbumGridDragSelect _dragSelect = AlbumGridDragSelect(
+    isEnabled: () => _selecting,
+    hitTest: _tileAt,
+    isSelected: (mediaId) => _selected.contains(mediaId),
+    onChanged: _applyDragSelection,
+  );
   final List<Media> _items = [];
   /// 页内类型筛选：和相册详情页同一个模型、同一根分段条，进页面默认「全部」。
   AlbumMediaFilter _filter = AlbumMediaFilter.all;
@@ -174,6 +185,10 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
   void _pruneSelection() {
     final visibleIds = <int>{for (final item in _visibleItems) item.id};
     _selected.removeWhere((id) => !visibleIds.contains(id));
+    // 分页会一直往里加：已经不在列表里的格子把 key 一起丢掉，
+    // 否则命中表会跟着翻过的整条时间轴一起长。
+    final loadedIds = <int>{for (final item in _items) item.id};
+    _tileKeys.removeWhere((id, _) => !loadedIds.contains(id));
   }
 
   void _selectFilter(AlbumMediaFilter filter) {
@@ -258,10 +273,15 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
         ..clear()
         ..add(media.id);
     });
+    // 长按这一下手指还按在屏幕上：接着拖就是连续选中。方向在这里就定死
+    // （= 这一格刚被选上），不然留到第一次 move 再按「从已选中项起手」反推，
+    // 会得到「连续取消」，正好和用户的意思相反。
+    _dragSelect.startFromLongPress(media.id);
     _notifySelection();
   }
 
   void _exitSelection() {
+    _dragSelect.reset();
     setState(() {
       _selecting = false;
       _selected.clear();
@@ -274,6 +294,42 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
       if (!_selected.add(media.id)) _selected.remove(media.id);
     });
     _notifySelection();
+  }
+
+  /// 多选态长按：先翻这一格，再把这一轮拖拽的方向接上去（手指还按着）。
+  void _longPressTile(Media media) {
+    _toggleSelect(media);
+    _dragSelect.startFromLongPress(media.id);
+  }
+
+  /// 拖拽连选把手指划过的格子一次交过来。
+  void _applyDragSelection(Set<int> mediaIds, bool select) {
+    var changed = false;
+    for (final mediaId in mediaIds) {
+      final hit = select ? _selected.add(mediaId) : _selected.remove(mediaId);
+      if (hit) changed = true;
+    }
+    if (!changed) return;
+    setState(() {});
+    _notifySelection();
+  }
+
+  /// 拖拽连选靠命中检测找格子：只有真正建出来的格子有 render box，
+  /// 划出屏幕的格子自然命中不到，滚回来还能接着选。
+  int? _tileAt(Offset globalPosition) {
+    for (final entry in _tileKeys.entries) {
+      final box = entry.value.currentContext?.findRenderObject();
+      if (box is! RenderBox || !box.hasSize) continue;
+      final local = box.globalToLocal(globalPosition);
+      if (local.dx < 0 ||
+          local.dy < 0 ||
+          local.dx > box.size.width ||
+          local.dy > box.size.height) {
+        continue;
+      }
+      return entry.key;
+    }
+    return null;
   }
 
   bool get _allSelected {
@@ -529,7 +585,13 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
                     final media = section.items[index];
                     final globalIndex = sectionOffset + index;
                     final selected = _selected.contains(media.id);
+                    // 拖拽连选的命中检测按这个 key 取格子的 render box。
+                    final tileKey = _tileKeys.putIfAbsent(
+                      media.id,
+                      () => GlobalKey(),
+                    );
                     return Stack(
+                      key: tileKey,
                       fit: StackFit.expand,
                       children: [
                         AlbumThumb(
@@ -541,7 +603,7 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
                               ? () => _toggleSelect(media)
                               : () => _open(displayItems, globalIndex),
                           onLongPress: _selecting
-                              ? () => _toggleSelect(media)
+                              ? () => _longPressTile(media)
                               : () => _enterSelectionWith(media),
                         ),
                         if (_selecting)
@@ -624,10 +686,20 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
             RefreshIndicator(
               color: AppColors.primary,
               onRefresh: () => _load(refresh: true),
-              child: CustomScrollView(
-                controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: slivers,
+              // Listener 常挂着（不是多选态才挂）：长按进入多选的那一次按下，
+              // 指针的命中路径在按下的瞬间就定死了，后插进来的 Listener 收不到
+              // 这根手指后续的 move——「长按不松手继续拖」就断在这里。
+              // 它不参与手势竞技场，所以竖向滚动、长按、单击全都照旧。
+              child: Listener(
+                onPointerDown: _dragSelect.onPointerDown,
+                onPointerMove: _dragSelect.onPointerMove,
+                onPointerUp: _dragSelect.onPointerUp,
+                onPointerCancel: _dragSelect.onPointerCancel,
+                child: CustomScrollView(
+                  controller: _scrollController,
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: slivers,
+                ),
               ),
             ),
             if (showScrubber)
@@ -653,12 +725,11 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
 
   /// 筛选后没有可见项：文案只说这一件事，动作是回到「全部」。
   Widget _buildFilteredEmpty() {
-    final noVideos = _filter == AlbumMediaFilter.videos;
     return EmptyState(
-      icon: noVideos
-          ? Icons.videocam_off_outlined
-          : Icons.image_not_supported_outlined,
-      title: noVideos ? '筛选后没有视频' : '筛选后没有照片',
+      // 图标与「照片 / 动态图片 / 视频」的名字都取自筛选本身，
+      // 三处空状态不会再各写一句。
+      icon: _filter.emptyIcon,
+      title: '筛选后没有${_filter.noun}',
       action: FilledButton(
         onPressed: () => _selectFilter(AlbumMediaFilter.all),
         child: const Text('看全部'),

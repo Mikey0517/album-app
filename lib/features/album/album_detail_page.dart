@@ -79,11 +79,19 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   final Set<int> _selected = {};
   int? _coverSelectedId;
   final ScrollController _gridScroll = ScrollController();
-  // 点按由缩略图自己处理，滑动多选要跨格命中，所以给每格留一个 key。
+  // 点按由缩略图自己处理，拖拽连选要跨格命中，所以给每格留一个 key。
   final Map<int, GlobalKey> _tileKeys = {};
+  // 长按进入多选后不松手继续拖 = 连续选中；多选态直接横向划过 = 连选/连消。
+  // 指针簿记和命中采样都在 widgets/album_thumb.dart 的 AlbumGridDragSelect 里，
+  // 朋友圈相册用的是同一个——两页不各写一份。
+  late final AlbumGridDragSelect _dragSelect = AlbumGridDragSelect(
+    isEnabled: () => _selecting,
+    hitTest: _tileAt,
+    isSelected: (mediaId) => _selected.contains(mediaId),
+    onChanged: _applyDragSelection,
+  );
   // 每个日期分组的网格 sliver 一个 key：时间轴气泡靠它实时取顶部可见项。
   final List<GlobalKey> _gridSliverKeys = [];
-  bool? _dragSelectValue;
   // 封面在顶上时状态栏图标要转成白色，完全收起后回到深色。
   bool _headerScrolled = false;
   // 只钉当前分组的日期头：阈值表、吸顶分组都由公共组件算，
@@ -459,19 +467,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             RefreshIndicator(
               color: AppColors.primary,
               onRefresh: () => _load(silent: true),
-              child: _selecting
-                  // 多选态下横向划过格子即可连选/连消，竖向滚动不受影响。
-                  ? GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onHorizontalDragStart: (details) =>
-                          _startDragSelect(details.globalPosition),
-                      onHorizontalDragUpdate: (details) =>
-                          _applyDragSelect(details.globalPosition),
-                      onHorizontalDragEnd: (_) => _endDragSelect(),
-                      onHorizontalDragCancel: _endDragSelect,
-                      child: scrollView,
-                    )
-                  : scrollView,
+              // Listener 常挂着（不是多选态才挂）：长按进入多选的那一次按下，
+              // 指针的命中路径在按下的瞬间就定死了，后插进来的 Listener 收不到
+              // 这根手指后续的 move——「长按不松手继续拖」就断在这里。
+              // 它不参与手势竞技场，所以竖向滚动、长按、单击全都照旧。
+              child: Listener(
+                onPointerDown: _dragSelect.onPointerDown,
+                onPointerMove: _dragSelect.onPointerMove,
+                onPointerUp: _dragSelect.onPointerUp,
+                onPointerCancel: _dragSelect.onPointerCancel,
+                child: scrollView,
+              ),
             ),
             if (showScrubber)
               // 轨道顶边 = 吸顶区下沿；跳转按 offsets（越拖越准），气泡实时
@@ -562,15 +568,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       return slivers;
     }
     if (displayItems.isEmpty) {
-      final noVideos = _filter == AlbumMediaFilter.videos;
       slivers.add(
         SliverFillRemaining(
           hasScrollBody: false,
           child: EmptyState(
-            icon: noVideos
-                ? Icons.videocam_off_outlined
-                : Icons.image_not_supported_outlined,
-            title: noVideos ? '还没有视频' : '还没有照片',
+            // 图标与「照片 / 动态图片 / 视频」的名字都取自筛选本身，
+            // 三处空状态不会再各写一句。
+            icon: _filter.emptyIcon,
+            title: '还没有${_filter.noun}',
             action: FilledButton(
               onPressed: () => _selectFilter(AlbumMediaFilter.all),
               child: const Text('看全部'),
@@ -650,8 +655,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         ? null
         : _album.isPrivate && !_album.isOwner
             ? '来自 ${_album.ownerLabel} · ${_album.roleLabel} · '
-                '${counts.photos} 张照片 · ${counts.videos} 个视频'
-            : '${counts.photos} 张照片 · ${counts.videos} 个视频';
+                '${counts.images} 张照片 · ${counts.videos} 个视频'
+            : '${counts.images} 张照片 · ${counts.videos} 个视频';
     final delegate = _AlbumHeaderDelegate(
       topPadding: MediaQuery.paddingOf(context).top,
       // 多选态直接把头图收成一条工具栏，屏幕让给勾选。
@@ -754,7 +759,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
           onLongPress: widget.coverPickMode
               ? () => setState(() => _coverSelectedId = media.id)
               : _selecting
-                  ? () => _toggleSelect(media)
+                  ? () => _longPressTile(media)
                   : () => _enterSelectionWith(media),
         ),
         if (showSelection)
@@ -843,13 +848,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         ..clear()
         ..add(media.id);
     });
+    // 长按这一下手指还按在屏幕上：接着拖就是连续选中。方向在这里就定死
+    // （= 这一格刚被选上），不然留到第一次 move 再按「从已选中项起手」反推，
+    // 会得到「连续取消」，正好和用户的意思相反。
+    _dragSelect.startFromLongPress(media.id);
   }
 
   void _exitSelection() {
+    _dragSelect.reset();
     setState(() {
       _selecting = false;
       _selected.clear();
-      _dragSelectValue = null;
     });
   }
 
@@ -857,6 +866,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     setState(() {
       if (!_selected.add(media.id)) _selected.remove(media.id);
     });
+  }
+
+  /// 多选态长按：先翻这一格，再把这一轮拖拽的方向接上去（手指还按着）。
+  void _longPressTile(Media media) {
+    _toggleSelect(media);
+    _dragSelect.startFromLongPress(media.id);
   }
 
   bool get _allSelected {
@@ -877,29 +892,18 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     });
   }
 
-  void _startDragSelect(Offset globalPosition) {
-    final id = _tileAt(globalPosition);
-    if (id == null) return;
-    setState(() => _dragSelectValue = !_selected.contains(id));
-    _applyDragSelect(globalPosition);
-  }
-
-  void _applyDragSelect(Offset globalPosition) {
-    final value = _dragSelectValue;
-    if (value == null) return;
-    final id = _tileAt(globalPosition);
-    if (id == null) return;
-    final changed = value ? _selected.add(id) : _selected.remove(id);
+  /// 拖拽连选把手指划过的格子一次交过来；选中集合变了才重建。
+  void _applyDragSelection(Set<int> mediaIds, bool select) {
+    var changed = false;
+    for (final mediaId in mediaIds) {
+      final hit = select ? _selected.add(mediaId) : _selected.remove(mediaId);
+      if (hit) changed = true;
+    }
     if (changed) setState(() {});
   }
 
-  void _endDragSelect() {
-    if (_dragSelectValue == null) return;
-    setState(() => _dragSelectValue = null);
-  }
-
-  /// 滑动多选靠命中检测找格子：只有真正建出来的格子有 render box，
-  /// 划出屏幕的格子自然命中不到，松手前滚回来还能接着选。
+  /// 拖拽连选靠命中检测找格子：只有真正建出来的格子有 render box，
+  /// 划出屏幕的格子自然命中不到，滚回来还能接着选。
   int? _tileAt(Offset globalPosition) {
     for (final entry in _tileKeys.entries) {
       final box = entry.value.currentContext?.findRenderObject();
