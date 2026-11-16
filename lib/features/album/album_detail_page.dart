@@ -580,7 +580,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         SliverFillRemaining(
           hasScrollBody: false,
           child: EmptyState(
-            // 图标与「照片 / 动态图片 / 视频」的名字都取自筛选本身，
+            // 图标与「照片 / 动态照片 / 视频」的名字都取自筛选本身，
             // 三处空状态不会再各写一句。
             icon: _filter.emptyIcon,
             title: '还没有${_filter.noun}',
@@ -663,8 +663,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         ? null
         : _album.isPrivate && !_album.isOwner
             ? '来自 ${_album.ownerLabel} · ${_album.roleLabel} · '
-                '${counts.images} 张照片 · ${counts.videos} 个视频'
-            : '${counts.images} 张照片 · ${counts.videos} 个视频';
+                '${counts.photos} 张照片 · ${counts.videos} 个视频'
+            : '${counts.photos} 张照片 · ${counts.videos} 个视频';
     final delegate = _AlbumHeaderDelegate(
       topPadding: MediaQuery.paddingOf(context).top,
       // 多选态直接把头图收成一条工具栏，屏幕让给勾选。

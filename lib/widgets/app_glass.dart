@@ -8,6 +8,7 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 
 import '../core/design/accent.dart';
 import '../core/design/colors.dart';
+import '../core/design/shadow.dart';
 import '../core/page_backdrop_controller.dart';
 
 /// 把 [GlassQuality] 从这里再导出，用到玻璃的页面只 import 本文件就行，
@@ -331,9 +332,13 @@ LiquidGlassSettings appGlassChromeSettings(BuildContext context) {
 Color get appGlassChromeTintColor =>
     AppColors.isDark ? const Color(0x12FFFFFF) : const Color(0x1AD2DCF0);
 
-/// 玻璃表面的 1px 半透明描边颜色：浅色模式收一道极淡的暗边，深色模式提亮。
+/// 表面的 1px 半透明描边颜色：浅色模式收一道极淡的暗边（黑 8%），
+/// 深色模式提亮（白 12%）。
+///
+/// 玻璃与卡片（[AppGlassSurface.depth]）共用这一档：卡片的描边不是另一套
+/// 颜色，否则玻璃档 / minimal 档切换时卡片边上会换色。
 Color get appGlassStrokeColor => AppColors.isDark
-    ? Colors.white.withValues(alpha: 0.14)
+    ? Colors.white.withValues(alpha: 0.12)
     : Colors.black.withValues(alpha: 0.08);
 
 /// 顶部内高光的不透明度：浅色 18%、深色 22%。
@@ -345,6 +350,30 @@ double appGlassHighlightAlpha() => AppColors.isDark ? 0.22 : 0.18;
 /// 玻璃表面的顶部内高光：白色 [appGlassHighlightAlpha] → 0，只铺上沿一半多一点。
 LinearGradient appGlassHighlightGradient() {
   final alpha = appGlassHighlightAlpha();
+  return LinearGradient(
+    begin: Alignment.topCenter,
+    end: Alignment.bottomCenter,
+    colors: [
+      Colors.white.withValues(alpha: alpha),
+      Colors.white.withValues(alpha: 0.0),
+    ],
+    stops: const [0, 0.55],
+  );
+}
+
+/// 卡片 / 列表的顶部内高光：白色 12%（深色 16%）→ 0。
+///
+/// 比玻璃 chrome 的 [appGlassHighlightAlpha]（18%/22%）低一档：卡片本身已经
+/// 有双层阴影撑层次，高光再亮就成了压在正文上的一条白杠。取值落在
+/// 10%~16% 这一档里，浅色 12%、深色 16%。
+double appCardHighlightAlpha() => AppColors.isDark ? 0.16 : 0.12;
+
+/// 卡片顶部的内高光：白色 [appCardHighlightAlpha] → 0 的细渐变。
+///
+/// 只铺上沿一半多一点（0 → 0.55 停住），再往下就是卡片本体；和玻璃 chrome
+/// 用的是同一个形状约定，只是 alpha 低一档。
+LinearGradient appCardHighlightGradient() {
+  final alpha = appCardHighlightAlpha();
   return LinearGradient(
     begin: Alignment.topCenter,
     end: Alignment.bottomCenter,
@@ -479,15 +508,19 @@ class AppGlassSurface extends StatelessWidget {
     this.scrim = false,
     this.scrimColor,
     this.pauseDuringRefresh = true,
+    this.depth = false,
   });
 
-  /// 玻璃分支的前景描边层。
+  /// 卡片 / 列表的外层阴影（[depth] 为 true 时才有）。
+  static const Key shadowKey = Key('app-glass-shadow');
+
+  /// 前景描边层：玻璃分支一直是前景绘制，[depth] 的不透明分支也走它。
   static const Key strokeKey = Key('app-glass-stroke');
 
   /// 玻璃分支的内部 scrim 层（只有 [scrim] 为 true 时有）。
   static const Key scrimKey = Key('app-glass-scrim');
 
-  /// 玻璃分支的顶部内高光层。
+  /// 顶部内高光层（玻璃分支与 [depth] 的卡片都有）。
   static const Key highlightKey = Key('app-glass-highlight');
 
   /// 卡片 / 列表项 / 新建相册按钮的材质档位：**一处开关**。
@@ -587,6 +620,21 @@ class AppGlassSurface extends StatelessWidget {
   /// capture 未就绪帧），暂停只负责让刷新这几帧更钝一点。
   final bool pauseDuringRefresh;
 
+  /// 卡片 / 列表的立体感：双层阴影 + 顶部内高光 + 1px 半透明描边。
+  ///
+  /// 默认 false：底部胶囊 / 筛选条 / 底栏 / 弹窗这些 chrome 保持原样。卡片
+  /// （[AppCard]、朋友圈 PostCard、我的页头像卡）传 true。
+  ///
+  /// 玻璃分支本来就有高光与描边，打开 depth 后只是把高光换成卡片那一档
+  /// （[appCardHighlightAlpha]，10%~16%）并补一层外层阴影；**不透明分支**
+  /// （minimal / 无档位 / 刷新保持）照样画同样的阴影与描边，只是没有模糊——
+  /// 低端机上的卡片同样有层次，切档也不会从「有阴影」跳成「贴着底」。
+  ///
+  /// 全是静态绘制：阴影画在卡片外面（不吃布局）、描边用前景 DecoratedBox
+  /// （不会像 Container.border 那样把 56 撑成 58）、高光是 IgnorePointer
+  /// 叠层（不挡点击）。不做任何按下/悬浮位移动画，列表滚动不会抖。
+  final bool depth;
+
   @override
   Widget build(BuildContext context) {
     // 刷新开关一变就重建：开关只在真刷新期间变，平时没有额外开销。
@@ -639,14 +687,22 @@ class AppGlassSurface extends StatelessWidget {
       // 退化分支的底子已经不透明（[AppColors.bgSurface]），不需要 scrim。
       // 刷新保持（[refreshPaused]）走的就是这条分支：同色不透明表面、布局
       // 一模一样，刷新一结束立刻回到玻璃（档位从未被改过）。
+      // depth 卡片的描边由 [AppSurfaceDepth] 统一画（和玻璃分支同一档的
+      // 半透明 1px 边），这里不再叠一圈 divider，免得两条边叠成深色。
       Widget opaque = DecoratedBox(
         decoration: BoxDecoration(
           color: AppColors.bgSurface,
           borderRadius: borderRadius,
-          border: border ?? Border.all(color: AppColors.divider, width: 1),
+          border: depth
+              ? null
+              : border ?? Border.all(color: AppColors.divider, width: 1),
         ),
         child: padded,
       );
+      if (depth) {
+        // 没有模糊，但阴影、高光、描边一样不少：低端机上卡片也有层次。
+        opaque = AppSurfaceDepth(radius: radius, child: opaque);
+      }
       if (margin == null) return opaque;
       return Padding(padding: margin!, child: opaque);
     }
@@ -684,20 +740,31 @@ class AppGlassSurface extends StatelessWidget {
             ),
           padded,
           // 顶部内高光：静态一层，盖在内容上、不参与命中测试。
-          Positioned.fill(
-            child: IgnorePointer(
-              child: DecoratedBox(
-                key: highlightKey,
-                decoration: BoxDecoration(
-                  borderRadius: borderRadius,
-                  gradient: appGlassHighlightGradient(),
+          // depth 卡片的高光由外层 [AppSurfaceDepth] 画（和 minimal 同一层），
+          // 这里不再叠第二层。
+          if (!depth)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  key: highlightKey,
+                  decoration: BoxDecoration(
+                    borderRadius: borderRadius,
+                    gradient: appGlassHighlightGradient(),
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );
+
+    if (depth) {
+      // 卡片的立体感：双层阴影 + 卡片档内高光 + 1px 描边。玻璃仍是 standard
+      // （不抓 capture），只是外面多一层阴影、里面换成低一档的高光。
+      final Widget layered = AppSurfaceDepth(radius: radius, child: glass);
+      if (margin == null) return layered;
+      return Padding(padding: margin!, child: layered);
+    }
 
     // 1px 半透明描边：前景绘制，布局尺寸一点不变（Container 的 border 会把
     // 56 撑成 57）。
@@ -712,6 +779,71 @@ class AppGlassSurface extends StatelessWidget {
     );
     if (margin == null) return stroked;
     return Padding(padding: margin!, child: stroked);
+  }
+}
+
+/// 卡片 / 列表的立体感外层：双层阴影（[AppShadow.card]）+ 顶部内高光
+/// （[appCardHighlightGradient]）+ 1px 半透明描边（[appGlassStrokeColor]）。
+///
+/// [AppGlassSurface.depth] 与 [AppCard] 的不透明分支共用这一层，所以玻璃档 /
+/// minimal 档看起来是同一张卡片：玻璃档只是多一层模糊，阴影、高光、描边完全
+/// 一致。圆角取调用点现有的 token（[AppRadius]），这里不自己定。
+///
+/// 三层都不吃布局：
+/// - 阴影画在圆角矩形外面，不撑尺寸；
+/// - 高光是 Positioned.fill + IgnorePointer，盖在内容上但不挡点击；
+/// - 描边是 DecorationPosition.foreground 的 1px 边，不会像
+///   Container.border 那样把高度撑大 1px。
+///
+/// 没有任何按下/悬浮位移动画：列表滚动时卡片不会抖。
+class AppSurfaceDepth extends StatelessWidget {
+  const AppSurfaceDepth({super.key, required this.radius, required this.child});
+
+  /// 与表面一致的圆角半径（[AppRadius] 里的 token）。
+  final double radius;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = BorderRadius.circular(radius);
+    return DecoratedBox(
+      key: AppGlassSurface.shadowKey,
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        boxShadow: AppShadow.card,
+      ),
+      // passthrough：约束原样透传，卡片宽高与没有这一层时完全一致。
+      child: Stack(
+        fit: StackFit.passthrough,
+        children: [
+          child,
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                key: AppGlassSurface.highlightKey,
+                decoration: BoxDecoration(
+                  borderRadius: borderRadius,
+                  gradient: appCardHighlightGradient(),
+                ),
+              ),
+            ),
+          ),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                key: AppGlassSurface.strokeKey,
+                position: DecorationPosition.foreground,
+                decoration: BoxDecoration(
+                  borderRadius: borderRadius,
+                  border: Border.all(color: appGlassStrokeColor, width: 1),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

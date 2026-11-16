@@ -17,7 +17,7 @@ extension AlbumMediaFilterEmptyIcon on AlbumMediaFilter {
       };
 }
 
-/// 相册的「全部 / 照片 / 动态图片 / 视频」筛选条，相册详情页与朋友圈相册共用这一份。
+/// 相册的「全部 / 照片 / 动态照片 / 视频」筛选条，相册详情页与朋友圈相册共用这一份。
 ///
 /// 两页的差异只有摆法：详情页套在页头下（或 AppBar.bottom），朋友圈相册
 /// 套在 [AlbumMediaFilterSliver] 里吸顶。文案、数量口径、选中样式都从

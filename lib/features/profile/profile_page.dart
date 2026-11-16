@@ -547,6 +547,8 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               padding: const EdgeInsets.all(20),
               requestedQuality: AppGlassSurface.kCardQuality,
+              // 和 AppCard 同一个立体感：双层阴影 + 高光 + 1px 描边。
+              depth: true,
               child: Row(
                 children: [
                   CircleAvatar(

@@ -726,7 +726,7 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
   /// 筛选后没有可见项：文案只说这一件事，动作是回到「全部」。
   Widget _buildFilteredEmpty() {
     return EmptyState(
-      // 图标与「照片 / 动态图片 / 视频」的名字都取自筛选本身，
+      // 图标与「照片 / 动态照片 / 视频」的名字都取自筛选本身，
       // 三处空状态不会再各写一句。
       icon: _filter.emptyIcon,
       title: '筛选后没有${_filter.noun}',

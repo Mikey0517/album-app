@@ -281,7 +281,7 @@ void main() {
           children: [
             AppCard(glass: true, child: Text('服务器状态')),
             SizedBox(height: 12),
-            AppGlassSurface(child: Text('我的')),
+            AppCard(child: Text('我的')),
           ],
         ),
         GlassQuality.minimal,
@@ -289,14 +289,16 @@ void main() {
 
       expect(find.byType(GlassContainer), findsNothing);
       expect(find.byType(BackdropFilter), findsNothing);
-      // 描边/高光叠层只在玻璃分支出现。
-      expect(find.byKey(AppGlassSurface.strokeKey), findsNothing);
-      expect(find.byKey(AppGlassSurface.highlightKey), findsNothing);
-      // 两张卡片都画的是不透明表面。
+      // 没有模糊，但卡片的立体感还在：阴影、高光、1px 描边一样不少。
+      expect(find.byKey(AppGlassSurface.shadowKey), findsNWidgets(2));
+      expect(find.byKey(AppGlassSurface.strokeKey), findsNWidgets(2));
+      expect(find.byKey(AppGlassSurface.highlightKey), findsNWidgets(2));
+      // 卡片本体仍然是不透明表面（阴影层没有底色，跳过）。
       for (final decoration in tester
           .widgetList<DecoratedBox>(find.byType(DecoratedBox))
           .map((e) => e.decoration)
-          .whereType<BoxDecoration>()) {
+          .whereType<BoxDecoration>()
+          .where((decoration) => decoration.color != null)) {
         expect(decoration.color, AppColors.bgSurface);
       }
     });
@@ -308,8 +310,24 @@ void main() {
       ));
 
       expect(find.byType(GlassContainer), findsNothing);
-      expect(_firstDecorationUnder(tester, AppCard).color, AppColors.bgSurface);
-      expect(find.byKey(AppGlassSurface.strokeKey), findsNothing);
+      expect(find.byType(BackdropFilter), findsNothing);
+      final decorations = tester
+          .widgetList<DecoratedBox>(
+            find.descendant(
+              of: find.byType(AppCard),
+              matching: find.byType(DecoratedBox),
+            ),
+          )
+          .map((box) => box.decoration)
+          .whereType<BoxDecoration>();
+      expect(
+        decorations.where((decoration) => decoration.color == AppColors.bgSurface),
+        isNotEmpty,
+        reason: '底子还是不透明卡片',
+      );
+      // 没有玻璃也保留同样的立体感。
+      expect(find.byKey(AppGlassSurface.shadowKey), findsOneWidget);
+      expect(find.byKey(AppGlassSurface.strokeKey), findsOneWidget);
     });
 
     testWidgets('上限降到 standard：卡片退回磨砂档，仍然是一块玻璃', (tester) async {
@@ -352,16 +370,16 @@ void main() {
       expect(strokeDecoration.borderRadius,
           BorderRadius.circular(AppRadius.lg));
 
-      // 高光：白色 appGlassHighlightAlpha() → 0 的线性渐变，
+      // 高光：卡片档是白色 appCardHighlightAlpha()（10%~16%）→ 0 的细渐变，
       // IgnorePointer 盖在内容上不挡点击。
       final highlight = tester.widget<DecoratedBox>(
         find.byKey(AppGlassSurface.highlightKey),
       );
       final gradient =
           (highlight.decoration as BoxDecoration).gradient! as LinearGradient;
-      expect(gradient.colors.first.a, closeTo(appGlassHighlightAlpha(), 1e-9));
-      expect(gradient.colors.first.a, greaterThan(0.12),
-          reason: 'tint 压下去之后高光要更亮，玻璃才不至于「看不见」');
+      expect(gradient.colors.first.a, closeTo(appCardHighlightAlpha(), 1e-9));
+      expect(gradient.colors.first.a, inInclusiveRange(0.10, 0.16),
+          reason: '卡片高光落在 10%~16%，再亮就成压在正文上的白杠');
       expect(gradient.colors.last.a, 0.0);
       expect(gradient.begin, Alignment.topCenter);
       // 高光层最近的 IgnorePointer 一定在忽略命中（点击照样落到 tab/卡片）。
@@ -386,7 +404,20 @@ void main() {
       ));
 
       expect(find.byType(GlassContainer), findsNothing);
-      expect(_firstDecorationUnder(tester, AppCard).color, AppColors.bgSurface);
+      final decorations = tester
+          .widgetList<DecoratedBox>(
+            find.descendant(
+              of: find.byType(AppCard),
+              matching: find.byType(DecoratedBox),
+            ),
+          )
+          .map((box) => box.decoration)
+          .whereType<BoxDecoration>();
+      expect(
+        decorations.where((decoration) => decoration.color == AppColors.bgSurface),
+        isNotEmpty,
+        reason: '不透明卡片的底子还是 bgSurface',
+      );
     });
   });
 

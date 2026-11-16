@@ -31,7 +31,7 @@ class AppSegmentedItem {
   const AppSegmentedItem(this.label, {this.count});
 }
 
-/// 紧凑分段条（全部 / 照片 / 动态图片 / 视频）：**整条一枚玻璃胶囊**。
+/// 紧凑分段条（全部 / 照片 / 动态照片 / 视频）：**整条一枚玻璃胶囊**。
 ///
 /// 视觉只有两条规则：
 /// 1. 底子是一块玻璃（[AppGlassSurface]），与底部 footer / 多选底栏同一套材质

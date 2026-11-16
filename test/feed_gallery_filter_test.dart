@@ -1,4 +1,5 @@
 import 'package:album_app/core/design/theme.dart';
+import 'package:album_app/features/album/album_media_filter.dart';
 import 'package:album_app/features/album/album_timeline_layout.dart';
 import 'package:album_app/features/album/feed_gallery_page.dart';
 import 'package:album_app/features/album/photo_timeline_scrubber.dart';
@@ -24,7 +25,7 @@ Media _photo(int id, DateTime takenAt) => Media(
       postId: null,
     );
 
-/// 动态图片：图片 + 服务端提取出来的动态视频。
+/// 动态照片：图片 + 服务端提取出来的实况视频。
 Media _live(int id, DateTime takenAt) => Media(
       id: id,
       type: 'image',
@@ -68,7 +69,7 @@ List<Media> _mixed() => [
       _video(12, DateTime(2020, 5, 12, 10, 1)),
     ];
 
-/// 4 张普通照片 + 4 张动态图片 + 4 个视频，分三天：三类数量刚好都不同。
+/// 4 张普通照片 + 4 张动态照片 + 4 个视频，分三天：三类数量刚好都不同。
 List<Media> _mixedLive() => [
       _photo(1, DateTime(2020, 5, 10, 9)),
       _live(2, DateTime(2020, 5, 10, 9, 1)),
@@ -208,47 +209,53 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('筛选条顺序与数量：全部 / 照片 / 动态图片 / 视频', (tester) async {
+  testWidgets('筛选条顺序与数量：全部 / 照片 / 动态照片 / 视频', (tester) async {
     await _pump(tester, items: _mixedLive());
 
     final bar = tester.widget<AppSegmentedBar>(find.byType(AppSegmentedBar));
     expect(
       bar.items.map((item) => item.label).toList(),
-      ['全部', '照片', '动态图片', '视频'],
-      reason: '动态图片排在照片后面、视频前面',
+      ['全部', '照片', '动态照片', '视频'],
+      reason: '动态照片排在照片后面、视频前面',
     );
-    expect(bar.items.map((item) => item.count).toList(), [12, 4, 4, 4]);
+    // 4 普通照片 + 4 动态照片 + 4 视频：照片 = 8（含动态照片），全部 = 12。
+    expect(bar.items.map((item) => item.count).toList(), [12, 8, 4, 4]);
     final lefts = [
-      for (final label in ['全部', '照片', '动态图片', '视频'])
+      for (final label in ['全部', '照片', '动态照片', '视频'])
         tester.getRect(find.text(label)).left,
     ];
     expect(lefts, orderedEquals([...lefts]..sort()));
 
-    await _tapFilter(tester, '动态图片');
+    await _tapFilter(tester, '动态照片');
     final live =
         tester.widgetList<AlbumThumb>(find.byType(AlbumThumb)).toList();
     expect(live, hasLength(4));
     expect(
       live.every((thumb) => thumb.media.isLivePhoto && !thumb.media.isVideo),
       isTrue,
-      reason: '动态图片只含有动态视频的图片',
+      reason: '动态照片只含有实况视频的图片',
     );
 
     await _tapFilter(tester, '照片');
     final photos =
         tester.widgetList<AlbumThumb>(find.byType(AlbumThumb)).toList();
-    expect(photos, hasLength(4));
+    expect(photos, hasLength(8), reason: '照片 = 普通照片 + 动态照片');
+    expect(photos.every((thumb) => !thumb.media.isVideo), isTrue);
     expect(
-      photos.every((thumb) => !thumb.media.isVideo && !thumb.media.isLivePhoto),
-      isTrue,
-      reason: '普通照片不含动态图片',
+      photos.where((thumb) => thumb.media.isLivePhoto),
+      hasLength(4),
+      reason: '照片列表里包含动态照片（包含语义）',
     );
 
     // 数量始终是全量：切来切去数字不跳。
     expect(_chipCount(tester, '全部'), 12);
-    expect(_chipCount(tester, '照片'), 4);
-    expect(_chipCount(tester, '动态图片'), 4);
+    expect(_chipCount(tester, '照片'), 8);
+    expect(_chipCount(tester, '动态照片'), 4);
     expect(_chipCount(tester, '视频'), 4);
+    final counts = AlbumMediaCounts.from(_mixedLive());
+    expect(counts.photos, counts.stillPhotos + counts.livePhotos,
+        reason: '照片数量 == 普通照片 + 动态照片');
+    expect(counts.livePhotos, lessThanOrEqualTo(counts.photos));
   });
 
   testWidgets('筛选后时间轴 itemCount / offsets / 实时月份跟随可见集合', (tester) async {
@@ -321,15 +328,15 @@ void main() {
     expect(find.byType(AlbumThumb), findsNothing);
   });
 
-  testWidgets('空状态四：筛选后没有动态图片', (tester) async {
+  testWidgets('空状态四：筛选后没有动态照片', (tester) async {
     await _pump(tester, items: [
       _photo(1, DateTime(2020, 5, 10, 9)),
       _photo(2, DateTime(2020, 5, 10, 10)),
       _video(3, DateTime(2020, 5, 11, 9)),
     ]);
 
-    await _tapFilter(tester, '动态图片');
-    expect(find.text('筛选后没有动态图片'), findsOneWidget);
+    await _tapFilter(tester, '动态照片');
+    expect(find.text('筛选后没有动态照片'), findsOneWidget);
     expect(find.byType(AlbumThumb), findsNothing);
 
     await tester.tap(find.text('看全部'));

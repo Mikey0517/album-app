@@ -467,7 +467,7 @@ void main() {
       expect(border.top.width, 1);
       expect(border.top.color, AppColors.divider);
       // 四段文字与数量都还在（没有白屏）。
-      for (final label in ['全部', '照片', '动态图片', '视频']) {
+      for (final label in ['全部', '照片', '动态照片', '视频']) {
         expect(find.text(label), findsOneWidget);
       }
     });

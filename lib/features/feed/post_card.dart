@@ -119,10 +119,13 @@ class _PostCardState extends State<PostCard> {
               // chrome；卡片仍不自建层（useOwnLayer 默认 false），内容有
               // RepaintBoundary 兜着，滚动时不会每帧重建。
               // 降到 minimal / 玻璃不可用时就是不透明的 bgSurface，布局完全一致。
+              // depth：双层阴影 + 顶部内高光 + 1px 描边，磨砂档与退化档一样有
+              // 层次（只是退化档没有模糊），卡片本身不做位移动画。
               child: AppGlassSurface(
                 radius: AppRadius.lg,
                 padding: const EdgeInsets.all(16),
                 requestedQuality: AppGlassSurface.kCardQuality,
+                depth: true,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

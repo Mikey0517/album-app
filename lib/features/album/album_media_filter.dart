@@ -6,7 +6,7 @@ import '../../models/media.dart';
 /// 若像排序/分组那样全局持久化，下次进别的相册会莫名只剩视频，用户还得
 /// 自己找回来。页内刷新、上传后仍然保留，切走再进来回到「全部」。
 ///
-/// 枚举顺序就是筛选条上的顺序（全部 / 照片 / 动态图片 / 视频）：
+/// 枚举顺序就是筛选条上的顺序（全部 / 照片 / 动态照片 / 视频）：
 /// [AlbumMediaFilterBar] 直接按 values 摆，文案、数量、选中态都不会另起一套。
 enum AlbumMediaFilter { all, photos, livePhotos, videos }
 
@@ -14,7 +14,7 @@ extension AlbumMediaFilterX on AlbumMediaFilter {
   String get label => switch (this) {
         AlbumMediaFilter.all => '全部',
         AlbumMediaFilter.photos => '照片',
-        AlbumMediaFilter.livePhotos => '动态图片',
+        AlbumMediaFilter.livePhotos => '动态照片',
         AlbumMediaFilter.videos => '视频',
       };
 
@@ -22,41 +22,54 @@ extension AlbumMediaFilterX on AlbumMediaFilter {
   String get noun => switch (this) {
         AlbumMediaFilter.all => '内容',
         AlbumMediaFilter.photos => '照片',
-        AlbumMediaFilter.livePhotos => '动态图片',
+        AlbumMediaFilter.livePhotos => '动态照片',
         AlbumMediaFilter.videos => '视频',
       };
 
-  /// 「动态图片」= 图片且有服务端提取出来的动态视频；「照片」只剩普通静态照片，
-  /// 否则动态图片会被数两次，「全部」就对不上照片 + 动态图片 + 视频。
+  /// 四类的关系是**包含**，不是互斥：
+  /// - 全部 = 所有媒体；
+  /// - 照片 = 所有图片（含动态照片）；
+  /// - 动态照片 = 图片中带实况的那部分，是「照片」的子集；
+  /// - 视频 = 所有视频。
+  ///
+  /// 所以「照片」不再排掉动态照片（旧语义会排掉，照片与动态照片互斥）；
+  /// 数量上 照片 = 普通照片 + 动态照片，「全部」= 照片 + 视频——动态照片
+  /// 已经算在照片里，不能加第二次。
   bool matches(Media media) => switch (this) {
         AlbumMediaFilter.all => true,
-        AlbumMediaFilter.photos => !media.isVideo && !media.isLivePhoto,
+        AlbumMediaFilter.photos => !media.isVideo,
         AlbumMediaFilter.livePhotos => !media.isVideo && media.isLivePhoto,
         AlbumMediaFilter.videos => media.isVideo,
       };
 }
 
-/// 相册里照片/动态图片/视频各有几个。筛选条上的数量始终取全量，
+/// 相册里普通照片 / 动态照片 / 视频各有几个。筛选条上的数量始终取全量，
 /// 这样切换筛选时数字不跳，用户知道自己漏掉了多少。
+///
+/// 口径（与 [AlbumMediaFilterX.matches] 一致）：
+/// - [photos] = 所有图片 = [stillPhotos] + [livePhotos]（含动态照片）；
+/// - [livePhotos] 只是照片的子集，[total] 里不能再加它；
+/// - [total] = [photos] + [videos]。
 class AlbumMediaCounts {
-  /// 普通静态照片（不含动态图片）。
-  final int photos;
+  /// 普通照片：图片、不带实况。是照片的一部分。
+  final int stillPhotos;
 
-  /// 动态图片（图片 + 动态视频）。
+  /// 动态照片：图片 + 服务端提取出来的实况视频。也是照片的一部分。
   final int livePhotos;
   final int videos;
 
   const AlbumMediaCounts({
-    required this.photos,
+    required this.stillPhotos,
     required this.livePhotos,
     required this.videos,
   });
 
-  /// 照片总数，含动态图片：页头那句「N 张照片」用这个——
-  /// 动态图片也是照片，页头不必拆成三项。
-  int get images => photos + livePhotos;
+  /// 照片 = 所有图片（含动态照片）。页头那句「N 张照片」用这个，
+  /// 筛选条上「照片」的角标也是这个：两处一个口径。
+  int get photos => stillPhotos + livePhotos;
 
-  int get total => photos + livePhotos + videos;
+  /// 全部 = 照片 + 视频。动态照片已经算在照片里，不能加第二次。
+  int get total => photos + videos;
 
   int of(AlbumMediaFilter filter) => switch (filter) {
         AlbumMediaFilter.all => total,
@@ -66,7 +79,7 @@ class AlbumMediaCounts {
       };
 
   factory AlbumMediaCounts.from(List<Media> items) {
-    var photos = 0;
+    var stillPhotos = 0;
     var livePhotos = 0;
     var videos = 0;
     for (final item in items) {
@@ -75,11 +88,11 @@ class AlbumMediaCounts {
       } else if (item.isLivePhoto) {
         livePhotos++;
       } else {
-        photos++;
+        stillPhotos++;
       }
     }
     return AlbumMediaCounts(
-      photos: photos,
+      stillPhotos: stillPhotos,
       livePhotos: livePhotos,
       videos: videos,
     );
