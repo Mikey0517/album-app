@@ -318,8 +318,9 @@ void main() {
     expect(_chipCount(tester, '全部'), 12);
     expect(_chipCount(tester, '照片'), 8);
     expect(_chipCount(tester, '视频'), 4);
-    // 头部统计始终是整本相册，不随筛选变。
-    expect(find.text('8 张照片 · 4 个视频'), findsOneWidget);
+    // 头部不再有「N 张照片 · M 个视频」这一行：数字只在筛选角标里。
+    expect(find.textContaining('张照片 ·'), findsNothing);
+    expect(find.textContaining('个视频'), findsNothing);
     expect(find.byType(AlbumThumb), findsNWidgets(12));
   });
 
@@ -341,10 +342,15 @@ void main() {
         tester.getRect(find.text(label)).left,
     ];
     expect(lefts, orderedEquals([...lefts]..sort()));
-    // 页头「N 张照片」与「照片」筛选同一个口径：所有图片（含动态照片）。
+    // 页头统计行已删；「照片」角标仍是「普通照片 + 动态照片」同一个口径。
     expect(
-      find.text('8 张照片 · 4 个视频'),
-      findsOneWidget,
+      find.textContaining('张照片 ·'),
+      findsNothing,
+      reason: '相册页头部不再显示 N 张照片 · M 个视频',
+    );
+    expect(
+      _chipCount(tester, '照片'),
+      8,
       reason: '页头照片数 = 普通照片 + 动态照片，和「照片」角标一致',
     );
     final counts = AlbumMediaCounts.from(_mixedLive());

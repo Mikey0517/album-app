@@ -370,16 +370,16 @@ void main() {
       expect(strokeDecoration.borderRadius,
           BorderRadius.circular(AppRadius.lg));
 
-      // 高光：卡片档是白色 appCardHighlightAlpha()（10%~16%）→ 0 的细渐变，
-      // IgnorePointer 盖在内容上不挡点击。
+      // 高光：卡片档是白色 appCardHighlightAlpha()（6%）→ 0 的细渐变，
+      // IgnorePointer 盖在内容上不挡点击。磨砂卡片不该靠表面反光提层次。
       final highlight = tester.widget<DecoratedBox>(
         find.byKey(AppGlassSurface.highlightKey),
       );
       final gradient =
           (highlight.decoration as BoxDecoration).gradient! as LinearGradient;
       expect(gradient.colors.first.a, closeTo(appCardHighlightAlpha(), 1e-9));
-      expect(gradient.colors.first.a, inInclusiveRange(0.10, 0.16),
-          reason: '卡片高光落在 10%~16%，再亮就成压在正文上的白杠');
+      expect(gradient.colors.first.a, inInclusiveRange(0.04, 0.08),
+          reason: '卡片高光压到 6% 一档：立体感交给阴影，亮一点就成压在正文上的白杠');
       expect(gradient.colors.last.a, 0.0);
       expect(gradient.begin, Alignment.topCenter);
       // 高光层最近的 IgnorePointer 一定在忽略命中（点击照样落到 tab/卡片）。
@@ -490,10 +490,13 @@ void main() {
           tester.widget<GlassContainer>(find.byType(GlassContainer));
       expect(container.useOwnLayer, isFalse);
       expect(container.quality, GlassQuality.standard);
-      // standard 的光学参数：12 / 1.2 / 8。
+      // 卡片的光学参数：斜面对齐磨砂档（12），但模糊/底色是白雾那一套
+      // （blur 20 / tint 37% / 折射归零）。
       final settings = container.settings!;
       expect(settings.thickness, 12);
-      expect(settings.blur, 8);
+      expect(settings.blur, appCardFrostBlur);
+      expect(settings.glassColor, appCardFrostTintColor);
+      expect(settings.refractiveIndex, 1.0);
       // 滚动时只重绘玻璃层，卡片内容走缓存。
       expect(
         find.descendant(
@@ -504,15 +507,15 @@ void main() {
       );
     });
 
-    testWidgets('上限降到 standard：卡片退回磨砂参数，仍然是玻璃', (tester) async {
+    testWidgets('上限降到 standard：卡片仍是白雾磨砂，仍然是玻璃', (tester) async {
       await tester.pumpWidget(host(GlassQuality.standard));
       await tester.pump();
 
       final container =
           tester.widget<GlassContainer>(find.byType(GlassContainer));
       expect(container.quality, GlassQuality.standard);
-      expect(container.settings!.thickness, 12, reason: '磨砂那套光学参数');
-      expect(container.settings!.blur, 8);
+      expect(container.settings!.thickness, 12, reason: '斜面对齐磨砂档');
+      expect(container.settings!.blur, appCardFrostBlur);
       expect(find.text('周末去了公园'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });

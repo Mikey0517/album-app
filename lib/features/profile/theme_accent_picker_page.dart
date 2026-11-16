@@ -7,33 +7,82 @@ import '../../core/design/radius.dart';
 import '../../core/design/spacing.dart';
 import '../../core/design/text_styles.dart';
 
-/// 自定义主题色：只用 Slider 拼出 色相 / 饱和度 / 明度 三条通道，
-/// 顶部大圆实时预览，保存后写回 [AppAccentController] 并落盘。
-class ThemeAccentPickerPage extends StatefulWidget {
+/// 打开 HSV 取色页，返回用户选的颜色；用户取消（返回键 / 侧滑）是 null。
+///
+/// 主题色、页面背景的纯色、双色渐变的两个色标都用它：取色这件事只有一份实现
+/// （[HsvColorPickerPage] 的三条 Slider），谁要颜色谁调这个函数。
+Future<Color?> pickHsvColor(
+  BuildContext context, {
+  required Color initial,
+  required String title,
+}) {
+  return Navigator.of(context).push<Color>(
+    MaterialPageRoute<Color>(
+      builder: (_) => HsvColorPickerPage(initial: initial, title: title),
+    ),
+  );
+}
+
+/// 自定义主题色：整页取色，保存后写回 [AppAccentController] 并落盘。
+///
+/// 只是 [HsvColorPickerPage] 的一层「保存到哪里」的包装：主题色和页面背景的
+/// 纯色 / 渐变两个色标共用同一个取色器，不各写一份。
+class ThemeAccentPickerPage extends StatelessWidget {
   const ThemeAccentPickerPage({super.key});
 
   @override
-  State<ThemeAccentPickerPage> createState() => _ThemeAccentPickerPageState();
+  Widget build(BuildContext context) {
+    return HsvColorPickerPage(
+      initial: AppAccentController.seed.value,
+      title: '自定义主题色',
+      onSave: AppAccentController.setSeed,
+    );
+  }
 }
 
-class _ThemeAccentPickerPageState extends State<ThemeAccentPickerPage> {
+/// 只用 Slider 拼出 色相 / 饱和度 / 明度 三条通道，顶部大圆实时预览。
+///
+/// [onSave] 为 null：「保存」把选中的颜色 pop 回去（[pickHsvColor] 走这条）；
+/// 非 null：先交给调用点落盘，再关页面（路由结果类型是 void，不往回带颜色）。
+class HsvColorPickerPage extends StatefulWidget {
+  const HsvColorPickerPage({
+    super.key,
+    required this.initial,
+    required this.title,
+    this.onSave,
+  });
+
+  /// 进来时的初始颜色（决定三条 Slider 的起点）。
+  final Color initial;
+
+  /// 页面标题（「自定义主题色」/「纯色背景」/「起始色」…）。
+  final String title;
+
+  /// 保存回调；为空表示「把颜色 pop 回去」。
+  final Future<void> Function(Color color)? onSave;
+
+  @override
+  State<HsvColorPickerPage> createState() => _HsvColorPickerPageState();
+}
+
+class _HsvColorPickerPageState extends State<HsvColorPickerPage> {
   late HSVColor _hsv;
 
   @override
   void initState() {
     super.initState();
-    _hsv = AppAccent.hsvOf(AppAccentController.seed.value);
+    _hsv = AppAccent.hsvOf(widget.initial);
   }
 
   Future<void> _save() async {
-    await AppAccentController.setSeed(
-      AppAccent.fromHsv(
-        hue: _hsv.hue,
-        saturation: _hsv.saturation,
-        value: _hsv.value,
-      ),
-    );
-    if (mounted) Navigator.of(context).pop();
+    final color = _color;
+    final onSave = widget.onSave;
+    if (onSave != null) {
+      await onSave(color);
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+    if (mounted) Navigator.of(context).pop(color);
   }
 
   Color get _color =>
@@ -47,7 +96,7 @@ class _ThemeAccentPickerPageState extends State<ThemeAccentPickerPage> {
     return Scaffold(
       backgroundColor: AppColors.bgPage,
       appBar: AppBar(
-        title: const Text('自定义主题色'),
+        title: Text(widget.title),
         actions: [
           TextButton(onPressed: _save, child: const Text('保存')),
         ],

@@ -21,10 +21,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 // 三处「换玻璃」的控件：多选底栏、上传按钮、分类条。
 //
 // 它们和底部 footer 是**同一块材质**：同一个 [AppGlassSurface]、同一套档位与
-// 光学参数（premium，28 / 1.38 / 0.10 / 3）、同样的 scrim 分支；几何上一律是
-// 圆角 = 高度/2 的 pill。这里守四件事：
+// 光学参数（premium，28 / 1.38 / 0.10 / 3）、同样的 scrim 分支；几何上都是
+// 圆角 = 高度/2（上传按钮是直径 48 的圆，其余是 pill）。这里守四件事：
 //   1. 多选底栏是浮动胶囊：左右 18、底部离安全区 8、四个操作等宽；
-//   2. 上传按钮是 pill 玻璃，且整枚让开右侧 30 宽的时间轴轨道（矩形不相交）；
+//   2. 上传按钮是直径 48 的圆钮、只放「+」图标，且整枚让开右侧 30 宽的时间轴
+//      轨道（断言的是它的外接矩形与轨道不相交）；
 //   3. 分类条整条一枚胶囊，选中段只换文字颜色、**不加填充块**；
 //   4. minimal / 无档位时三处都退成同形状的不透明表面（bgSurface + 1px 边），
 //      不跳版、不白屏。
@@ -73,6 +74,24 @@ BoxDecoration _firstDecorationUnder(WidgetTester tester, Finder frame) {
     find.descendant(of: frame, matching: find.byType(DecoratedBox)),
   );
   return decorated.first.decoration as BoxDecoration;
+}
+
+/// chrome 控件的玻璃参数：**一组都不许动**。
+///
+/// 卡片改成白雾磨砂（[appCardFrostSettings]）是卡片自己的事，底部胶囊 /
+/// 筛选条 / 多选底栏 / 上传按钮仍是 [appGlassChromeSettings]（折射优先的
+/// premium 那套）；这里逐个数点名，谁被连带改掉都会红。
+void _expectChromeSettings(WidgetTester tester) {
+  final container =
+      tester.widget<GlassContainer>(find.byType(GlassContainer).first);
+  final settings = container.settings!;
+  expect(settings.thickness, 28, reason: 'chrome 仍是 premium 的深斜面');
+  expect(settings.blur, 3, reason: 'chrome 仍是折射优先的低模糊');
+  expect(settings.refractiveIndex, 1.38);
+  expect(settings.chromaticAberration, 0.10);
+  expect(settings.glassColor, appGlassChromeTintColor);
+  expect(settings.blur, lessThan(appCardFrostBlur),
+      reason: '卡片的白雾模糊不许漏到 chrome 上');
 }
 
 /// 四段都在、且每段只有一个玻璃表面的多选底栏。
@@ -190,6 +209,7 @@ void main() {
       expect(surface.radius, SelectionFooter.barHeight / 2);
       // 真的在建玻璃：整条胶囊一块 GlassContainer，不是每一格各一块。
       expect(find.byType(GlassContainer), findsOneWidget);
+      _expectChromeSettings(tester);
 
       final barRect = tester.getRect(find.byType(SelectionFooter));
       final pillRect = tester.getRect(find.byType(AppGlassSurface));
@@ -397,6 +417,7 @@ void main() {
       expect(pill.width, 390 - 24);
       // 玻璃也只有一块：不是每一段各一块。
       expect(find.byType(GlassContainer), findsOneWidget);
+      _expectChromeSettings(tester);
 
       // 选中段 = 主题色文字，未选中 = 与底部 tab 同一档的中性灰。
       expect(tester.widget<Text>(find.text('全部')).style!.color, AppColors.primary);
@@ -473,8 +494,8 @@ void main() {
     });
   });
 
-  group('上传按钮：玻璃 pill，让开时间轴轨道', () {
-    testWidgets('是 pill 玻璃，且矩形与右侧轨道不相交', (tester) async {
+  group('上传按钮：玻璃圆钮，让开时间轴轨道', () {
+    testWidgets('是圆形玻璃：直径 48、只有「+」、外接矩形与轨道不相交', (tester) async {
       await _pumpAlbum(tester);
 
       final fab = find.byKey(AlbumUploadFab.surfaceKey);
@@ -483,22 +504,36 @@ void main() {
       expect(surface.requestedQuality, AppBottomTabBar.preferredQuality);
       expect(surface.preferPremium, isTrue);
       expect(surface.scrim, isTrue);
-      expect(surface.radius, AlbumUploadFab.height / 2);
+      expect(surface.radius, AlbumUploadFab.diameter / 2);
       expect(
         find.descendant(of: fab, matching: find.byType(GlassContainer)),
         findsOneWidget,
       );
+      _expectChromeSettings(tester);
 
+      // 圆的**外接矩形**就是正方形，边长 = 直径 48；宽度不再由内容撑开。
       final fabRect = tester.getRect(fab);
-      expect(fabRect.height, AlbumUploadFab.height);
-      expect(fabRect.width, greaterThan(fabRect.height), reason: 'pill 不是圆钮');
+      expect(fabRect.width, AlbumUploadFab.diameter);
+      expect(fabRect.height, AlbumUploadFab.diameter);
+      expect(fabRect.width, fabRect.height, reason: '圆钮不是 pill');
+      expect(AlbumUploadFab.diameter, 48);
+      // 只有「+」图标：没有文字、没有左右内边距把宽度撑开。
       expect(
         find.descendant(of: fab, matching: find.text('上传照片')),
-        findsOneWidget,
+        findsNothing,
       );
       expect(
+        find.descendant(of: fab, matching: find.text('上传')),
+        findsNothing,
+      );
+      final icon = tester.widget<Icon>(
+        find.descendant(of: fab, matching: find.byIcon(Icons.add)),
+      );
+      expect(icon.size, AlbumUploadFab.iconSize);
+      expect(icon.size, 22);
+      expect(
         find.descendant(of: fab, matching: find.byIcon(Icons.add_a_photo_outlined)),
-        findsOneWidget,
+        findsNothing,
       );
 
       // 右侧时间轴轨道：30 宽的一条，从吸顶区下沿一直到底。
@@ -521,7 +556,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('minimal 档：退成同形状的不透明胶囊，仍然让开轨道', (tester) async {
+    testWidgets('minimal 档：退成同尺寸的不透明圆钮，仍然让开轨道', (tester) async {
       await _pumpAlbum(tester, quality: GlassQuality.minimal);
 
       expect(find.byType(GlassContainer), findsNothing);
@@ -530,7 +565,8 @@ void main() {
       final fab = find.byKey(AlbumUploadFab.surfaceKey);
       expect(fab, findsOneWidget);
       final fabRect = tester.getRect(fab);
-      expect(fabRect.height, AlbumUploadFab.height);
+      expect(fabRect.width, AlbumUploadFab.diameter);
+      expect(fabRect.height, AlbumUploadFab.diameter);
 
       final decoration = _firstDecorationUnder(tester, fab);
       expect(decoration.color, AppColors.bgSurface);
@@ -541,7 +577,9 @@ void main() {
       final border = decoration.border! as Border;
       expect(border.top.width, 1);
       expect(border.top.color, AppColors.divider);
-      expect(find.text('上传照片'), findsOneWidget);
+      // 退化也不加文字：形状、尺寸、图标全都不变。
+      expect(find.text('上传照片'), findsNothing);
+      expect(find.byIcon(Icons.add), findsOneWidget);
 
       final track = tester.getRect(find.byType(PhotoTimelineScrubber));
       expect(fabRect.overlaps(track), isFalse, reason: '退化也不许压轨道');

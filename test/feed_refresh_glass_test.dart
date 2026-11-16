@@ -77,6 +77,21 @@ List<String> _cardPaths(WidgetTester tester) {
   return paths;
 }
 
+/// 第一张卡片的玻璃 [Element]：刷新往返里必须是**同一个**实例。
+///
+/// Element 换了 = 那一层玻璃被换掉/重建，真机上就是材质断一下；同实例说明
+/// 刷新只是重绘，没有换材质。
+Element? _firstCardGlassElement(WidgetTester tester) {
+  final found = find
+      .descendant(
+        of: find.byType(PostCard).first,
+        matching: find.byType(GlassContainer),
+      )
+      .evaluate()
+      .toList();
+  return found.isEmpty ? null : found.first;
+}
+
 /// 卡片留白带（玻璃外框上沿 8px 处，避开内缩 16 的正文）的平均亮度。
 ///
 /// 白卡 ≈ 1.0；黑卡 ≈ 0.0。只取留白带是因为正文里本来就有深色文字，混进去
@@ -143,7 +158,7 @@ void main() {
     );
   });
 
-  testWidgets('下拉刷新全过程：卡片每一帧都不许落到需要 capture 的 premium 路径',
+  testWidgets('下拉刷新全过程：玻璃材质连续（没有 opaque 中间态），黑卡仍不复现',
       (tester) async {
     tester.view.physicalSize = const Size(360, 780);
     tester.view.devicePixelRatio = 1.0;
@@ -166,32 +181,50 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(PostCard), findsWidgets);
 
-    final frames = <String, List<List<String>>>{
-      '刷新前': [_cardPaths(tester)],
-    };
+    // 刷新前的基准：卡片档位、玻璃元素实例、刷新区重绘边界的实例、留白带亮度。
+    final beforePaths = _cardPaths(tester);
+    final glassBefore = _firstCardGlassElement(tester);
+    final layerBefore =
+        tester.element(find.byKey(FeedRefreshGlassLayer.repaintKey));
+    final luminanceBefore = await _cardPaddingBandLuminance(tester);
+    expect(beforePaths, isNotEmpty);
+    expect(
+      beforePaths.every((p) => p == GlassQuality.standard.name),
+      isTrue,
+      reason: '刷新前卡片就是 standard 玻璃：$beforePaths',
+    );
+    expect(glassBefore, isNotNull);
 
     // 用 RefreshIndicator 真正会调用的那个回调走一遍下拉刷新。
     final refresh =
         tester.widget<RefreshIndicator>(find.byType(RefreshIndicator));
     final future = refresh.onRefresh();
     await tester.pump();
-    expect(AppGlassRefreshHold.isActive, isTrue, reason: '刷新段一开始就暂停玻璃');
+    // 老实现（刷新期间换成同色不透明表面）在这一行就把 hold 打开了——那一进
+    // 一出正是「下拉刷新闪一下」的来源，现在 feed 页不许再动材质。
+    expect(AppGlassRefreshHold.isActive, isFalse,
+        reason: '刷新期间不换材质：不再把玻璃暂停成不透明表面');
 
-    // 刷新保持期间逐帧记录。回包有 320ms 假延时，所以这里能真正看到「刷新中」
-    // 的中间帧，而不是把回包后那一帧当成刷新中。
-    final holdFrames = <List<String>>[];
-    await tester.pump(const Duration(milliseconds: 16));
-    final holdLuminance = await _cardPaddingBandLuminance(tester);
-    for (var i = 0; i < 60; i++) {
-      if (!AppGlassRefreshHold.isActive) break;
-      holdFrames.add(_cardPaths(tester));
+    final frames = <String, List<List<String>>>{
+      '刷新前': [beforePaths],
+    };
+
+    // 刷新往返逐帧记录。回包有 320ms 假延时，20 帧 × 16ms 刚好把「刷新中」
+    // 和「回包后数据替换」两段都盖住（老实现的闪烁就发生在后半段）。
+    //
+    // 每帧除了记档位，还采一次卡片留白带的亮度：材质换没换，亮度是最直接的
+    // 证据——换成不透明 bgSurface（浅色纯白）那几帧会明显亮出去。
+    final refreshFrames = <List<String>>[];
+    final refreshLuminance = <double>[];
+    for (var i = 0; i < 20; i++) {
+      refreshLuminance.add(await _cardPaddingBandLuminance(tester));
+      refreshFrames.add(_cardPaths(tester));
       await tester.pump(const Duration(milliseconds: 16));
     }
     await future;
     await tester.pumpAndSettle();
 
-    // 刷新结束、数据替换完成后连续几帧：黑卡就发生在这一段（暂停玻璃已经
-    // 释放，卡片回到 premium 重新 capture）。
+    // 数据替换完成后连续几帧：黑卡原本就发生在这一段。
     final afterFrames = <List<String>>[];
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 16));
@@ -206,15 +239,19 @@ void main() {
       await tester.pump(const Duration(milliseconds: 16));
       scrollFrames.add(_cardPaths(tester));
     }
-    frames['刷新保持'] = holdFrames;
+    frames['刷新往返'] = refreshFrames;
     frames['刷新后'] = afterFrames;
     frames['滚动中'] = scrollFrames;
 
     final premiumFrames = <String, List<String>>{};
+    final opaqueFrames = <String, List<String>>{};
     frames.forEach((phase, phaseFrames) {
       for (final paths in phaseFrames) {
         if (paths.any((p) => p == GlassQuality.premium.name)) {
           premiumFrames.putIfAbsent(phase, () => paths);
+        }
+        if (paths.any((p) => p == 'opaque')) {
+          opaqueFrames.putIfAbsent(phase, () => paths);
         }
       }
     });
@@ -229,21 +266,47 @@ void main() {
           '卡片必须固定在 standard（纯 BackdropFilter）。',
     );
 
-    // 暂停玻璃作为第二层保险仍然要在。
+    // 材质连续：刷新前/往返/刷新后/滚动中，每一帧每张卡片都是同一层玻璃，
+    // 没有任何一帧退回「不透明表面」——那一次切换就是闪烁本身。
     expect(
-      holdFrames.any((paths) => paths.contains('opaque')),
-      isTrue,
-      reason: '刷新期间保留「暂停玻璃 → 同色不透明表面」',
+      opaqueFrames,
+      isEmpty,
+      reason: '这些帧里卡片变成了不透明表面（材质切换 = 闪烁）：$opaqueFrames',
     );
-    // 刷新结束后必须回到玻璃（standard），不能一直钉在不透明面上。
+
+    // 不是「换了但很快换回来」：玻璃元素与刷新区重绘边界刷新前后必须是同一个
+    // 实例，说明刷新往返里材质层根本没被换掉/重建。
     expect(
-      afterFrames.any((paths) => paths.contains(GlassQuality.standard.name)),
-      isTrue,
-      reason: '刷新结束立刻回到 standard 玻璃，只是不再抓 capture',
+      _firstCardGlassElement(tester),
+      same(glassBefore),
+      reason: '刷新后卡片的玻璃 Element 换了实例：材质层被重建，画面就会闪',
     );
-    // 不画玻璃的那几帧是同色不透明底，不是黑块。
-    expect(holdLuminance, greaterThan(0.5),
-        reason: '刷新保持期间卡片留白带亮度 $holdLuminance');
+    expect(
+      tester.element(find.byKey(FeedRefreshGlassLayer.repaintKey)),
+      same(layerBefore),
+      reason: '刷新区重绘边界刷新后换了实例：整棵刷新区被重建了',
+    );
+
+    // 亮度连续：刷新中的每一帧都只能落在「刷新前」和「刷新后」两个稳态之间。
+    // 老实现（换成不透明 bgSurface）会在中途亮出去/暗下去一截——那一截就是
+    // 用户看到的那下闪。稳态本身在刷新后可以有一点位移（数据替换后卡片内容
+    // 变了），但**不许有超出稳态的瞬时跳变**。
+    final steadyLow = luminanceBefore < afterLuminance
+        ? luminanceBefore
+        : afterLuminance;
+    final steadyHigh = luminanceBefore < afterLuminance
+        ? afterLuminance
+        : luminanceBefore;
+    for (final value in refreshLuminance) {
+      expect(
+        value,
+        inInclusiveRange(steadyLow - 0.02, steadyHigh + 0.02),
+        reason: '刷新往返里有一帧的留白带亮度 $value 超出了稳态区间 '
+            '[${steadyLow.toStringAsFixed(4)}, ${steadyHigh.toStringAsFixed(4)}]：'
+            '这就是材质切换那一帧（刷新前 $luminanceBefore、刷新后 $afterLuminance）。',
+      );
+      expect(value, greaterThan(0.5), reason: '刷新期间不许出现发黑的卡片');
+    }
     expect(afterLuminance, greaterThan(0.5),
         reason: '刷新后卡片留白带亮度 $afterLuminance');
     expect(tester.takeException(), isNull);

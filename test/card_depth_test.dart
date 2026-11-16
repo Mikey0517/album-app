@@ -77,7 +77,7 @@ void _expectCardLayers(WidgetTester tester, Finder card, {bool dark = false}) {
   // 阴影跟着圆角走，圆角仍是现有 token。
   expect(decoration.borderRadius, BorderRadius.circular(AppRadius.lg));
 
-  // 顶部内高光：白 10%~16% → 0 的细渐变，IgnorePointer 不挡点击。
+  // 顶部内高光：白 6% → 0 的极淡渐变（磨砂不靠反光），IgnorePointer 不挡点击。
   final highlight = tester.widget<DecoratedBox>(
     find
         .descendant(of: card, matching: find.byKey(AppGlassSurface.highlightKey))
@@ -87,7 +87,7 @@ void _expectCardLayers(WidgetTester tester, Finder card, {bool dark = false}) {
       (highlight.decoration as BoxDecoration).gradient! as LinearGradient;
   expect(gradient.begin, Alignment.topCenter);
   expect(gradient.colors.first.a, closeTo(appCardHighlightAlpha(), 1e-9));
-  expect(gradient.colors.first.a, inInclusiveRange(0.10, 0.16));
+  expect(gradient.colors.first.a, inInclusiveRange(0.04, 0.08));
   expect(gradient.colors.last.a, 0.0);
   expect(
     tester

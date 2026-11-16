@@ -82,7 +82,8 @@ void main() {
       // 也不改变卡片。
       expect(container.quality, GlassQuality.standard);
       expect(container.settings!.thickness, 12);
-      expect(container.settings!.blur, 8);
+      expect(container.settings!.blur, appCardFrostBlur,
+          reason: '我的页卡片也是白雾磨砂');
     }
     expect(tester.takeException(), isNull);
   });

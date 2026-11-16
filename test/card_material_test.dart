@@ -134,13 +134,16 @@ void main() {
 
     // 玻璃（GlassContainer）和外框同尺寸：留白处也是玻璃，不是页面底色。
     expect(tester.getRect(find.byType(GlassContainer)), tester.getRect(surface));
-    // 卡片固定 standard：磨砂参数（12 / 1.2 / 8），不做 premium 的 capture。
+    // 卡片固定 standard：白雾磨砂参数（blur 20 / tint 37% / 折射归零），
+    // 不做 premium 的 capture。
     final container =
         tester.widget<GlassContainer>(find.byType(GlassContainer));
     expect(container.quality, GlassQuality.standard,
         reason: 'premium 的 capture 会在列表重建那一帧画出黑块');
-    expect(container.settings!.thickness, 12, reason: '磨砂那套光学参数');
-    expect(container.settings!.blur, 8);
+    expect(container.settings!.thickness, 12, reason: '斜面仍是磨砂那档');
+    expect(container.settings!.blur, appCardFrostBlur);
+    expect(container.settings!.blur, inInclusiveRange(18, 24));
+    expect(container.settings!.glassColor, appCardFrostTintColor);
     expect(container.useOwnLayer, isFalse);
     _expectLayersCoverFrame(tester, surface);
     _expectNoOpaqueBoxBetween(tester, frame: surface, content: content);

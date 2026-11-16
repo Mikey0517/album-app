@@ -690,16 +690,16 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                     size: 22,
                   ),
                   title: const Text('页面背景', style: AppText.body),
-                  trailing: ValueListenableBuilder<String?>(
-                    valueListenable: PageBackdropController.path,
-                    builder: (context, saved, _) {
-                      final custom =
-                          PageBackdropController.imageFileOrNull(saved) != null;
+                  // 右侧文案跟着 spec 走：默认渐变 / 纯色 / 渐变 / 自定义，
+                  // 和弹层里的勾选态是同一个对象，不会一处说 A、一处说 B。
+                  trailing: ValueListenableBuilder(
+                    valueListenable: PageBackdropController.spec,
+                    builder: (context, spec, _) {
                       return Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            custom ? '自定义' : '默认渐变',
+                            spec.label,
                             style: AppText.captionOnGlass,
                           ),
                           Icon(

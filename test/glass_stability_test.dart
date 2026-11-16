@@ -218,7 +218,9 @@ void main() {
       final restored = _glass(tester);
       expect(restored.quality, GlassQuality.standard,
           reason: '刷新结束回到 standard 玻璃（不抓 capture，黑卡根因）');
-      expect(restored.settings!.thickness, 12, reason: '磨砂那套光学参数');
+      expect(restored.settings!.thickness, 12, reason: '斜面对齐磨砂档');
+      expect(restored.settings!.blur, appCardFrostBlur,
+          reason: '刷新结束后卡片回到白雾磨砂');
       expect(tester.takeException(), isNull);
     });
 
@@ -262,7 +264,7 @@ void main() {
       expect(AppGlassRefreshHold.isActive, isFalse, reason: '异常也要释放，别把卡片钉在不透明面上');
     });
 
-    testWidgets('FeedPage 的 onRefresh：刷新全程暂停卡片玻璃，结束后 standard',
+    testWidgets('FeedPage 的 onRefresh：不换材质，刷新前后是同一层 standard 玻璃',
         (tester) async {
       tester.view.physicalSize = const Size(360, 780);
       tester.view.devicePixelRatio = 1.0;
@@ -277,18 +279,27 @@ void main() {
       expect(_glass(tester).quality, GlassQuality.standard,
           reason: '卡片固定 standard（不做 capture）');
 
+      // 刷新前先记下这块玻璃的 Element：刷新往返里必须是同一个实例。
+      final glassBefore = find.byType(GlassContainer).evaluate().first;
+
       // 用 RefreshIndicator 真正会调用的那个回调，等于走一遍下拉刷新的刷新段。
       final refresh =
           tester.widget<RefreshIndicator>(find.byType(RefreshIndicator));
       final future = refresh.onRefresh();
       await tester.pump();
 
-      expect(AppGlassRefreshHold.isActive, isTrue,
-          reason: '刷新段一开始就暂停玻璃');
-      expect(find.byType(GlassContainer), findsNothing);
+      // 朋友圈页不再用「暂停玻璃 → 同色不透明表面」那套保险：那两次材质切换
+      // 才是下拉刷新时闪一下的来源（见 test/feed_refresh_glass_test.dart）。
+      expect(AppGlassRefreshHold.isActive, isFalse,
+          reason: 'FeedPage 的刷新不换材质');
+      expect(find.byType(GlassContainer), findsWidgets,
+          reason: '刷新期间玻璃照旧画着，不许换成不透明表面');
+      expect(_glass(tester).quality, GlassQuality.standard);
+      expect(find.byType(GlassContainer).evaluate().first, same(glassBefore),
+          reason: '刷新往返里玻璃层没被换掉/重建');
 
       // 刷新回包靠 pump 推进（widget 测试里时间是假的，不能干等 future）。
-      for (var i = 0; i < 40 && AppGlassRefreshHold.isActive; i++) {
+      for (var i = 0; i < 20; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
       await tester.pumpAndSettle();

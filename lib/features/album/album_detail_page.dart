@@ -363,22 +363,31 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         onPopInvokedWithResult: (didPop, result) {
           if (!didPop && _selecting) _exitSelection();
         },
-        child: Scaffold(
-          // 上传按钮浮在右下角：平移由 [AlbumUploadFabLocation] 负责让开右侧
-          // 时间轴的轨道区（默认 endFloat 的 16 会让按钮压在轨道上）。
-          floatingActionButtonLocation: const AlbumUploadFabLocation(),
-          // 空相册的入口在空状态里，右下角就不再叠一个同样的按钮。
-          floatingActionButton: _selecting || !_canEdit || _items.isEmpty
-              ? null
-              : AlbumUploadFab(onPressed: _upload),
-          // 没选中任何一项时不出操作条，屏幕只留内容。
-          bottomNavigationBar:
-              _selecting && _selected.isNotEmpty ? _buildSelectionBar() : null,
-          // 多选底栏和底部 footer 一样是**浮**在内容上的胶囊：body 一直铺到
-          // 屏幕底边，照片从玻璃底下穿过，折射才有东西可采。没有操作条时
-          // bottomNavigationBar 为 null，布局和以前完全一样。
-          extendBody: true,
-          body: _buildBody(),
+        // 页面底色和「相册 tab」是同一份实现、同一组参数：[AppGlassBackdrop]
+        // 的页面底色 + 渐变（或用户自定义背景图 + 同一档可读性遮罩）。从 tab
+        // 里看「朋友圈相册」和从列表 push 进来的相册详情原来是两种底（前者是
+        // 渐变，后者是 Scaffold 的 bgPage 实底），现在两处逐项一致；Scaffold
+        // 自己不上色，背景从它下面透上来。
+        child: AppGlassBackdrop(
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            // 上传按钮浮在右下角：平移由 [AlbumUploadFabLocation] 负责让开右侧
+            // 时间轴的轨道区（默认 endFloat 的 16 会让按钮压在轨道上）。
+            floatingActionButtonLocation: const AlbumUploadFabLocation(),
+            // 空相册的入口在空状态里，右下角就不再叠一个同样的按钮。
+            floatingActionButton: _selecting || !_canEdit || _items.isEmpty
+                ? null
+                : AlbumUploadFab(onPressed: _upload),
+            // 没选中任何一项时不出操作条，屏幕只留内容。
+            bottomNavigationBar: _selecting && _selected.isNotEmpty
+                ? _buildSelectionBar()
+                : null,
+            // 多选底栏和底部 footer 一样是**浮**在内容上的胶囊：body 一直铺到
+            // 屏幕底边，照片从玻璃底下穿过，折射才有东西可采。没有操作条时
+            // bottomNavigationBar 为 null，布局和以前完全一样。
+            extendBody: true,
+            body: _buildBody(),
+          ),
         ),
       ),
     );
@@ -657,14 +666,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   }
 
   Widget _buildHeader(BuildContext context) {
-    final counts = _counts;
-    // 空相册不摆 0 / 0，让人一眼看到的是「这里还没有东西」。
-    final subtitle = _items.isEmpty
-        ? null
-        : _album.isPrivate && !_album.isOwner
-            ? '来自 ${_album.ownerLabel} · ${_album.roleLabel} · '
-                '${counts.photos} 张照片 · ${counts.videos} 个视频'
-            : '${counts.photos} 张照片 · ${counts.videos} 个视频';
+    // 头部只留相册名：以前展开态下面还有一行「N 张照片 · M 个视频」，那行统计
+    // 与筛选条角标里的数字重复，用户明确要求去掉（角标不动）。
     final delegate = _AlbumHeaderDelegate(
       topPadding: MediaQuery.paddingOf(context).top,
       // 多选态直接把头图收成一条工具栏，屏幕让给勾选。
@@ -672,7 +675,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
           ? kToolbarHeight
           : (_hasCover ? _headerCoverHeight : _headerPlainHeight),
       title: _selecting ? '已选 ${_selected.length} 项' : _album.title,
-      subtitle: _selecting ? null : subtitle,
       coverUrl: _selecting || !_hasCover ? null : fullUrl(_album.coverThumb!),
       leading: _selecting
           ? IconButton(
@@ -1166,7 +1168,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   }
 }
 
-/// 相册头：封面随滚动折叠成一条工具栏，展开时露出相册名与照片/视频数量。
+/// 相册头：封面随滚动折叠成一条工具栏，展开时只露出相册名。
 ///
 /// 自己算收缩进度，是为了让「展开标题块」和「工具栏标题」交叉淡入淡出，
 /// 中间不会出现两块同名文字；折叠后的高度也和详情页算时间轴时用的
@@ -1175,7 +1177,6 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
   final double topPadding;
   final double contentHeight;
   final String title;
-  final String? subtitle;
   final String? coverUrl;
   final Widget leading;
   final List<Widget> actions;
@@ -1185,7 +1186,6 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
     required this.topPadding,
     required this.contentHeight,
     required this.title,
-    required this.subtitle,
     required this.coverUrl,
     required this.leading,
     required this.actions,
@@ -1220,7 +1220,12 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          ColoredBox(color: AppColors.bgPage),
+          // 没有封面时这一块**不垫自己的底色**：页面背景（[AppGlassBackdrop]）
+          // 直接从下面透上来，和「相册 tab」里的观感一致——同一个相册从 tab
+          // 进入和从列表 push 进入，顶部不再是「一块白底 + 下面渐变」两种底。
+          // 有封面时这张底只做封面图的衬底（折叠过程中它会被 bgPage 工具栏
+          // 盖住），所以照旧。
+          ColoredBox(color: hasCover ? AppColors.bgPage : Colors.transparent),
           if (hasCover) _cover(context, t),
           // 工具栏底色：折叠过程中渐显，保证图标和标题始终读得清。
           Positioned(
@@ -1242,33 +1247,14 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
               child: IgnorePointer(
                 child: Opacity(
                   opacity: blockOpacity,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: AppText.titleLarge.copyWith(
-                          color:
-                              hasCover ? Colors.white : AppColors.textPrimary,
-                        ),
-                      ),
-                      if (subtitle != null) ...[
-                        const SizedBox(height: 3),
-                        Text(
-                          subtitle!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: AppText.caption.copyWith(
-                            color: hasCover
-                                ? Colors.white.withValues(alpha: 0.86)
-                                : AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ],
+                  // 展开态只剩相册名：统计行（N 张照片 · M 个视频）已删除。
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppText.titleLarge.copyWith(
+                      color: hasCover ? Colors.white : AppColors.textPrimary,
+                    ),
                   ),
                 ),
               ),
@@ -1377,7 +1363,6 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
     return topPadding != oldDelegate.topPadding ||
         contentHeight != oldDelegate.contentHeight ||
         title != oldDelegate.title ||
-        subtitle != oldDelegate.subtitle ||
         coverUrl != oldDelegate.coverUrl ||
         leading != oldDelegate.leading ||
         actions != oldDelegate.actions ||
@@ -1385,10 +1370,12 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
   }
 }
 
-/// 「上传照片」按钮：相册页右下角的**玻璃胶囊**，和多选底栏 / footer 同一套材质。
+/// 「上传照片」按钮：相册页右下角的**玻璃圆钮**，和多选底栏 / footer 同一套材质。
 ///
-/// 形状：pill（圆角 = 高度/2），高度 [height]，宽度由内容撑开（图标 + 文字），
-/// 不再是一个纯图标圆钮。图标与文字都用主题色，玻璃自己给底衬。
+/// 形状：圆形，直径 [diameter]（就是原来胶囊的高度 48）；里面只有一个「+」
+/// 图标（[iconSize]），没有文字、也没有左右内边距——宽度不再由内容撑开，
+/// 落点也就稳定（[AlbumUploadFabLocation] 用同一个直径算右缘）。图标用主题色，
+/// 玻璃自己给底衬。
 ///
 /// 材质：走 [AppGlassSurface]——档位取 [preferredQuality]（与底部胶囊同档，
 /// [AppBottomTabBar.preferredQuality]）、[preferPremium]，所以光学参数
@@ -1399,11 +1386,14 @@ class _AlbumHeaderDelegate extends SliverPersistentHeaderDelegate {
 /// shader）时退成同尺寸、同圆角的不透明 [AppColors.bgSurface] + 1px 细边，
 /// 布局一模一样，不跳版也不白屏。
 class AlbumUploadFab extends StatefulWidget {
-  /// 胶囊高度（不含外边距）。圆角 = 它的一半。
-  static const double height = 48;
+  /// 直径（也是高度，不含外边距）。圆形按钮没有「宽度由内容撑开」这回事。
+  static const double diameter = 48;
 
-  /// 胶囊圆角 = 高度/2，正好是 pill。
-  static const double radius = height / 2;
+  /// 圆角 = 半径，正好是一个圆。
+  static const double radius = diameter / 2;
+
+  /// 「+」图标的尺寸。
+  static const double iconSize = 22;
 
   /// 按钮右缘到时间轴轨道**左缘**的最小间距（见 [AlbumUploadFabLocation]）。
   static const double trackGap = 8;
@@ -1447,33 +1437,19 @@ class _AlbumUploadFabState extends State<AlbumUploadFab> {
             requestedQuality: AlbumUploadFab.preferredQuality,
             // 静态 chrome：优先 premium（折射），拿不到时自己退回磨砂档。
             preferPremium: true,
-            // 后面是滚动的照片墙：叠一层 scrim 给图标和文字一块稳定底衬。
+            // 后面是滚动的照片墙：叠一层 scrim 给图标一块稳定底衬。
             scrim: true,
             child: SizedBox(
-              height: AlbumUploadFab.height,
+              width: AlbumUploadFab.diameter,
+              height: AlbumUploadFab.diameter,
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: widget.onPressed,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.add_a_photo_outlined,
-                        size: 20,
-                        color: AppColors.primary,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '上传照片',
-                        style: AppText.caption.copyWith(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    ],
+                child: Center(
+                  child: Icon(
+                    Icons.add,
+                    size: AlbumUploadFab.iconSize,
+                    color: AppColors.primary,
                   ),
                 ),
               ),

@@ -10,6 +10,7 @@ import '../core/design/accent.dart';
 import '../core/design/colors.dart';
 import '../core/design/shadow.dart';
 import '../core/page_backdrop_controller.dart';
+import '../core/page_backdrop_spec.dart';
 
 /// 把 [GlassQuality] 从这里再导出，用到玻璃的页面只 import 本文件就行，
 /// 不必各自去 import 一次 liquid_glass_widgets。
@@ -255,20 +256,22 @@ bool appGlassPremiumDecision({
 /// 单独抽出来是为了让「玻璃底衬有多亮」只有一个数——对比度计算与 shader 用
 /// 同一份取值，不再各写一遍。
 ///
-/// 取值比早期版本（23% / 17%）低一档：卡片要「透」出来，底色由背后的渐变/
-/// 背景图自己给，玻璃只负责一层极淡的冷调与高光。卡片正文用的是
-/// [AppColors.textPrimary]，对这块底衬的对比度 > 15:1；tint 压低只会让底衬
-/// 更接近页面底色，文字不会更难读（底部胶囊另有 scrim，见
-/// [appGlassScrimBackplate]）。
+/// 取值比早期版本（23% / 17%）低一档：这一档只给「透」的表面用（浮层与
+/// chrome 回退），底色由背后的渐变/背景图自己给，玻璃只负责一层极淡的冷调
+/// 与高光。**卡片不用它**：卡片的磨砂 tint 是 [appCardFrostTintColor]
+/// （37%/48% 的白雾）。卡片正文用的是 [AppColors.textPrimary]，对这块底衬的
+/// 对比度 > 15:1；tint 压低只会让底衬更接近页面底色，文字不会更难读
+/// （底部胶囊另有 scrim，见 [appGlassScrimBackplate]）。
 Color get appGlassTintColor =>
     AppColors.isDark ? const Color(0x1AFFFFFF) : const Color(0x26D2DCF0);
 
-/// 磨砂档的光学参数：**透**优先，不做磨砂墙。
+/// **非卡片** standard 表面的光学参数：轻磨砂、仍偏「透」。
 ///
-/// 就是 standard 档用的那一套：卡片 / 列表项 / 新建相册按钮（
-/// [AppGlassSurface.kCardQuality]）、调用点显式要 standard 的表面（强制更新
-/// 弹窗），以及 premium 拿不到（[appGlassPremiumAvailable] 为假）时的整块回退。
-/// premium 那一套见 [appGlassChromeSettings]。
+/// 只用在两处：显式要 standard 的浮层（强制更新弹窗），以及 premium 拿不到
+/// （[appGlassPremiumAvailable] 为假）时静态 chrome 的整块回退。
+///
+/// **卡片 / 列表不走这一套**：它们要的是「白雾磨砂、不要玻璃透亮感」，见
+/// [appCardFrostSettings]（blur 20 / tint 37%~48% / 折射归零）。
 ///
 /// 为什么不用包的 classic 预设：classic 的 tint 只有 12% 白蓝、模糊 5，落在
 /// 纯色页面上「模糊纯色还是纯色」，整块玻璃只剩一点透明度。这里模糊提到 8
@@ -287,6 +290,61 @@ LiquidGlassSettings appGlassSettings(BuildContext context) {
     refractiveIndex: 1.2,
     saturation: 1.35,
     chromaticAberration: dark ? 0.02 : 0.03,
+  );
+}
+
+/// 卡片的磨砂 tint：**明确的白雾**，不是一层薄透光。
+///
+/// 浅色 37% 的白（[AppColors.bgSurface] 在浅色就是纯白）、深色 48% 的
+/// [AppColors.bgSurface]（#171B24，比页面底色亮一点）。这层底子是「有颜色
+/// 的雾」：卡片背后的照片/渐变只透出一层轮廓，正文落上去始终是同一块底。
+///
+/// 为什么按 alpha 直接合成而不是包的 adaptive（luminance-preserving）：
+/// adaptive 只取 tint 的色相、把亮度还给背景，白 tint 根本不「加白」，卡片
+/// 还是透的；磨砂要的正是「提亮/压暗背景」这件事本身，所以
+/// [appCardFrostSettings] 里把 [LiquidGlassSettings.bodyMode] 设成
+/// [GlassBodyMode.clear]（按 alpha 精确合成，跨档位一致）。
+const double appCardFrostTintAlphaLight = 0.37;
+const double appCardFrostTintAlphaDark = 0.48;
+
+/// 当前明暗模式下卡片的磨砂 tint。
+Color get appCardFrostTintColor => AppColors.bgSurface.withValues(
+      alpha: AppColors.isDark
+          ? appCardFrostTintAlphaDark
+          : appCardFrostTintAlphaLight,
+    );
+
+/// 卡片磨砂的模糊半径：落在 18~24 这一档。
+const double appCardFrostBlur = 20;
+
+/// 卡片 / 列表项的磨砂参数：**白雾**优先，不做玻璃。
+///
+/// 与 [appGlassSettings]（轻磨砂、透）的差别就是用户说的「不要玻璃透亮感」：
+/// - blur 8 → [appCardFrostBlur]（20）：背后的照片被彻底揉开，只剩明暗；
+/// - tint 15%/10% → [appCardFrostTintColor]（37%/48%）：一层真正的白/深雾，
+///   卡片的底色不再随背后的内容跳；
+/// - [LiquidGlassSettings.bodyMode] = [GlassBodyMode.clear]：按 alpha 精确
+///   合成这层雾（adaptive 会把亮度还给背景，白雾等于没加）；
+/// - lightIntensity 压到 0.65/0.55、ambientStrength 0：表面不再反光，立体感
+///   交给双层阴影（[AppShadow.card]）与 1px 描边；
+/// - refractiveIndex 1.0 + chromaticAberration 0：卡片本来就不走 premium，
+///   边缘不做位移/色散，只留一层平面的雾。
+///
+/// 描边与高光仍由 [AppGlassSurface.depth]（[AppSurfaceDepth]）叠：高光压到
+/// [appCardHighlightAlpha]（6%）这一档，几乎只是一条极淡的过渡。
+LiquidGlassSettings appCardFrostSettings(BuildContext context) {
+  final dark = AppColors.isDark;
+  return LiquidGlassSettings(
+    thickness: 12,
+    blur: appCardFrostBlur,
+    glassColor: appCardFrostTintColor,
+    bodyMode: GlassBodyMode.clear,
+    lightAngle: 2.356,
+    lightIntensity: dark ? 0.55 : 0.65,
+    ambientStrength: 0.0,
+    refractiveIndex: 1.0,
+    saturation: 1.15,
+    chromaticAberration: 0.0,
   );
 }
 
@@ -361,12 +419,13 @@ LinearGradient appGlassHighlightGradient() {
   );
 }
 
-/// 卡片 / 列表的顶部内高光：白色 12%（深色 16%）→ 0。
+/// 卡片 / 列表的顶部内高光：白色 6% → 0。
 ///
-/// 比玻璃 chrome 的 [appGlassHighlightAlpha]（18%/22%）低一档：卡片本身已经
-/// 有双层阴影撑层次，高光再亮就成了压在正文上的一条白杠。取值落在
-/// 10%~16% 这一档里，浅色 12%、深色 16%。
-double appCardHighlightAlpha() => AppColors.isDark ? 0.16 : 0.12;
+/// 比玻璃 chrome 的 [appGlassHighlightAlpha]（18%/22%）低得多：卡片改成白雾
+/// 磨砂之后，立体感来自双层阴影（[AppShadow.card]）与 1px 描边，表面高光再
+/// 亮就成了压在正文上的一条白杠，也把「雾」重新照成「玻璃」。6% 只留一条
+/// 极淡的过渡，明暗两档同一个值——深色模式本来就不该靠反光提层次。
+double appCardHighlightAlpha() => 0.06;
 
 /// 卡片顶部的内高光：白色 [appCardHighlightAlpha] → 0 的细渐变。
 ///
@@ -445,16 +504,18 @@ Color appGlassScrimBackplate() => AppAccent.compositeOver(
 /// **卡片**上文字实际落上去的底色（没有 scrim 那一层）。
 ///
 /// 卡片不带 scrim（[AppGlassSurface.scrim] 默认 false），所以底衬只有「玻璃
-/// tint 叠页面底色」这一层：standard（卡片现在的档位，见
-/// [AppGlassSurface.kCardQuality]）用 [appGlassTintColor]（15%/10%），
+/// tint 叠页面底色」这一层：磨砂卡片（卡片现在的档位，见
+/// [AppGlassSurface.kCardQuality]）用 [appCardFrostTintColor]（37%/48%），
 /// premium（静态 chrome 才用）用 [appGlassChromeTintColor]（10%/7%）。
 /// 两者都是半透明色，单独算对比度没有意义——先按 [AppAccent.compositeOver]
 /// 合成成不透明色再算。
 ///
 /// 页面底图/渐变会让真实底衬在这个值上下浮动，所以对比度断言取这条「最典型」
 /// 的底（页面底色），和 [appGlassPremiumScrimBackplate] 是同一个约定。
+/// 磨砂 tint 提到 37%/48% 之后底衬更接近 [AppColors.bgSurface]，卡片小字的
+/// 对比度只会更高。
 Color appGlassCardBackplate({bool premium = true}) => AppAccent.compositeOver(
-      premium ? appGlassChromeTintColor : appGlassTintColor,
+      premium ? appGlassChromeTintColor : appCardFrostTintColor,
       AppColors.bgPage,
     );
 
@@ -488,8 +549,9 @@ Color appGlassCardBackplate({bool premium = true}) => AppAccent.compositeOver(
 /// - premium（[preferPremium] 为真且 [appGlassPremiumAvailable] 为真，只有
 ///   静态 chrome 走）：[appGlassChromeSettings] 的深斜面参数 + 薄 scrim
 ///   （[appGlassPremiumScrimAlpha]）；
-/// - standard（卡片 / 显式要 standard 的表面）：[appGlassSettings] 的磨砂参数，
-///   纯 BackdropFilter，**不抓 capture**；
+/// - standard（卡片 / 显式要 standard 的表面）：**不抓 capture**；卡片 /
+///   列表（[depth] 为真）走 [appCardFrostSettings]（白雾磨砂：blur 20、
+///   tint 37%/48%、折射归零），其余走 [appGlassSettings]（轻磨砂）；
 /// - 不透明（平台不支持 shader / 注入 minimal / 下拉刷新保持）：不透明
 ///   [AppColors.bgSurface] 圆角块，见 [pauseDuringRefresh]。
 /// 三条路布局完全一致（同样的 margin / padding / 圆角），切档不跳版、不白屏。
@@ -525,9 +587,10 @@ class AppGlassSurface extends StatelessWidget {
 
   /// 卡片 / 列表项 / 新建相册按钮的材质档位：**一处开关**。
   ///
-  /// 现在是 [GlassQuality.standard]：[appGlassSettings] 的磨砂参数
-  /// （thickness 12 / refractiveIndex 1.2 / chromaticAberration 0.03 / blur 8），
-  /// 纯 BackdropFilter + 包的轻量 shader。
+  /// 现在是 [GlassQuality.standard]：卡片 / 列表走
+  /// [appCardFrostSettings] 的白雾磨砂参数（thickness 12 / blur 20 /
+  /// tint 37%~48% / lightIntensity 0.65~0.55 / refractiveIndex 1 /
+  /// chromaticAberration 0），包的轻量 shader，纯 BackdropFilter。
   ///
   /// **为什么不是 premium（这是「下拉刷新黑卡」的根因）**：premium 在包里是
   /// GlassContainer → AdaptiveGlass → LiquidGlass.withOwnLayer →
@@ -591,7 +654,8 @@ class AppGlassSurface extends StatelessWidget {
   final bool preferPremium;
 
   /// 玻璃参数；null 时按档位取 [appGlassChromeSettings]（premium，和底部
-  /// 胶囊同一套）或 [appGlassSettings]（磨砂回退）。
+  /// 胶囊同一套）、[appCardFrostSettings]（卡片 / 列表，[depth] 为真）或
+  /// [appGlassSettings]（其余 standard 表面）。
   final LiquidGlassSettings? settings;
 
   /// 是否在玻璃内部叠一层低透明 scrim（[scrimKey]）。
@@ -626,7 +690,7 @@ class AppGlassSurface extends StatelessWidget {
   /// （[AppCard]、朋友圈 PostCard、我的页头像卡）传 true。
   ///
   /// 玻璃分支本来就有高光与描边，打开 depth 后只是把高光换成卡片那一档
-  /// （[appCardHighlightAlpha]，10%~16%）并补一层外层阴影；**不透明分支**
+  /// （[appCardHighlightAlpha]，6%→0）并补一层外层阴影；**不透明分支**
   /// （minimal / 无档位 / 刷新保持）照样画同样的阴影与描边，只是没有模糊——
   /// 低端机上的卡片同样有层次，切档也不会从「有阴影」跳成「贴着底」。
   ///
@@ -716,8 +780,13 @@ class AppGlassSurface extends StatelessWidget {
       useOwnLayer: useOwnLayer,
       settings: settings ??
           (premiumActive
+              // 静态 chrome（底部胶囊 / 筛选条 / 多选底栏 / 上传按钮）：折射。
               ? appGlassChromeSettings(context)
-              : appGlassSettings(context)),
+              // 卡片 / 列表项：白雾磨砂（[AppGlassSurface.depth] 为真）。
+              : depth
+                  ? appCardFrostSettings(context)
+                  // 其余显式要 standard 的表面（强制更新弹窗）：轻磨砂。
+                  : appGlassSettings(context)),
       // padding 不交给 GlassContainer：见类文档的几何约定。
       clipBehavior: Clip.antiAlias,
       child: Stack(
@@ -847,12 +916,17 @@ class AppSurfaceDepth extends StatelessWidget {
   }
 }
 
-/// 背景图上的可读性遮罩：浅色模式叠 [AppColors.bgPage] 55%，深色 65%。
+/// 背景图上的可读性遮罩：浅色模式叠 [AppColors.bgPage] 35%，深色 45%。
 ///
-/// 图上直接压一层页面底色，卡片/文字不用跟着换配色也读得清；两档的差别
-/// 来自深色底本身更亮（#0E1118），压得轻一点就够。
-const double appBackdropMaskAlphaLight = 0.55;
-const double appBackdropMaskAlphaDark = 0.65;
+/// 图上直接压一层页面底色，卡片/文字不用跟着换配色也读得清；两档的差别来自
+/// 深色底本身更亮（#0E1118），压得轻一点就够。
+///
+/// 取值从 55%/65% 降到 35%/45%：用户选的那张图才是「页面背景」，压到 55%
+/// 之后图的对比度、细节全被抹平，看起来就是「糊」。文字可读性不再靠这层
+/// 遮罩硬撑——卡片自己是 37%/48% 的白雾磨砂（[appCardFrostTintColor]），
+/// 正文落在卡片上，不落在图上。
+const double appBackdropMaskAlphaLight = 0.35;
+const double appBackdropMaskAlphaDark = 0.45;
 
 /// 当前明暗模式下的遮罩不透明度。
 double appBackdropMaskAlpha() =>
@@ -862,6 +936,30 @@ double appBackdropMaskAlpha() =>
 Color appBackdropMaskColor() =>
     AppColors.bgPage.withValues(alpha: appBackdropMaskAlpha());
 
+/// 背景图解码宽度的上限（像素）：与 [PageBackdropController.maxEdge] 同一个数。
+///
+/// 再大就只是白占内存：2K 屏的物理宽是 1440 左右，2560 宽的手机也要靠
+/// 屏幕尺寸现算，而不是这里硬顶。
+const int appBackdropDecodeMaxWidth = 2048;
+
+/// 背景图按「屏幕宽 × devicePixelRatio」解码，上限
+/// [appBackdropDecodeMaxWidth]。
+///
+/// 为什么不是写死的 1080：1080 只够 1080p 屏（逻辑宽 360 × 3x）。2K 屏（物理
+/// 宽 1440 起）上这张图会被放大 1.3 倍以上，放大就是糊；屏幕更窄时按 2048
+/// 解码又白占内存。取「屏幕物理宽」正好是一像素对一像素。
+///
+/// 拿不到 MediaQuery（极少数没有 MediaQuery 的宿主）时退回上限：宁可用满
+/// 分辨率，也不要因为算不出宽度就退到一张小图。
+int appBackdropDecodeWidth(BuildContext context) {
+  final media = MediaQuery.maybeOf(context);
+  if (media == null) return appBackdropDecodeMaxWidth;
+  final pixels = (media.size.width * media.devicePixelRatio).round();
+  if (pixels < 1) return appBackdropDecodeMaxWidth;
+  if (pixels > appBackdropDecodeMaxWidth) return appBackdropDecodeMaxWidth;
+  return pixels;
+}
+
 /// 页面最底层的「流动底色」：给玻璃一点可被模糊的内容。
 ///
 /// 根因：BackdropFilter 模糊的是它背后的像素，纯色页面上模糊纯色还是纯色，
@@ -869,14 +967,25 @@ Color appBackdropMaskColor() =>
 /// 渐变加两团径向光斑（主题色 6~10% 透明度，深色模式换成压暗的近似色），
 /// 玻璃背后就有东西在流动。
 ///
-/// 用户在「我的 → 页面背景」选过图之后，渐变层换成那张图（[PageBackdropController]，
-/// 三个页面共用同一张）：[BoxFit.cover] 铺满 + 一层可读性遮罩，渐变与光斑整体
-/// 让位（图本身就是「有东西可模糊」）。图丢了自动回退渐变。
+/// 用户在哪一种形态由 [PageBackdropSpec] 决定（[PageBackdropController.spec]，
+/// 三个页面共用同一份）：
+/// - 默认渐变：上面这套品牌渐变 + 光斑，原样保留；
+/// - 纯色：一块 [BoxDecoration.color]，**不套遮罩**——遮罩是为了让图上的文字
+///   读得清，套到用户挑的颜色上只会把它改成另一块灰；
+/// - 双色渐变：左上 → 右下的 [LinearGradient]，同样不套遮罩；
+/// - 图片：[BoxFit.cover] 铺满 + 一层可读性遮罩，渐变与光斑整体让位（图本身
+///   就是「有东西可模糊」）。图丢了自动回退默认渐变。
+///
+/// **这张图本身必须是清晰的**：背景图那一层不加任何
+/// [ImageFilter.blur]/[BackdropFilter]，也不做低质量过滤（[BoxFit.cover] +
+/// [FilterQuality.medium]）。模糊只有一处来源——卡片自己的 glass shader
+/// 模糊它**后面**的内容；在背景图上再开一层模糊，就是「整页都糊」。
 ///
 /// 性能：全是静态绘制，不参与每帧重绘；背景图只解码一份（[Image.file] 的
-/// cacheWidth 走 [ResizeImage]，解码尺寸封顶 [PageBackdropController.maxEdge]），
-/// 并单独包一层 [RepaintBoundary]。与玻璃卡片共存时不额外开模糊层——模糊由
-/// 卡片自己的 glass shader 负责，这里再开一层就是白烧 GPU。
+/// cacheWidth 走 [ResizeImage]，尺寸按 [appBackdropDecodeWidth] =「屏幕宽 ×
+/// devicePixelRatio」、上限 [appBackdropDecodeMaxWidth]），并单独包一层
+/// [RepaintBoundary]。与玻璃卡片共存时不额外开模糊层——模糊由卡片自己的
+/// shader 负责，这里再开一层就是白烧 GPU。
 /// [GlassQuality.minimal] 下照样画——背景是普通绘制，跟玻璃档位无关。
 class AppGlassBackdrop extends StatelessWidget {
   const AppGlassBackdrop({super.key, required this.child});
@@ -894,7 +1003,16 @@ class AppGlassBackdrop extends StatelessWidget {
   static const Key imageKey = Key('app-glass-backdrop-image');
 
   /// 背景图上的可读性遮罩层。
+  ///
+  /// **只有图片形态才有这一层**：纯色 / 双色渐变是用户自己挑的底，不压遮罩。
   static const Key maskKey = Key('app-glass-backdrop-mask');
+
+  /// 纯色那一层（[BoxDecoration.color] = spec 里的颜色）。
+  static const Key colorKey = Key('app-glass-backdrop-color');
+
+  /// 双色渐变那一层（左上 → 右下的 [LinearGradient]，正好两个色标）。
+  static const Key customGradientKey =
+      Key('app-glass-backdrop-gradient-colors');
 
   final Widget child;
 
@@ -908,22 +1026,51 @@ class AppGlassBackdrop extends StatelessWidget {
             decoration: BoxDecoration(color: AppColors.bgPage),
           ),
         ),
-        // 背景图/渐变二选一：路径有值且文件还在才走图，否则（含文件被删）
-        // 原样回退到渐变。
+        // 四选一：默认渐变 / 纯色 / 双色渐变 / 图片。图片副本丢了（含文件被删）
+        // 原样回退到默认渐变。
         Positioned.fill(
-          child: ValueListenableBuilder<String?>(
-            valueListenable: PageBackdropController.path,
-            builder: (context, saved, _) {
-              final file = PageBackdropController.imageFileOrNull(saved);
-              return file == null
-                  ? _gradientLayers()
-                  : _photoLayers(file);
-            },
+          child: ValueListenableBuilder<PageBackdropSpec>(
+            valueListenable: PageBackdropController.spec,
+            builder: (context, spec, _) => _specLayers(context, spec),
           ),
         ),
         Positioned.fill(child: child),
       ],
     );
+  }
+
+  /// 按 spec 画对应的那一层。
+  ///
+  /// 遮罩只在图片分支出现（[_photoLayers]）：纯色 / 双色渐变是用户自己挑的
+  /// 底，压一层页面底色的半透明遮罩等于把他选的颜色改掉。
+  Widget _specLayers(BuildContext context, PageBackdropSpec spec) {
+    switch (spec.type) {
+      case PageBackdropType.defaultGradient:
+        return _gradientLayers();
+      case PageBackdropType.color:
+        return DecoratedBox(
+          key: colorKey,
+          decoration: BoxDecoration(color: spec.color ?? AppColors.bgPage),
+        );
+      case PageBackdropType.gradient:
+        return DecoratedBox(
+          key: customGradientKey,
+          decoration: BoxDecoration(
+            // 方向固定左上 → 右下（和默认渐变同一条对角线），不另做方向设置。
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                spec.gradientStart ?? AppColors.bgPage,
+                spec.gradientEnd ?? AppColors.bgPage,
+              ],
+            ),
+          ),
+        );
+      case PageBackdropType.image:
+        final file = PageBackdropController.imageFileOf(spec);
+        return file == null ? _gradientLayers() : _photoLayers(context, file);
+    }
   }
 
   /// 没有自定义背景图时的「流动底色」。
@@ -989,17 +1136,21 @@ class AppGlassBackdrop extends StatelessWidget {
   }
 
   /// 自定义背景图：`BoxFit.cover` 铺满 + 一层可读性遮罩。
-  Widget _photoLayers(File file) {
+  Widget _photoLayers(BuildContext context, File file) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 单独成层 + 解码尺寸封顶：玻璃卡片滚动/重绘时不重新解码这张图。
+        // 单独成层 + 按屏幕解码：玻璃卡片滚动/重绘时不重新解码这张图。
+        // 解码宽度跟着屏幕走（[appBackdropDecodeWidth]），2K 屏上不会拿一张
+        // 1080 的图去放大；[FilterQuality.medium] 是默认档，显式写出来是为了
+        // 不给「被谁改低成 low」留口子。
         RepaintBoundary(
           child: Image.file(
             file,
             key: imageKey,
             fit: BoxFit.cover,
-            cacheWidth: PageBackdropController.maxEdge,
+            cacheWidth: appBackdropDecodeWidth(context),
+            filterQuality: FilterQuality.medium,
             gaplessPlayback: true,
             errorBuilder: (_, __, ___) => const SizedBox.shrink(),
           ),

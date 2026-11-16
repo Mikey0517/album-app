@@ -266,24 +266,27 @@ void main() {
       expect(card.useOwnLayer, isFalse,
           reason: '卡片不自建层（列表里另有 RepaintBoundary 兜着）');
 
-      // standard 那一套：thickness 12 / 折射 1.2 / blur 8。
+      // 卡片那一套：白雾磨砂（blur 20 / tint 37% / 折射归零）。
       final settings = card.settings!;
       expect(settings.thickness, 12);
-      expect(settings.refractiveIndex, 1.2);
-      expect(settings.blur, 8);
-      expect(settings.glassColor.a, closeTo(appGlassTintColor.a, 1e-9),
-          reason: '磨砂那一份 tint（卡片不再用胶囊的 chrome tint）');
+      expect(settings.refractiveIndex, 1.0,
+          reason: '卡片不走 premium，边缘不做折射位移');
+      expect(settings.blur, appCardFrostBlur);
+      expect(settings.glassColor, appCardFrostTintColor,
+          reason: '白雾 tint（不再是 15% 的透光 tint）');
+      expect(settings.glassColor.a, inInclusiveRange(0.35, 0.40),
+          reason: '浅色雾度落在 35%~40%');
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('上限降到 standard：卡片退回磨砂参数，不白屏也不抛异常', (tester) async {
+    testWidgets('上限降到 standard：卡片仍是白雾磨砂，不白屏也不抛异常', (tester) async {
       await tester.pumpWidget(cardHost(quality: GlassQuality.standard));
 
       final card = _container(tester);
       expect(card.quality, GlassQuality.standard);
-      expect(card.settings!.thickness, 12, reason: '磨砂那套光学参数');
-      expect(card.settings!.blur, 8);
-      expect(card.settings!.glassColor.a, closeTo(appGlassTintColor.a, 1e-9));
+      expect(card.settings!.thickness, 12, reason: '斜面仍是磨砂那档');
+      expect(card.settings!.blur, appCardFrostBlur);
+      expect(card.settings!.glassColor, appCardFrostTintColor);
       expect(find.text('卡片'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });

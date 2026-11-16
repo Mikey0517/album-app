@@ -158,6 +158,9 @@ class _FeedPageState extends State<FeedPage> {
     }
   }
 
+  /// 下拉刷新回调：**不暂停玻璃材质**（见 [FeedRefreshGlassLayer]）。
+  Future<void> _refresh() => _load(refresh: true);
+
   void _openOnThisDay() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => const OnThisDayPage()),
@@ -253,32 +256,32 @@ class _FeedPageState extends State<FeedPage> {
     if (_posts.isEmpty) {
       return RefreshIndicator(
         color: AppColors.primary,
-        // 刷新这几帧把卡片玻璃暂停成同色不透明表面（第二层保险）：黑卡的
-        // 根因是卡片走 premium 的 capture，未就绪帧会整块发黑——那条已经在
-        // AppGlassSurface.kCardQuality = standard 拆掉（见
-        // test/feed_refresh_glass_test.dart）。刷新一结束立刻恢复玻璃，档位
-        // 本身不变（见 AppGlassRefreshHold）。
-        onRefresh: () => appGlassWhileRefreshing(() => _load(refresh: true)),
-        child: CustomScrollView(
-          controller: _scrollController,
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverFillRemaining(
-              hasScrollBody: false,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 120),
-                child: EmptyState(
-                  icon: Icons.photo_camera_outlined,
-                  title: '还没有动态',
-                  subtitle: '点右上角发布第一条',
-                  action: FilledButton(
-                    onPressed: _compose,
-                    child: const Text('发动态'),
+        // 刷新期间**不换材质**（见 [FeedRefreshGlassLayer]）：玻璃从头到尾是同
+        // 一层，只换成「隔离重绘」。早先那套「暂停玻璃 → 不透明表面」的一进
+        // 一出才是下拉刷新时闪一下的来源。
+        onRefresh: _refresh,
+        child: FeedRefreshGlassLayer(
+          child: CustomScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 120),
+                  child: EmptyState(
+                    icon: Icons.photo_camera_outlined,
+                    title: '还没有动态',
+                    subtitle: '点右上角发布第一条',
+                    action: FilledButton(
+                      onPressed: _compose,
+                      child: const Text('发动态'),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
@@ -362,12 +365,15 @@ class _FeedPageState extends State<FeedPage> {
       children: [
         RefreshIndicator(
           color: AppColors.primary,
-          onRefresh: () => appGlassWhileRefreshing(() => _load(refresh: true)),
-          child: CustomScrollView(
-            key: _scrollViewKey,
-            controller: _scrollController,
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: slivers,
+          // 同一个回调、同一层玻璃：刷新全程不暂停材质，只隔离重绘。
+          onRefresh: _refresh,
+          child: FeedRefreshGlassLayer(
+            child: CustomScrollView(
+              key: _scrollViewKey,
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: slivers,
+            ),
           ),
         ),
         // 时间轴浮在列表右侧、RefreshIndicator 之外：竖直拖拽由它自己接管，
@@ -382,6 +388,36 @@ class _FeedPageState extends State<FeedPage> {
       ],
     );
   }
+}
+
+/// 刷新区外面那层**稳定**的重绘边界：下拉刷新期间不换材质，只隔离重绘。
+///
+/// 黑卡的根因是卡片走 premium 的 capture（那几帧采到空纹理，叠上 tint 就是
+/// 一块近黑），已经由 [AppGlassSurface.kCardQuality] = standard 拆掉——卡片
+/// 现在是纯 BackdropFilter，没有「capture 未就绪」的中间帧。
+///
+/// 早先这里还有第二层保险：刷新回调内把玻璃暂停成同色不透明表面
+/// （`appGlassWhileRefreshing` → [AppGlassRefreshHold]）。那套的问题不在保险
+/// 本身，而在**换材质**：进 refresh 一帧玻璃→不透明块，出 refresh 一帧再换
+/// 回来，两次切换正好落在 RefreshIndicator 动画的帧上，用户看到的就是「下拉
+/// 刷新时页面闪一下」。
+///
+/// 现在改成：材质从第一帧到最后一帧都是同一层玻璃，只把刷新区包进这个
+/// [RepaintBoundary]。key 是常量（[repaintKey]）、与数据无关，所以刷新往返
+/// （setState → 列表重建 → 数据替换）里边界与玻璃的 Element 都不换，玻璃按
+/// 缓存图层重绘，既不会整棵树重画，也不会重新抓 capture。没有「不透明中间
+/// 态」，也就不需要淡入淡出兜底（否则过渡时长还得压在 120ms 内）。
+class FeedRefreshGlassLayer extends StatelessWidget {
+  const FeedRefreshGlassLayer({super.key, required this.child});
+
+  /// 重绘边界的 key：常量，不随数据变化（测试据此断言刷新前后是同一个）。
+  static const Key repaintKey = Key('feed-refresh-glass-layer');
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) =>
+      RepaintBoundary(key: repaintKey, child: child);
 }
 
 /// 吸顶日期头的高度：动态流顶部那条「几月几日」。
