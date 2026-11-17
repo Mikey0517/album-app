@@ -7,11 +7,12 @@ import '../core/design/colors.dart';
 /// 相册详情页的筛选条、日期分组头都用它：高度、吸顶行为、底衬色只有一份
 /// 实现，样式由传入的 child 决定（[AppSegmentedBarSurface] / DateHeader）。
 ///
-/// 底衬默认是页面底色：日期分组头这种「压住照片的小标签」需要一块实底，否则
-/// 滚动的内容会在字下面穿过去。**筛选条不传底衬**（[background] 传透明）——
-/// 它自己那层 [AppSegmentedBarSurface] 是「透明 + 极轻模糊」，模糊必须能采到
-/// 这一层下面的滚动内容，所以这里不能再垫一层不透明色（垫了模糊就只采到
-/// 这块底色，等于什么都没做）。
+/// **两个调用点现在都把底衬显式传透明**（[background] = `Colors.transparent`）：
+/// 吸顶条垫一层页面底色之后，[AppGlassBackdrop] 的渐变（或背景图）到这里就被
+/// 截成一条白杠。透明之后滚动的照片会从字后面透出，所以两者各自在 child 里带
+/// 一层极轻模糊（[AppSegmentedBarSurface] / [DateHeaderBlur]）—— 模糊必须能采到
+/// 这条带子下面真正的滚动内容，这一层就不能再垫不透明色（垫了模糊只采到那块
+/// 底色，等于什么都没做），这也正是 [color] 的 alpha = 0 时整层不画的原因。
 class PinnedBarSliver extends StatelessWidget {
   final double height;
   final Widget child;

@@ -477,7 +477,11 @@ class _FloatingDateHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return DateHeader(text: text, height: kFeedDateHeaderHeight);
+    // 底衬透明（见 [DateHeader]）：卡片从这条带子后面滚过去，靠一层极轻模糊
+    // 把照片纹理揉开，页面渐变照样穿过。
+    return DateHeaderBlur(
+      child: DateHeader(text: text, height: kFeedDateHeaderHeight),
+    );
   }
 
   @override

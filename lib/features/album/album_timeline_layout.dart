@@ -22,8 +22,9 @@ const double kTimelineDateHeaderHeight = 34;
 /// 每过一组就差 4px，拖到后面的月份会越拖越偏。
 ///
 /// 它是分组头**自己的下内边距**（见 [kTimelineDateHeaderPadding]），不是网格的
-/// 顶部内边距：分组头整块不透明，吸顶时这段留白也被底色盖住，吸顶条下沿与第一
-/// 行照片之间才不会透出页面底色（那正是「时间条与吸顶分类条之间有一条缝」）。
+/// 顶部内边距：吸顶时这段留白也在吸顶条里（模糊层铺满整条，见 [DateHeaderBlur]），
+/// 吸顶条下沿与第一行照片之间不会漏出没被盖住的一段（那正是「时间条与吸顶分类条
+/// 之间有一条缝」）。
 const double kTimelineSectionGap = 4;
 
 /// 日期分组头的整体高度 = 文字区 + 与网格之间的留白。
@@ -46,7 +47,7 @@ const double kTimelineMinTrackHeight = 120;
 const double kTimelineTrackWidth = 30;
 
 /// 日期分组头的内边距：左右 16（相册页 12 的网格留白 + 4，两页同值），
-/// 下面 4 = 与网格之间的留白，跟着分组头的底色一起铺满。
+/// 下面 4 = 与网格之间的留白，跟着分组头一起算进吸顶条的高度。
 const EdgeInsets kTimelineDateHeaderPadding = EdgeInsets.fromLTRB(
   16,
   0,
@@ -200,7 +201,7 @@ List<int> timelineSliverStarts(List<AlbumSection> sections) {
 /// 用的是同一份几何。
 ///
 /// 高度取 [kTimelineDateHeaderExtent]（34 + 4）：与网格之间的留白是它自己的
-/// 下内边距，整块不透明，所以滚动中不会从分组头下沿透出页面底色。
+/// 下内边距。底衬透明（见 [DateHeader]），背景渐变从整条（含这段留白）穿过。
 Widget timelineDateHeader(AlbumSection section, {Widget? trailing}) {
   return DateHeader(
     text: section.header ?? '',
@@ -216,10 +217,20 @@ Widget timelineDateHeader(AlbumSection section, {Widget? trailing}) {
 ///
 /// 吸顶版与内容流版同高（[kTimelineDateHeaderExtent]）：吸顶那一刻分组头的
 /// 位置本来就正好在吸顶位，两者不会互相挤动，吸顶条下沿也不会漏缝。
+///
+/// 底衬（两版都是**透明**的，见 [DateHeader]）：吸顶 sliver 的底衬显式传透明
+/// —— 传 [AppColors.bgPage] 的话那层模糊只采到这块底色，页面背景与滚过的照片
+/// 一点也透不上来（[PinnedBarSliver] 读到 alpha = 0 就整层不画）。滚过的照片
+/// 会从透明的日期头后面透出来，所以**吸顶版**再单独挂一层 [DateHeaderBlur]：
+/// 它挂在 sliver 的 child 上面，和 [PinnedBarSliver] 那层互不影响，分类条的
+/// 「自己带模糊」行为原样不变。
 Widget timelineDateHeaderSliver({required bool pinned, required Widget child}) {
-  return pinned
-      ? PinnedBarSliver(height: kTimelineDateHeaderExtent, child: child)
-      : SliverToBoxAdapter(child: child);
+  if (!pinned) return SliverToBoxAdapter(child: child);
+  return PinnedBarSliver(
+    height: kTimelineDateHeaderExtent,
+    background: Colors.transparent,
+    child: DateHeaderBlur(child: child),
+  );
 }
 
 /// 「只钉当前分组」的滚动状态：阈值表 + 当前该吸顶的分组下标。

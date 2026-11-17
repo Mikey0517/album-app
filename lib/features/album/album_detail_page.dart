@@ -119,6 +119,11 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
   bool get _busy => _batchDownloading || _batchDeleting || _batchMoving;
 
+  /// 右下角上传按钮：能写的用户一直有（空相册也一样，见 [_buildSlivers] 的空状态）；
+  /// 多选态让开底栏，首次加载与整页加载失败时不叠在提示上。
+  bool get _showUploadFab =>
+      _canEdit && !_selecting && !_loading && !(_error != null && _items.isEmpty);
+
   @override
   void initState() {
     super.initState();
@@ -374,10 +379,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             // 上传按钮浮在右下角：平移由 [AlbumUploadFabLocation] 负责让开右侧
             // 时间轴的轨道区（默认 endFloat 的 16 会让按钮压在轨道上）。
             floatingActionButtonLocation: const AlbumUploadFabLocation(),
-            // 空相册的入口在空状态里，右下角就不再叠一个同样的按钮。
-            floatingActionButton: _selecting || !_canEdit || _items.isEmpty
-                ? null
-                : AlbumUploadFab(onPressed: _upload),
+            // 空相册也留着它：空状态里不再另放「添加媒体」，上传入口只有右下角
+            // 这一个（只读用户、多选态、首次加载、整页没加载出来时没有）。
+            floatingActionButton:
+                _showUploadFab ? AlbumUploadFab(onPressed: _upload) : null,
             // 没选中任何一项时不出操作条，屏幕只留内容。
             bottomNavigationBar: _selecting && _selected.isNotEmpty
                 ? _buildSelectionBar()
@@ -568,17 +573,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     }
     if (_items.isEmpty) {
       slivers.add(
-        SliverFillRemaining(
+        const SliverFillRemaining(
           hasScrollBody: false,
+          // 空相册不摆按钮：上传入口就是右下角那个圆钮（见 [_showUploadFab]），
+          // 只读用户没有入口，也不需要一句解释自己是只读。
           child: EmptyState(
             icon: Icons.photo_library_outlined,
             title: '相册还是空的',
-            action: _canEdit
-                ? FilledButton(
-                    onPressed: _upload,
-                    child: const Text('添加媒体'),
-                  )
-                : null,
           ),
         ),
       );
@@ -608,7 +609,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       final section = sections[sectionIndex];
       if (section.header != null) {
         // 只有「当前分组」这一个头吸顶，其余分组头是内容流里的普通 34 高横条。
-        // 两者几何完全一样（同样 34 高、同为不透明底色），所以滚动到阈值时切换
+        // 两者几何完全一样（同样 34 高、底衬同为透明），所以滚动到阈值时切换
         // 不会跳：那一刻它的内容位置本来就已经和吸顶位重合。吸顶/不吸顶的切换
         // 与头的几何都在 album_timeline_layout.dart 里，和朋友圈相册同一份。
         slivers.add(

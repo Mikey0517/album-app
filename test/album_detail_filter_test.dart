@@ -121,19 +121,20 @@ Future<void> _pump(
   WidgetTester tester, {
   required List<Media> items,
   Size size = const Size(390, 844),
+  Album? album,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 
-  final album = _album(mediaCount: items.length);
+  final target = album ?? _album(mediaCount: items.length);
   await tester.pumpWidget(
     MaterialApp(
       theme: buildAppTheme(),
       home: AlbumDetailPage(
-        album: album,
-        loader: (id) async => AlbumDetail(album: album, items: items),
+        album: target,
+        loader: (id) async => AlbumDetail(album: target, items: items),
       ),
     ),
   );
@@ -453,13 +454,37 @@ void main() {
     expect(find.text('已选 4 项'), findsOneWidget);
   });
 
-  testWidgets('空状态一：相册为空', (tester) async {
+  testWidgets('空状态一：相册为空，上传入口只剩右下角的圆钮', (tester) async {
     await _pump(tester, items: const []);
     expect(find.text('相册还是空的'), findsOneWidget);
-    expect(find.text('添加媒体'), findsOneWidget);
-    // 没有内容就不摆筛选条，屏幕只留「添加」。
+    // 空状态里不再有「添加媒体」按钮：入口是右下角那个圆钮。
+    expect(find.text('添加媒体'), findsNothing);
+    expect(find.byType(FilledButton), findsNothing);
+    expect(find.byKey(AlbumUploadFab.surfaceKey), findsOneWidget);
+    // 没有内容就不摆筛选条，屏幕只留标题。
     expect(find.byType(AppSegmentedBar), findsNothing);
     expect(find.byType(AlbumThumb), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('空状态一（只读）：没有上传入口，空状态也不长按钮', (tester) async {
+    await _pump(
+      tester,
+      items: const [],
+      album: Album(
+        id: 9,
+        title: '别人的夏天',
+        coverThumb: null,
+        mediaCount: 0,
+        createdAt: DateTime(2020, 5, 1),
+        visibility: 'private',
+        myRole: 'viewer',
+        isOwner: false,
+      ),
+    );
+    expect(find.text('相册还是空的'), findsOneWidget);
+    expect(find.text('添加媒体'), findsNothing);
+    expect(find.byType(AlbumUploadFab), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
