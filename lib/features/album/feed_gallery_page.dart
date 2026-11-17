@@ -538,27 +538,23 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
               slivers.add(
                 timelineDateHeaderSliver(
                   pinned: sectionIndex == _pin.pinnedSection,
-                  child: timelineDateHeader(
-                    section,
-                    trailing: _selecting
-                        ? TextButton(
-                            onPressed: _batchDownloading
-                                ? null
-                                : () => _toggleSectionSelection(section.items),
-                            style: TextButton.styleFrom(
-                              minimumSize: const Size(0, 32),
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 8),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            child: Text(
-                              _isSectionSelected(section.items)
-                                  ? '取消全选'
-                                  : '全选',
-                            ),
-                          )
-                        : null,
-                  ),
+                  section: section,
+                  trailing: _selecting
+                      ? TextButton(
+                          onPressed: _batchDownloading
+                              ? null
+                              : () => _toggleSectionSelection(section.items),
+                          style: TextButton.styleFrom(
+                            minimumSize: const Size(0, 32),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 8),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          child: Text(
+                            _isSectionSelected(section.items) ? '取消全选' : '全选',
+                          ),
+                        )
+                      : null,
                 ),
               );
             }

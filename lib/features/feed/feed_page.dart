@@ -12,7 +12,6 @@ import '../../widgets/app_bottom_tab_bar.dart';
 import '../../widgets/app_glass.dart';
 import '../../widgets/date_header.dart';
 import '../../widgets/empty_state.dart';
-import '../../widgets/pinned_band_blur.dart';
 import '../../widgets/loading_view.dart';
 import '../album/photo_timeline_scrubber.dart';
 import '../viewer/media_viewer_page.dart';
@@ -478,12 +477,13 @@ class _FloatingDateHeaderDelegate extends SliverPersistentHeaderDelegate {
   @override
   Widget build(
       BuildContext context, double shrinkOffset, bool overlapsContent) {
-    // 底衬是主题色浅渐变（见 [DateHeader] / [BarTint]）：条带有一层自己的色，
-    // 页面背景仍从渐变里隐约透上来。这一条是**吸顶**的，卡片会从它下面滚过去，
-    // 浅渐变只压掉一成纹理，所以再套一层很轻的模糊（[PinnedBandBlur]，分工见
-    // 那里）；内容流里的日期头是纯渐变。
-    return PinnedBandBlur(
-      child: DateHeader(text: text, height: kFeedDateHeaderHeight),
+    // 这一条是**吸顶**的：材质与底部 footer 完全相同（[AppChromeGlassBar]：
+    // premium 折射 + 55% scrim + 最低档模糊），卡片会从玻璃下面滚过去。内容流
+    // 里的日期头（on_this_day_page 那一份）不吸顶，完全透明。
+    return DateHeader(
+      text: text,
+      height: kFeedDateHeaderHeight,
+      pinned: true,
     );
   }
 

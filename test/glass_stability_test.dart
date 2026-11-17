@@ -61,6 +61,18 @@ Post _post() => Post(
 GlassContainer _glass(WidgetTester tester) =>
     tester.widget<GlassContainer>(find.byType(GlassContainer).first);
 
+/// 卡片自己的那块玻璃。朋友圈顶部现在还有一条 **premium 的吸顶日期条**
+/// （与底部 footer 同款），整棵树里第一块 GlassContainer 不再一定是卡片——
+/// 所以要按 PostCard 收窄。
+GlassContainer _cardGlass(WidgetTester tester) => tester.widget<GlassContainer>(
+      find
+          .descendant(
+            of: find.byType(PostCard),
+            matching: find.byType(GlassContainer),
+          )
+          .first,
+    );
+
 Widget _markApp(GlassQuality quality, Widget home) => AppGlassScope(
       quality: quality,
       child: MaterialApp(theme: buildAppTheme(), home: home),
@@ -276,11 +288,17 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(PostCard), findsWidgets);
-      expect(_glass(tester).quality, GlassQuality.standard,
+      expect(_cardGlass(tester).quality, GlassQuality.standard,
           reason: '卡片固定 standard（不做 capture）');
 
       // 刷新前先记下这块玻璃的 Element：刷新往返里必须是同一个实例。
-      final glassBefore = find.byType(GlassContainer).evaluate().first;
+      final glassBefore = find
+          .descendant(
+            of: find.byType(PostCard),
+            matching: find.byType(GlassContainer),
+          )
+          .evaluate()
+          .first;
 
       // 用 RefreshIndicator 真正会调用的那个回调，等于走一遍下拉刷新的刷新段。
       final refresh =
@@ -294,8 +312,16 @@ void main() {
           reason: 'FeedPage 的刷新不换材质');
       expect(find.byType(GlassContainer), findsWidgets,
           reason: '刷新期间玻璃照旧画着，不许换成不透明表面');
-      expect(_glass(tester).quality, GlassQuality.standard);
-      expect(find.byType(GlassContainer).evaluate().first, same(glassBefore),
+      expect(_cardGlass(tester).quality, GlassQuality.standard);
+      expect(
+          find
+              .descendant(
+                of: find.byType(PostCard),
+                matching: find.byType(GlassContainer),
+              )
+              .evaluate()
+              .first,
+          same(glassBefore),
           reason: '刷新往返里玻璃层没被换掉/重建');
 
       // 刷新回包靠 pump 推进（widget 测试里时间是假的，不能干等 future）。
@@ -306,7 +332,7 @@ void main() {
       await future;
 
       expect(AppGlassRefreshHold.isActive, isFalse);
-      expect(_glass(tester).quality, GlassQuality.standard,
+      expect(_cardGlass(tester).quality, GlassQuality.standard,
           reason: '刷新前后档位不变，仍是 standard');
       expect(tester.takeException(), isNull);
     });

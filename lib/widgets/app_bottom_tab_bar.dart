@@ -3,7 +3,7 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'
     show LiquidGlassSettings;
 
 import '../core/design/colors.dart';
-import '../core/design/text_styles.dart';
+import 'app_chrome_glass_bar.dart';
 import 'app_glass.dart';
 import 'app_glass_tone.dart';
 
@@ -48,12 +48,12 @@ Color get appTabBarInactiveColor => Color.lerp(
     )!;
 
 /// 未选中项的对比保护：同色 1px 描边的不透明度（上限 12%，再高就成发光字）。
-const double appTabBarHaloAlpha = 0.10;
+///
+/// 与三处吸顶条的描边同源：[kAppChromeHaloAlpha]（见 app_chrome_glass_bar.dart）。
+const double appTabBarHaloAlpha = kAppChromeHaloAlpha;
 
 /// 文字/图标的极轻描边：同色、10%、0 偏移 1px 模糊，不发光、不加底色。
-List<Shadow> appTabBarHalo(Color color) => [
-      Shadow(color: color.withValues(alpha: appTabBarHaloAlpha), blurRadius: 1),
-    ];
+List<Shadow> appTabBarHalo(Color color) => appChromeHalo(color);
 
 /// 胶囊内部 scrim 的不透明度：**与其余 chrome 同一组数**
 /// （[appGlassChromeScrimAlphaLight] / [appGlassChromeScrimAlphaDark]，
@@ -74,21 +74,24 @@ const double appTabBarScrimAlphaLight = appGlassChromeScrimAlphaLight;
 const double appTabBarScrimAlphaDark = appGlassChromeScrimAlphaDark;
 
 /// 当前明暗模式下胶囊 scrim 的不透明度。
-double appTabBarScrimAlpha() =>
-    AppColors.isDark ? appTabBarScrimAlphaDark : appTabBarScrimAlphaLight;
+///
+/// 唯一来源是 [appChromeScrimAlpha]（= chrome 那一组数）：footer 与三处吸顶条
+/// 取同一个函数，不存在第二份 scrim。
+double appTabBarScrimAlpha() => appChromeScrimAlpha();
 
 /// 胶囊 scrim 的颜色：页面底色 + [appTabBarScrimAlpha]（合成公式见
 /// app_tab_bar_contrast.dart）。
-Color appTabBarScrimColor() =>
-    AppColors.bgPage.withValues(alpha: appTabBarScrimAlpha());
+Color appTabBarScrimColor() => appChromeScrimColor();
 
 /// 胶囊玻璃的模糊半径：**2**（= [appGlassChromeBlur]，premium 的最低档）。
+///
+/// 别名于 [appChromeBlur]：footer 与三处吸顶条同一个数。
 ///
 /// 上一轮是 24：scrim 76%/82% 时背后只剩 24%/18% 的权重，糊大一点没代价，
 /// 还能把照片纹理揉成一块底色。scrim 让到 55% 之后，那 45% 正是**要给折射用**
 /// 的内容——再糊 24，斜面采样到的位移被抹平，「45% 可见度」就退化成一块更亮的
 /// 灰板。所以模糊压到与其余 chrome 相同的最低档。
-const double appTabBarBlur = appGlassChromeBlur;
+const double appTabBarBlur = appChromeBlur;
 
 /// 胶囊自己的玻璃参数：光学档位照旧（premium 折射 / 拿不到时磨砂回退），
 /// 只把模糊换成 [appTabBarBlur]。
@@ -100,12 +103,8 @@ const double appTabBarBlur = appGlassChromeBlur;
 /// 档位判定与 [AppGlassSurface] 内部那条
 /// （preferPremium 为真时 [appGlassPremiumAvailable]）完全一致，所以这里取的
 /// 参数就是那个表面真正会用的参数。
-LiquidGlassSettings appTabBarGlassSettings(BuildContext context) {
-  final base = appGlassPremiumAvailable(context)
-      ? appGlassChromeSettings(context)
-      : appGlassSettings(context);
-  return base.copyWith(blur: appTabBarBlur);
-}
+LiquidGlassSettings appTabBarGlassSettings(BuildContext context) =>
+    appChromeGlassSettings(context);
 
 /// 悬浮胶囊式底部 tab：等宽三格、图标 + 文字。
 ///
@@ -178,72 +177,56 @@ class AppBottomTabBar extends StatelessWidget {
   /// 格子。
   static Key tabKey(int index) => ValueKey<String>('bottom-tab-$index');
 
-  /// 想用的玻璃档位；null = [preferredQuality]（premium），拿不到时由
-  /// [AppGlassSurface] 回退到磨砂档。
-  final GlassQuality? requestedQuality;
-
   /// 胶囊想要的玻璃档位：premium（Impeller 全管线，折射/边缘扭曲）。
   ///
-  /// 三个页面共用这一个数，改档位只改这里。
-  static const GlassQuality preferredQuality = GlassQuality.premium;
+  /// 三个页面共用这一个数，改档位只改 [AppChromeGlassBar.preferredQuality]
+  /// ——footer 与三处吸顶条是同一份材质，档位不可能只改其中一个。
+  static const GlassQuality preferredQuality = AppChromeGlassBar.preferredQuality;
 
   /// 胶囊自建渲染层：premium 的 per-widget settings 只在自建层里生效。
   ///
-  /// 只有这一块静态 chrome 值得开；卡片仍然是 useOwnLayer: false。
-  static const bool usesOwnLayer = true;
+  /// 只有静态 chrome 值得开；卡片仍然是 useOwnLayer: false。footer 与三处
+  /// 吸顶条取同一个数（[AppChromeGlassBar.usesOwnLayer]）。
+  static const bool usesOwnLayer = AppChromeGlassBar.usesOwnLayer;
 
   const AppBottomTabBar({
     super.key,
     required this.items,
     required this.selectedIndex,
     required this.onSelected,
-    this.requestedQuality,
   });
 
   @override
   Widget build(BuildContext context) {
     // 安全区算进外间距：胶囊自己浮在安全区上面，不贴屏幕底边。
     final safeBottom = MediaQuery.viewPaddingOf(context).bottom;
-    // 未选中文字/图标的墨色跟着**背景合成亮度**走（方案 C）：采样一变就重建
-    // 这 3 个格子，取舍见 app_glass_tone.dart。选中态始终是主题色。
-    return appGlassToneBuilder(
-      (context, ink) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          sideInset,
-          0,
-          sideInset,
-          bottomGap + safeBottom,
-        ),
-        child: AppGlassSurface(
-          radius: radius,
-          requestedQuality: requestedQuality ?? preferredQuality,
-          // 静态 chrome 优先 premium（折射）；拿不到时 AppGlassSurface 自己
-          // 退回磨砂档 + 重 scrim，这里不用分支。
-          preferPremium: true,
-          useOwnLayer: usesOwnLayer,
-          // 玻璃后面是滚动的照片：内部叠一层页面底色 scrim，未选中的文字才有
-          // 底衬。厚度不跟档位走（premium 与回退同一组数，见
-          // [appTabBarScrimAlpha] = 0.55 = 折射可见度 45%）；模糊由
-          // [appTabBarGlassSettings] 压到 [appTabBarBlur]。
-          scrim: true,
-          settings: appTabBarGlassSettings(context),
-          scrimColor: appTabBarScrimColor(),
-          child: SizedBox(
-            height: barHeight,
-            child: Row(
-              children: [
-                for (var index = 0; index < items.length; index++)
-                  Expanded(
-                    child: _TabButton(
-                      key: tabKey(index),
-                      item: items[index],
-                      selected: index == selectedIndex,
-                      ink: ink,
-                      onTap: () => onSelected(index),
-                    ),
+    // 材质整个交给 [AppChromeGlassBar]（与三处吸顶条同一份）：圆角是胶囊，
+    // 其余参数一字不差。未选中文字/图标的墨色跟着**背景合成亮度**走（方案 C）：
+    // 采样一变就重建这 3 个格子，取舍见 app_glass_tone.dart；选中态始终是主题色。
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        sideInset,
+        0,
+        sideInset,
+        bottomGap + safeBottom,
+      ),
+      child: AppChromeGlassBar(
+        radius: radius,
+        builder: (context, ink) => SizedBox(
+          height: barHeight,
+          child: Row(
+            children: [
+              for (var index = 0; index < items.length; index++)
+                Expanded(
+                  child: _TabButton(
+                    key: tabKey(index),
+                    item: items[index],
+                    selected: index == selectedIndex,
+                    ink: ink,
+                    onTap: () => onSelected(index),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),
@@ -297,13 +280,8 @@ class _TabButton extends StatelessWidget {
               item.label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: AppText.caption.copyWith(
-                fontSize: 10.5,
-                height: 1.1,
-                fontWeight: FontWeight.w500,
-                color: color,
-                shadows: halo,
-              ),
+              // footer 未激活那一套（字号/行高/字重与三处吸顶条同一个来源）。
+              style: appChromeLabelStyle(color, shadows: halo),
             ),
           ],
         ),

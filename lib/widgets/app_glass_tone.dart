@@ -73,6 +73,31 @@ Color appGlassToneInkForBackdrop(Color? backdrop) => backdrop == null
 /// 这一帧该用的墨色：读 [AppBackdropSample] 最近一次采样。
 Color appGlassToneInk() => appGlassToneInkForBackdrop(AppBackdropSample.color.value);
 
+/// **没有底衬**的表面（透明日期条）上的墨色：底衬就是采样到的背景本身。
+///
+/// [appGlassToneInk] 的底衬是「scrim 叠背景」——玻璃条里面那层 55% 的页面底色
+/// （[appGlassToneBackplate]）。内容流里的日期条完全透明，文字直接压在背景图
+/// 上，没有那层 scrim，所以这里直接比背景亮度：阈值仍是
+/// [appGlassToneThreshold]（它本来就是黑/白两套墨色的交叉点，而不是 0.5）。
+///
+/// 四种极端背景（纯白/纯黑/纯红/纯蓝）× 明暗实测最坏 4.58:1，见
+/// test/pinned_chrome_bar_test.dart 与 test/date_header_backdrop_test.dart。
+Color appGlassToneInkBare(Color? backdrop) => backdrop == null
+    ? (AppColors.isDark
+        ? appGlassToneFallbackDarkTheme
+        : appGlassToneFallbackLightTheme)
+    : appGlassToneInkForLuminance(AppAccent.relativeLuminance(backdrop));
+
+/// 同 [appGlassToneBuilder]，但走**没有底衬**那一档（[appGlassToneInkBare]）。
+Widget appGlassBareToneBuilder(
+  Widget Function(BuildContext context, Color ink) builder,
+) =>
+    ValueListenableBuilder<Color?>(
+      valueListenable: AppBackdropSample.color,
+      builder: (context, backdrop, _) =>
+          builder(context, appGlassToneInkBare(backdrop)),
+    );
+
 /// 随采样结果重建：[builder] 拿到的就是当前该用的墨色。
 ///
 /// 采样一变（换背景图 / 换主题）胶囊里的文字与图标跟着换，切完就不再重建。

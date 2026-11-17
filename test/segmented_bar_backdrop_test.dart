@@ -10,38 +10,40 @@ import 'package:album_app/core/page_backdrop_spec.dart';
 import 'package:album_app/features/album/album_media_filter.dart';
 import 'package:album_app/features/album/album_media_filter_bar.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
+import 'package:album_app/widgets/app_chrome_glass_bar.dart';
 import 'package:album_app/widgets/app_glass.dart';
 import 'package:album_app/widgets/app_segmented_bar.dart';
-import 'package:album_app/widgets/date_header.dart';
-import 'package:album_app/widgets/pinned_band_blur.dart';
 import 'package:album_app/widgets/pinned_bar_sliver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'
-    show GlassContainer, LightweightLiquidGlass;
+    show LightweightLiquidGlass;
 import 'package:shared_preferences/shared_preferences.dart';
 
-// 相册分类筛选条（「全部 / 照片 / 动态照片 / 视频」那条 46 高的带子）的底衬：
-// 从「透明 + blur 8」换成**与日期条同一套主题色浅渐变**。
+// 相册分类筛选条（「全部 / 照片 / 动态照片 / 视频」那条 46 高的带子）的底衬。
 //
-// 为什么改：用户先报「日期条模糊透明有点奇怪」，改完又说「分类条也是一样」。
-// 两条横条现在共用一份参数（[BarTint]）：
-// - 浅色：alpha 0.10 → 0.02；深色：alpha 0.14 → 0.04，纵向（上沿 → 下沿）；
-// - 没有 [BackdropFilter]、没有模糊层、没有玻璃：整条只有一个渐变。
+// 这一轮的口径（按形态分两份，同一个 [AppSegmentedBarSurface]）：
+// - **吸顶**那一份（相册详情页 / 朋友圈相册，压在滚动的照片上）：
+//   与底部 footer **完全相同**的玻璃（[AppChromeGlassBar]：premium 折射 +
+//   55% scrim + 最低档模糊 + 自动墨色文字）；
+// - **非吸顶**那一份（选封面页 AppBar.bottom，下面没有内容经过）：
+//   仍然是主题色浅渐变（[BarTint]：浅色 0.10 → 0.02、深色 0.14 → 0.04），
+//   没有玻璃、没有模糊。
 //
-// 分类条**不再包玻璃胶囊**：它原来走 premium 档（capture 背景纹理那条管线），
-// 真机下拉刷新时会整块发黑。渐变底衬已经承担材质，玻璃这一层是重复的，于是
-// 整层删掉——没有玻璃就没有 capture，也就不可能再黑（复现见
-// test/refresh_black_bar_test.dart）。
+// 之前两处都是渐变（分类条为了躲「刷新时整块发黑」把玻璃删了）。现在黑条靠
+// 「玻璃层刷新全程不重建」来挡（常量 key 的 RepaintBoundary + 同一 Element，
+// 见 test/refresh_black_bar_test.dart），材质回到 footer 那一份。
 //
-// 这份文件守四件事：
-// 1. 底衬与日期条是**同一份**渐变（颜色取自 [AppColors.primary]、最大 alpha
-//    ≤ 0.16），不是各写各的第二份；
-// 2. 条带里没有 GlassContainer / BackdropFilter：材质只有渐变这一层；
-// 3. 页面背景仍从渐变里透上来；滚过的内容只被染淡、不被揉开（没有模糊）；
-// 4. 文字与数量的对比度逐条量出来（浅/深各一遍），选中用的主题色为什么不
-//    到 4.5 也写在里面。
+// 这份文件守五件事：
+// 1. 非吸顶那一份的底衬就是 [BarTint] 那份渐变（颜色取自 [AppColors.primary]、
+//    最大 alpha ≤ 0.16），不是各写各的第二份；
+// 2. 吸顶那一份是 footer 同款玻璃（同一个组件、同一组开关），不是又一套材质；
+// 3. 吸顶条盖住滚过的照片纹理（条带里残留 < 0.02）；
+// 4. 非吸顶条只把纹理染淡（没有模糊、没有玻璃）；
+// 5. 非吸顶条的文字与数量对比度逐条量出来（浅/深各一遍），选中用的主题色
+//    为什么不到 4.5 也写在里面。吸顶条的自动墨色对比度见
+//    test/pinned_chrome_bar_test.dart。
 
 const Key _pageKey = Key('segmented-backdrop-page');
 
@@ -180,9 +182,8 @@ void main() {
     AppColors.setDark(false);
   });
 
-  test('底衬与日期条是同一份渐变：主题色、纵向、最大 alpha ≤ 0.16', () {
+  test('非吸顶那一份的底衬：主题色浅渐变、纵向、最大 alpha ≤ 0.16', () {
     const surface = AppSegmentedBarSurface(child: SizedBox.shrink());
-    const header = DateHeader(text: '今天 · 11月15日');
     for (final dark in <bool>[false, true]) {
       AppColors.setDark(dark);
       final gradient = surface.gradient;
@@ -199,15 +200,12 @@ void main() {
       expect(gradient.colors.first.a, closeTo(dark ? 0.14 : 0.10, 1e-9));
       expect(gradient.colors.last.a, closeTo(dark ? 0.04 : 0.02, 1e-9));
       expect(gradient.colors.first.a, lessThanOrEqualTo(BarTint.maxAlpha));
-      // 和日期条一模一样：两条横条不许各写一套参数。
-      expect(gradient.colors, header.gradient.colors,
-          reason: '分类条的渐变与日期条不一致（dark=$dark）：两份参数又分家了');
-      expect(gradient.begin, header.gradient.begin);
-      expect(gradient.end, header.gradient.end);
+      // 只有一份参数：非吸顶那一份直接取 BarTint，不另写一套。
+      expect(gradient, BarTint.gradient);
     }
   });
 
-  testWidgets('分类条里没有玻璃、也没有模糊：只有一层渐变底衬', (tester) async {
+  testWidgets('吸顶分类条是 footer 同款玻璃；非吸顶仍是渐变', (tester) async {
     _phone(tester);
     await tester.pumpWidget(_page());
     await tester.pumpAndSettle();
@@ -215,34 +213,30 @@ void main() {
     final pinned = tester.widget<PinnedBarSliver>(find.byType(PinnedBarSliver));
     expect(pinned.background, isNotNull);
     expect(pinned.background!.a, 0.0,
-        reason: '吸顶 sliver 垫了不透明色：逐渐变会被截成一条白杠');
+        reason: '吸顶 sliver 垫了不透明色：玻璃会被截成一条白杠');
 
     final band = find.byType(AppSegmentedBarSurface);
     expect(band, findsOneWidget);
     final surface = tester.widget<AppSegmentedBarSurface>(band);
-    expect(surface.gradient, BarTint.gradient);
-
-    // 条带里没有玻璃：premium 的 capture 就是「刷新时整条发黑」的来源。
-    expect(
-      find.descendant(of: band, matching: find.byType(GlassContainer)),
-      findsNothing,
-      reason: '分类条里还有玻璃：premium 的 capture 就是「刷新时整条发黑」的来源',
+    expect(surface.pinned, isTrue, reason: '这一条是吸顶的那一份');
+    // 吸顶那一份的底衬是玻璃（与 footer 同一个组件、同一组开关），不再是渐变。
+    final glass = find.descendant(
+      of: band,
+      matching: find.byType(AppChromeGlassBar),
     );
-    expect(
-      find.descendant(of: band, matching: find.byType(AppGlassSurface)),
-      findsNothing,
+    expect(glass, findsOneWidget,
+        reason: '吸顶分类条不是 footer 同款玻璃（还是另一套材质）');
+    final glassSurface = tester.widget<AppGlassSurface>(
+      find.descendant(of: glass, matching: find.byType(AppGlassSurface)),
     );
-    // 底衬自己不含模糊：模糊是**吸顶专用**的一层，挂在条带外面（PinnedBandBlur）。
-    expect(
-      find.descendant(of: band, matching: find.byType(BackdropFilter)),
-      findsNothing,
-      reason: '底衬里还嵌着一层模糊：模糊只该是吸顶那一层，不参与底衬',
-    );
-    final blur = find.ancestor(of: band, matching: find.byType(PinnedBandBlur));
-    expect(blur, findsOneWidget,
-        reason: '吸顶分类条缺兜底模糊：浅渐变只压掉一成纹理，照片会一条条透出来');
-    expect(tester.widget<PinnedBandBlur>(blur.first).blur, kPinnedBandBlur);
-    expect(kPinnedBandBlur, inInclusiveRange(6, 8));
+    expect(glassSurface.preferPremium, isTrue);
+    expect(glassSurface.useOwnLayer, isTrue);
+    expect(glassSurface.scrim, isTrue);
+    expect(glassSurface.requestedQuality, AppChromeGlassBar.preferredQuality);
+    // 圆角按形态取：分类条是胶囊（高度/2）。
+    expect(glassSurface.radius, kAppSegmentedBarPillRadius);
+    // 非吸顶那一份（选封面页 AppBar）仍然是渐变：同一个组件两种形态，
+    // 渐变与日期条、与原来的参数是同一份（见上面那条单元用例）。
 
     // 几何不变：整条 46 高、铺满宽度，内容带 46 - 上下各 7 = 32。
     final rect = tester.getRect(band);
@@ -258,7 +252,7 @@ void main() {
     }
   });
 
-  testWidgets('页面背景从渐变里透上来：不是实底，也不是纯透明', (tester) async {
+  testWidgets('吸顶条的底衬是玻璃：不是渐变、也不是纯透明', (tester) async {
     _phone(tester);
     PageBackdropController.spec.value =
         const PageBackdropSpec.solid(_backdropGreen);
@@ -266,25 +260,33 @@ void main() {
     await tester.pumpWidget(_page());
     await tester.pumpAndSettle();
 
-    final band = tester.getRect(find.byType(AppSegmentedBarSurface));
+    final band = find.byType(AppSegmentedBarSurface);
+    final rect = tester.getRect(band);
+    // 底衬不再是「主题色浅渐变」：条带里没有任何渐变装饰。
+    final gradients = tester
+        .widgetList<DecoratedBox>(
+          find.descendant(of: band, matching: find.byType(DecoratedBox)),
+        )
+        .map((box) => box.decoration)
+        .whereType<BoxDecoration>()
+        .map((decoration) => decoration.gradient)
+        .where((gradient) => gradient != null);
+    expect(gradients, isEmpty,
+        reason: '吸顶分类条里还画着渐变：这一份的底衬应该整个交给玻璃');
+
+    // 玻璃条必须有可采样/可画的表面（与 footer 同一个组件）。
+    expect(
+      find.descendant(of: band, matching: find.byType(AppGlassSurface)),
+      findsOneWidget,
+    );
+    // 像素：条带盖住了页面背景（玻璃 + scrim 画上去了），不是纯透明的一条。
     final shot = await _shoot(tester);
-    // 取左边的内边距（内容从 12 起）：这一条就是「底衬」本身。
-    final sample = Offset(band.left + 3, band.center.dy);
-    final pixel = shot.at(sample);
-    final t = (sample.dy - band.top) / band.height;
-    final expected = BarTint.backplateAt(t, over: _backdropGreen);
-    final pixelText = pixel.toString();
-    expect(_channel(pixel.r, expected.r), lessThanOrEqualTo(3),
-        reason: '条带里不是「渐变叠背景」（实测 $pixelText，期望 $expected）');
-    expect(_channel(pixel.g, expected.g), lessThanOrEqualTo(3));
-    expect(_channel(pixel.b, expected.b), lessThanOrEqualTo(3));
-    expect(_channel(pixel.b, _backdropGreen.b), greaterThan(6),
-        reason: '条带里看不到主题色：底衬没画（实测 $pixelText）');
-    expect(_channel(pixel.r, AppColors.bgPage.r), greaterThan(20),
-        reason: '条带又回到 bgPage 那块白底：实底会把页面背景截成一条白杠');
+    final pixel = shot.at(Offset(rect.left + 3, rect.center.dy));
+    expect(_channel(pixel.g, _backdropGreen.g), greaterThan(20),
+        reason: '条带里还是页面的绿色：玻璃与 scrim 没画上去（实测 $pixel）');
   });
 
-  testWidgets('吸顶：滚过的纹理由兜底模糊揉开（残留 < 0.02）', (tester) async {
+  testWidgets('吸顶：滚过的照片被玻璃盖住（条带内残留 < 0.02）', (tester) async {
     _phone(tester);
     await tester.runAsync(() => LightweightLiquidGlass.preWarm());
 
@@ -318,14 +320,13 @@ void main() {
     final ratioText = ratio.toStringAsFixed(3);
     expect(below, greaterThan(0.1),
         reason: '对照组本身没有纹理，这条用例就测不出东西（below=$belowText）');
-    expect(find.byType(PinnedBandBlur), findsOneWidget);
-    // 吸顶条的验收口径：兜底模糊把纹理揉开，条带里只剩一层柔和色雾（< 0.02，
-    // 纯渐变叠条纹时是 ≈0.19）。
+    // 吸顶条的验收口径：玻璃 + scrim 把底下的照片盖住，条带里只剩一层柔和色雾
+    // （< 0.02；纯透明/纯渐变叠条纹时是 ≈0.19）。
     expect(inBand, lessThan(0.02),
-        reason: '吸顶分类条里的照片纹理没被揉开（inBand=${inBand.toStringAsFixed(4)} / '
-            'below=$belowText = $ratioText）：照片会一条条从字后面透出来');
+        reason: '吸顶分类条里的照片纹理没被盖住（inBand=${inBand.toStringAsFixed(4)} / '
+            'below=$belowText = $ratioText）：玻璃/scrim 没画上去');
     expect(ratio, lessThan(0.10),
-        reason: '条带里的纹理残留太高（ratio=$ratioText）：兜底模糊没起作用');
+        reason: '条带里的纹理残留太高（ratio=$ratioText）：材质没盖住照片');
   });
 
   testWidgets('非吸顶（封面选择页 AppBar 那一份）：纯渐变，纹理只被染淡 ≤ 0.9',
@@ -369,8 +370,9 @@ void main() {
     await tester.pumpAndSettle();
 
     final band = tester.getRect(find.byType(AppSegmentedBarSurface));
-    // 不吸顶的那一份没有兜底模糊。
-    expect(find.byType(PinnedBandBlur), findsNothing);
+    // 不吸顶的那一份：没有玻璃、没有模糊，只有一层渐变。
+    expect(find.byType(AppChromeGlassBar), findsNothing);
+    expect(find.byType(BackdropFilter), findsNothing);
     final shot = await _shoot(tester);
     // 同一条 x 窗口（条纹是竖的，窗口相位才对得上）：条带里与条带下各取一条。
     // 内容从 12 起，4~11 这一段落在左右内边距里，只有底衬。
@@ -390,10 +392,37 @@ void main() {
         reason: '非吸顶条的纹理被压掉太多（ratio=$ratioText）：纯渐变只该染淡一成');
   });
 
-  testWidgets('文字与数量的对比度：选中/未选中在浅色与深色下都 ≥ 4.5',
+  testWidgets('非吸顶那一份的文字与数量对比度：浅色与深色下都 ≥ 4.5',
       (tester) async {
     _phone(tester);
-    await tester.pumpWidget(_page());
+    // 非吸顶那一份（选封面页 AppBar 里的那条）落在主题色浅渐变上——对比度是
+    // 这一份的契约。吸顶那一份换成自动墨色（与 footer 同一套），断言见
+    // test/pinned_chrome_bar_test.dart。
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: _pageKey,
+        child: MaterialApp(
+          theme: buildAppTheme(),
+          home: const Scaffold(
+            backgroundColor: Colors.transparent,
+            body: Align(
+              alignment: Alignment.topCenter,
+              child: AppSegmentedBarSurface(
+                child: AlbumMediaFilterBar(
+                  counts: AlbumMediaCounts(
+                    stillPhotos: 12,
+                    livePhotos: 3,
+                    videos: 2,
+                  ),
+                  selected: AlbumMediaFilter.all,
+                  onChanged: _noop,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
 
     // 选中段的文字色 = 主题色**在本条内**混黑 [kSegmentedSelectedInkDarken]。

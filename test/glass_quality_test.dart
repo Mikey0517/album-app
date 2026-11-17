@@ -61,7 +61,6 @@ Widget _tabBar(
       selectedIndex: selectedIndex,
       onSelected: onSelected ?? (_) {},
       items: _tabs,
-      requestedQuality: quality,
     ),
     quality: quality,
   );

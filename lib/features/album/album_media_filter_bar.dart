@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../widgets/app_segmented_bar.dart';
-import '../../widgets/pinned_band_blur.dart';
 import '../../widgets/pinned_bar_sliver.dart';
 import 'album_media_filter.dart';
 
@@ -53,16 +52,18 @@ class AlbumMediaFilterBar extends StatelessWidget {
   }
 }
 
-/// 吸顶版筛选条：高度、内边距、底衬由 [PinnedBarSliver] +
-/// [AppSegmentedBarSurface] 决定，和详情页完全相同。
+/// 吸顶版筛选条：高度、内边距由 [PinnedBarSliver] + [AppSegmentedBarSurface]
+/// 决定，和详情页完全相同。
 ///
 /// [PinnedBarSliver] 的底衬显式传**透明**：底衬由 [AppSegmentedBarSurface]
-/// 自己画（主题色浅渐变），吸顶 sliver 再垫一层页面底色的话，渐变顶上会多一条
-/// 白杠、背景也透不上来。
+/// 自己画（吸顶那一份是底部 footer 同款**玻璃**），吸顶 sliver 再垫一层页面
+/// 底色的话，玻璃顶上会多一条白杠、下面也没有内容可采。
 ///
-/// 这一条是**吸顶**的（照片会从它下面滚过去），渐变之上再套一层很轻的模糊
-/// （[PinnedBandBlur]）：浅渐变只压掉一成纹理，压不住滚过的照片。封面选择页
-/// 里同一个 [AppSegmentedBarSurface] 挂在 AppBar 上（不吸顶），那里不套模糊。
+/// 这一条是**吸顶**的（照片会从它下面滚过去），所以材质与 footer 完全一致：
+/// premium 折射 + 55% scrim（折射可见度 45%）+ 最低档模糊，refresh 全程是同一
+/// 块玻璃（见 [AppChromeGlassBar]）。封面选择页里同一个
+/// [AppSegmentedBarSurface] 挂在 AppBar 上（[AppSegmentedBarSurface.pinned]
+/// 为假），那里仍是主题色浅渐变、没有玻璃。
 class AlbumMediaFilterSliver extends StatelessWidget {
   final AlbumMediaCounts counts;
   final AlbumMediaFilter selected;
@@ -80,13 +81,12 @@ class AlbumMediaFilterSliver extends StatelessWidget {
     return PinnedBarSliver(
       height: kAppSegmentedBarHeight,
       background: Colors.transparent,
-      child: PinnedBandBlur(
-        child: AppSegmentedBarSurface(
-          child: AlbumMediaFilterBar(
-            counts: counts,
-            selected: selected,
-            onChanged: onChanged,
-          ),
+      child: AppSegmentedBarSurface(
+        pinned: true,
+        child: AlbumMediaFilterBar(
+          counts: counts,
+          selected: selected,
+          onChanged: onChanged,
         ),
       ),
     );

@@ -609,20 +609,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
       final section = sections[sectionIndex];
       if (section.header != null) {
-        // 只有「当前分组」这一个头吸顶，其余分组头是内容流里的普通 34 高横条。
-        // 两者几何完全一样（同样 34 高、底衬同为透明），所以滚动到阈值时切换
-        // 不会跳：那一刻它的内容位置本来就已经和吸顶位重合。吸顶/不吸顶的切换
-        // 与头的几何都在 album_timeline_layout.dart 里，和朋友圈相册同一份。
+        // 只有「当前分组」这一个头吸顶，其余分组头是内容流里的普通 38 高横条。
+        // 两者几何完全一样，所以滚动到阈值时切换不会跳：那一刻它的内容位置
+        // 本来就已经和吸顶位重合。吸顶/不吸顶的切换、头的几何与材质都在
+        // album_timeline_layout.dart 里，和朋友圈相册同一份——吸顶那一份是
+        // footer 同款玻璃，内容流那一份完全透明。
+        // 张数用 [DateHeader.count] 传：它和日期文字用同一套自动墨色。
         slivers.add(
           timelineDateHeaderSliver(
             pinned: sectionIndex == pinnedSection,
-            child: timelineDateHeader(
-              section,
-              trailing: Text(
-                '${section.items.length}',
-                style: AppText.caption,
-              ),
-            ),
+            section: section,
+            count: section.items.length,
           ),
         );
       }

@@ -4,6 +4,7 @@ import '../core/design/bar_tint.dart';
 import '../core/design/colors.dart';
 import '../core/formatters.dart';
 import 'app_bottom_tab_bar.dart';
+import 'app_chrome_glass_bar.dart';
 
 /// 页内筛选条的统一高度：相册详情页（以及选封面时的筛选）都用它。
 ///
@@ -47,22 +48,26 @@ class AppSegmentedItem {
   const AppSegmentedItem(this.label, {this.count});
 }
 
-/// 紧凑分段条（全部 / 照片 / 动态照片 / 视频）：**文字直接落在主题色浅渐变上**。
+/// 紧凑分段条（全部 / 照片 / 动态照片 / 视频）：**文字直接落在底衬上**。
 ///
 /// 视觉只有两条规则：
-/// 1. 底子就是外面那层吸顶底衬（[AppSegmentedBarSurface]，浅渐变见 [BarTint]）。
-///    这条栏自己**不再包玻璃**：每一段的容器里没有任何材质、没有底色块，
-///    只有文字与数量；
-/// 2. 选中态**只用文字颜色**表达：选中段的文案与数量换成 [AppColors.primary]，
-///    未选中的是 [appTabBarInactiveColor]（和底部 tab 的未选中态同一档）。
-///    没有实心胶囊、没有底色块、没有水波纹——和底部 tab 的选中态是同一种语言。
+/// 1. 底子由外面那层 [AppSegmentedBarSurface] 画：吸顶那一份是底部 footer 同款
+///    玻璃，非吸顶那一份是主题色浅渐变（[BarTint]）。这条栏自己**不包材质**：
+///    每一段的容器里没有底色块、没有玻璃，只有文字与数量；
+/// 2. 选中态**只用文字颜色**表达：选中段的文案与数量换成主题色（本条内局部加深
+///    [segmentedSelectedInk]）。没有实心胶囊、没有底色块、没有水波纹——和底部
+///    tab 的选中态是同一种语言。
 ///
-/// 数量用更小的字号挂在文案后面，靠字号和颜色分出主次，不加任何说明文字。
+/// 未选中的文字有两套，跟着底衬走：
+/// - 玻璃上（吸顶那一份）：与 footer 未激活标签同一套——自动墨色
+///   [appGlassToneInk] + 同一档字号/字重（[appChromeLabelStyle]）；
+/// - 浅渐变上（非吸顶那一份）：[appTabBarInactiveColor] 与
+///   [AppColors.textOnGlass]，字号大一号。
 ///
-/// **为什么把玻璃去掉**：真机上这条胶囊在下拉刷新时会整块发黑——premium 档走
-/// 的是「capture 背景纹理」那条管线，刷新那几帧采到未就绪的纹理，叠上 tint
-/// 就是一块近黑（和「刷新时黑卡」同一个根因）。渐变底衬已经承担了材质，这里
-/// 再留一层玻璃只是重复，于是整层删掉：没有玻璃 = 没有 capture = 不可能发黑。
+/// **玻璃为什么现在敢回来**：真机上这条胶囊早先在下拉刷新时会整块发黑——premium
+/// 档走「capture 背景纹理」那条管线，玻璃层被重建的那一帧采到未就绪的纹理，叠上
+/// tint 就是一块近黑。现在玻璃层挂常量 key 的 RepaintBoundary（[AppChromeGlassBar]），
+/// 刷新全程是同一个 Element，capture 不会重抓，黑条那一帧就不存在。
 /// 复现与回归见 test/refresh_black_bar_test.dart。
 class AppSegmentedBar extends StatelessWidget {
   /// 整条内容带的 key（原来是玻璃胶囊的位置）：测试用它量高度与宽度。
@@ -112,10 +117,12 @@ class AppSegmentedBar extends StatelessWidget {
   }
 }
 
-/// 分段条的吸顶容器：统一高度、内边距，**主题色浅渐变底衬**。
+/// 分段条的容器：统一高度、内边距；**吸顶那一份是 footer 同款玻璃，非吸顶那
+/// 一份是主题色浅渐变**。
 ///
-/// 详情页套在 [PinnedBarSliver] 里，选封面时套在 AppBar.bottom 里，两处都用
-/// 这一层，吸顶条的高度、内边距和底衬才不会各写各的。
+/// 详情页套在 [PinnedBarSliver] 里（[pinned] = true），选封面时套在
+/// AppBar.bottom 里（[pinned] = false），两处都用这一层，高度与内边距才不会
+/// 各写各的。
 ///
 /// **为什么不再是 [AppColors.bgPage] 实底**：吸顶条是一条横贯整屏的窄带，垫成
 /// 页面底色之后，[AppGlassBackdrop] 的渐变（或用户挑的背景图）到这里就被截成
@@ -134,23 +141,45 @@ class AppSegmentedBar extends StatelessWidget {
 class AppSegmentedBarSurface extends StatelessWidget {
   final Widget child;
 
-  const AppSegmentedBarSurface({super.key, required this.child});
+  /// 是不是吸顶的那一份：true = 与底部 footer 完全相同的玻璃；false = 原来的
+  /// 主题色浅渐变（不吸顶，下面没有内容经过，不需要材质）。
+  final bool pinned;
 
-  /// 底衬渐变：与日期分组条是同一份（[BarTint.gradient]）。
+  const AppSegmentedBarSurface({super.key, required this.child, this.pinned = false});
+
+  /// 非吸顶那一份的底衬渐变：与日期分组条是同一份（[BarTint.gradient]）。
+  ///
+  /// 吸顶那一份不画渐变——底衬是 [AppChromeGlassBar] 的玻璃。
   LinearGradient get gradient => BarTint.gradient;
+
+  /// 内容内边距：上下各 7（46 - 14 = 32 的内容带）。
+  static const EdgeInsets contentPadding = EdgeInsets.fromLTRB(12, 7, 12, 7);
 
   @override
   Widget build(BuildContext context) {
+    if (pinned) {
+      // 吸顶这一条压在滚动的照片上：材质整个交给 [AppChromeGlassBar]
+      // （与底部 footer 同一份），圆角取胶囊（高度/2）。墨色由玻璃条按背景
+      // 采样挑好后经 [AppChromeInk] 传给下面四段。
+      return AppChromeGlassBar(
+        radius: kAppSegmentedBarPillRadius,
+        builder: (context, ink) => SizedBox(
+          height: kAppSegmentedBarHeight,
+          width: double.infinity,
+          child: AppChromeInk(
+            ink: ink,
+            child: Padding(padding: contentPadding, child: child),
+          ),
+        ),
+      );
+    }
     // 渐变铺满整条（含上下 7 的内边距）：内缩的只是内容。
     return SizedBox(
       height: kAppSegmentedBarHeight,
       width: double.infinity,
       child: DecoratedBox(
         decoration: BoxDecoration(gradient: gradient),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
-          child: child,
-        ),
+        child: Padding(padding: contentPadding, child: child),
       ),
     );
   }
@@ -171,15 +200,46 @@ class _Segment extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = item.count;
-    // 选中只改颜色：主题色在本条内局部加深（[segmentedSelectedInk]），未选中用
-    // 和底部 tab 同一档的中性灰。
-    final color = selected ? segmentedSelectedInk : appTabBarInactiveColor;
-    // 数量：未选中用 [AppColors.textOnGlass]；选中跟文案同色——降透明度
-    // （0.72 / 0.85 / 0.9）在这层浅渐变上只有 2.6~3.9:1，只有满不透明才过 4.5。
-    // 主次靠字号（11 vs 13）与字重表达，不靠把颜色调淡。
-    final countColor = selected ? color : AppColors.textOnGlass;
-    // 同色极轻描边：玻璃底衬上的小字边缘不会糊进去，不做发光。
-    final halo = appTabBarHalo(color);
+    // 两种底衬、两套文字：
+    // - 吸顶那一份是玻璃（[AppChromeInk] 在祖先里）：文字用**footer 未激活那
+    //   一套**——自动墨色 + 与 footer 标签同字号/字重（[appChromeLabelStyle]）；
+    // - 非吸顶那一份是主题色浅渐变：沿用原来那套（未选中 [appTabBarInactiveColor]，
+    //   数量 [AppColors.textOnGlass]），字大一号。
+    final glassInk = AppChromeInk.maybeOf(context);
+    final Color color;
+    final TextStyle style;
+    final TextStyle countStyle;
+    if (glassInk != null) {
+      // 选中段仍用主题色（本条内局部加深 [segmentedSelectedInk]），未选中段与
+      // 数量用与 footer 同一档的自动墨色。
+      color = selected ? segmentedSelectedInk : glassInk;
+      style = appChromeLabelStyle(color, shadows: appChromeHalo(color));
+      countStyle = style;
+    } else {
+      // 选中只改颜色：主题色在本条内局部加深（[segmentedSelectedInk]），未选中用
+      // 和底部 tab 同一档的中性灰。
+      color = selected ? segmentedSelectedInk : appTabBarInactiveColor;
+      // 数量：未选中用 [AppColors.textOnGlass]；选中跟文案同色——降透明度
+      // （0.72 / 0.85 / 0.9）在这层浅渐变上只有 2.6~3.9:1，只有满不透明才过 4.5。
+      // 主次靠字号（11 vs 13）与字重表达，不靠把颜色调淡。
+      final countColor = selected ? color : AppColors.textOnGlass;
+      // 同色极轻描边：底衬上的小字边缘不会糊进去，不做发光。
+      final halo = appTabBarHalo(color);
+      style = TextStyle(
+        fontSize: 13,
+        height: 1.2,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        color: color,
+        shadows: halo,
+      );
+      countStyle = TextStyle(
+        fontSize: 11,
+        height: 1.2,
+        fontWeight: FontWeight.w600,
+        color: countColor,
+        shadows: halo,
+      );
+    }
     return Semantics(
       button: true,
       selected: selected,
@@ -202,26 +262,11 @@ class _Segment extends StatelessWidget {
                   item.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    height: 1.2,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                    color: color,
-                    shadows: halo,
-                  ),
+                  style: style,
                 ),
                 if (count != null) ...[
                   const SizedBox(width: 4),
-                  Text(
-                    formatCount(count),
-                    style: TextStyle(
-                      fontSize: 11,
-                      height: 1.2,
-                      fontWeight: FontWeight.w600,
-                      color: countColor,
-                      shadows: halo,
-                    ),
-                  ),
+                  Text(formatCount(count), style: countStyle),
                 ],
               ],
             ),

@@ -392,10 +392,12 @@ const double appGlassChromeChromaticAberration = 0.14;
 /// chrome 的饱和度：**1.3**。把折射采进来的背景色稍微提纯，玻璃才「亮」。
 const double appGlassChromeSaturation = 1.3;
 
-/// premium 档的光学参数：**折射**优先。底部胶囊 / 多选底栏 / 圆形上传按钮
-/// 这三处静态 chrome 全用它（见 [AppGlassSurface.preferPremium]）——卡片走
-/// standard，见 [AppGlassSurface.kCardQuality] 里「premium 会抓 capture，
-/// 列表重建时会黑」。（页内筛选条已经改成 BarTint 浅渐变底衬，不再包玻璃。）
+/// premium 档的光学参数：**折射**优先。底部胶囊 / 多选底栏 / 圆形上传按钮，
+/// 以及三处**吸顶悬浮条**（朋友圈吸顶日期条、相册吸顶分类条、相册吸顶日期条）
+/// 全用它（见 [AppGlassSurface.preferPremium]；四处 chrome 的具体接线见
+/// app_chrome_glass_bar.dart 的 AppChromeGlassBar）——卡片走 standard，见
+/// [AppGlassSurface.kCardQuality] 里「premium 会抓 capture，列表重建时会黑」。
+/// 非吸顶的页内筛选条与内容流日期条不包玻璃（渐变 / 透明，见 BarTint）。
 ///
 /// 和 [appGlassSettings] 的差别都在「折射能不能看出来」这件事上：
 /// - thickness [appGlassChromeThickness]：斜面越深，边缘的 displacement 越大；
@@ -509,10 +511,11 @@ const double appGlassScrimAlphaDark = 0.50;
 double appGlassScrimAlpha() =>
     AppColors.isDark ? appGlassScrimAlphaDark : appGlassScrimAlphaLight;
 
-/// **chrome 的 scrim 只有一个来源**：底部胶囊、多选底栏、圆形上传按钮全部取
-/// 这一组数（[appTabBarScrimAlphaLight] / [appTabBarScrimAlphaDark]
-/// 与 [appGlassPremiumScrimAlpha] 都是它的别名；页内筛选条已改成无玻璃的
-/// BarTint 浅渐变底衬，不再走这一套）。
+/// **chrome 的 scrim 只有一个来源**：底部胶囊、多选底栏、圆形上传按钮，以及
+/// 三处吸顶悬浮条全部取这一组数（[appTabBarScrimAlphaLight] /
+/// [appTabBarScrimAlphaDark] 与 [appGlassPremiumScrimAlpha] 都是它的别名，
+/// 吸顶条经 app_chrome_glass_bar.dart 的 appChromeScrimAlpha 取同一份；
+/// 非吸顶的页内筛选条与内容流日期条不包玻璃，不走这一套）。
 ///
 /// 0.55 = 折射可见度 45%：scrim 是压在玻璃**里面**的那层页面底色，它挡住多少
 /// 背景，折射就少多少可弯的内容（[appGlassChromeRefractionVisibility]）。上一轮

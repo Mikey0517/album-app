@@ -7,12 +7,12 @@ import '../core/design/colors.dart';
 /// 相册详情页的筛选条、日期分组头都用它：高度、吸顶行为、底衬色只有一份
 /// 实现，样式由传入的 child 决定（[AppSegmentedBarSurface] / DateHeader）。
 ///
-/// **两个调用点现在都把底衬显式传透明**（[background] = `Colors.transparent`）：
+/// **两个调用点都把底衬显式传透明**（[background] = `Colors.transparent`）：
 /// 吸顶条垫一层页面底色之后，[AppGlassBackdrop] 的渐变（或背景图）到这里就被
-/// 截成一条白杠；而且吸顶时是「不透明页面底色」，内容流里是「背景」，两者切换
-/// 的那一下会跳。底衬于是交给 child 自己画——两条横条的 child
-/// （[AppSegmentedBarSurface] / DateHeader）各带一层**主题色浅渐变**，吸顶版
-/// 与内容流版因此是同一块材质。这也是 [color] 的 alpha = 0 时整层不画的原因。
+/// 截成一条白杠，玻璃也没有内容可采。底衬于是完全交给 child 自己画——两条
+/// 横条的 child（[AppSegmentedBarSurface] / DateHeader）在吸顶形态下是底部
+/// footer 同款**玻璃**（见 AppChromeGlassBar）。这也是 [color] 的 alpha = 0 时
+/// 整层不画的原因。
 class PinnedBarSliver extends StatelessWidget {
   final double height;
   final Widget child;

@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import '../../core/album_view_settings.dart';
 import '../../models/media.dart';
 import '../../widgets/date_header.dart';
-import '../../widgets/pinned_band_blur.dart';
 import '../../widgets/pinned_bar_sliver.dart';
 import 'photo_timeline_scrubber.dart';
 
@@ -202,14 +201,24 @@ List<int> timelineSliverStarts(List<AlbumSection> sections) {
 /// 用的是同一份几何。
 ///
 /// 高度取 [kTimelineDateHeaderExtent]（34 + 4）：与网格之间的留白是它自己的
-/// 下内边距。底衬是主题色浅渐变（见 [DateHeader] / [BarTint]），铺满整条
-/// （含这段留白），页面背景从渐变里隐约透上来。
-Widget timelineDateHeader(AlbumSection section, {Widget? trailing}) {
+/// 下内边距，两版都铺满整条（含这段留白）。
+///
+/// 材质按 [pinned] 分两份（见 [DateHeader]）：吸顶那一份是底部 footer 同款
+/// **玻璃**（[AppChromeGlassBar]），内容流那一份**完全透明**，日期文字直接压
+/// 在页面背景上。两份的几何与文字完全一致，切换时只有材质不同。
+Widget timelineDateHeader(
+  AlbumSection section, {
+  int? count,
+  Widget? trailing,
+  bool pinned = false,
+}) {
   return DateHeader(
     text: section.header ?? '',
     height: kTimelineDateHeaderExtent,
     padding: kTimelineDateHeaderPadding,
+    count: count,
     trailing: trailing,
+    pinned: pinned,
   );
 }
 
@@ -220,24 +229,32 @@ Widget timelineDateHeader(AlbumSection section, {Widget? trailing}) {
 /// 吸顶版与内容流版同高（[kTimelineDateHeaderExtent]）：吸顶那一刻分组头的
 /// 位置本来就正好在吸顶位，两者不会互相挤动，吸顶条下沿也不会漏缝。
 ///
-/// 底衬（两版同一套渐变，见 [DateHeader]）：渐变由 [DateHeader] 自己画，所以
-/// 吸顶 sliver 的底衬显式传**透明**（[PinnedBarSliver] 读到 alpha = 0 就整层
-/// 不画）—— 垫一层 [AppColors.bgPage] 的话，日期条顶上会多出一条白杠，而且
-/// 吸顶版与内容流版就不再是同一块底衬（一个是「渐变叠背景」、一个是「渐变叠
-/// 不透明页面底色」），滚动到阈值那一下会看得见地跳一次。
+/// 底衬（两版都由 [DateHeader] 自己画）：吸顶 sliver 的底衬显式传**透明**
+/// （[PinnedBarSliver] 读到 alpha = 0 就整层不画）—— 垫一层
+/// [AppColors.bgPage] 的话，日期条顶上会多出一条白杠，玻璃也就没有内容可采。
 ///
-/// 两版的差别只剩「要不要兜住滚过的照片」：吸顶版多套一层 [PinnedBandBlur]
-/// （很轻的 blur，见那里的分工说明），内容流版是纯渐变。渐变参数完全一致，
-/// 页面背景与背景图都从它下面隐约透上来。
-Widget timelineDateHeaderSliver({required bool pinned, required Widget child}) {
-  if (!pinned) return SliverToBoxAdapter(child: child);
+/// 两版的差别就是材质：吸顶版是**底部 footer 同款玻璃**（padding 与参数见
+/// [DateHeader.pinned] / [AppChromeGlassBar]），内容流版**完全透明**。
+Widget timelineDateHeaderSliver({
+  required bool pinned,
+  required AlbumSection section,
+  int? count,
+  Widget? trailing,
+}) {
+  if (!pinned) {
+    return SliverToBoxAdapter(
+      child: timelineDateHeader(section, count: count, trailing: trailing),
+    );
+  }
   return PinnedBarSliver(
     height: kTimelineDateHeaderExtent,
     background: Colors.transparent,
-    // 吸顶这一份额外套一层很轻的模糊：它压着照片滚过去，浅渐变只压掉一成纹理。
-    // 非吸顶的那一份不套（下面没有内容经过），两份的**渐变完全相同**，切换时
-    // 底衬不换材质，只是多/少一层对背后内容的模糊。
-    child: PinnedBandBlur(child: child),
+    child: timelineDateHeader(
+      section,
+      count: count,
+      trailing: trailing,
+      pinned: true,
+    ),
   );
 }
 
