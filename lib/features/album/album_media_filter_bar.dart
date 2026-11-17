@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../widgets/app_segmented_bar.dart';
+import '../../widgets/pinned_band_blur.dart';
 import '../../widgets/pinned_bar_sliver.dart';
 import 'album_media_filter.dart';
 
@@ -55,9 +56,13 @@ class AlbumMediaFilterBar extends StatelessWidget {
 /// 吸顶版筛选条：高度、内边距、底衬由 [PinnedBarSliver] +
 /// [AppSegmentedBarSurface] 决定，和详情页完全相同。
 ///
-/// [PinnedBarSliver] 的底衬显式传**透明**：筛选条自己要的是「透明 + 极轻
-/// 模糊」（见 [AppSegmentedBarSurface]），吸顶 sliver 再垫一层页面底色的话，
-/// 那层模糊只会采到这块底色，页面渐变一点也透不上来。
+/// [PinnedBarSliver] 的底衬显式传**透明**：底衬由 [AppSegmentedBarSurface]
+/// 自己画（主题色浅渐变），吸顶 sliver 再垫一层页面底色的话，渐变顶上会多一条
+/// 白杠、背景也透不上来。
+///
+/// 这一条是**吸顶**的（照片会从它下面滚过去），渐变之上再套一层很轻的模糊
+/// （[PinnedBandBlur]）：浅渐变只压掉一成纹理，压不住滚过的照片。封面选择页
+/// 里同一个 [AppSegmentedBarSurface] 挂在 AppBar 上（不吸顶），那里不套模糊。
 class AlbumMediaFilterSliver extends StatelessWidget {
   final AlbumMediaCounts counts;
   final AlbumMediaFilter selected;
@@ -75,11 +80,13 @@ class AlbumMediaFilterSliver extends StatelessWidget {
     return PinnedBarSliver(
       height: kAppSegmentedBarHeight,
       background: Colors.transparent,
-      child: AppSegmentedBarSurface(
-        child: AlbumMediaFilterBar(
-          counts: counts,
-          selected: selected,
-          onChanged: onChanged,
+      child: PinnedBandBlur(
+        child: AppSegmentedBarSurface(
+          child: AlbumMediaFilterBar(
+            counts: counts,
+            selected: selected,
+            onChanged: onChanged,
+          ),
         ),
       ),
     );

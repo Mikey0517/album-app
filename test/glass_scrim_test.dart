@@ -3,16 +3,20 @@ import 'package:album_app/core/design/colors.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
 import 'package:album_app/widgets/app_glass.dart';
+import 'package:album_app/widgets/app_glass_tone.dart';
 import 'package:album_app/widgets/app_tab_bar_contrast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-// 底部胶囊的「读得清」两条：
-//   1. 玻璃内部叠一层**重** scrim（页面底色 76%/82%，见 appTabBarScrimAlpha），
-//      底衬先稳下来，未选中的灰字才有一块不随滚动内容跳的底；
+// 底部胶囊的两件事：
+//   1. 玻璃内部叠一层 scrim（页面底色 0.55 = 折射可见度 45%，见
+//      appTabBarScrimAlpha / appGlassChromeScrimAlpha）——这一轮把可见度从
+//      24%/18% 提到 45%，代价是文字底衬不再恒定；
 //   2. 未选中文字/图标带一圈同色 1px 描边（10%），内容颜色跳到极端时边缘不糊。
-// 这里把「读得清」变成可断言的数：未选中色与 scrim 合成后的底衬对比度 ≥ 4.5，
-// 浅色深色都要成立。四种极端背景（白/黑/红/蓝）逐条见 footer_contrast_test.dart。
+// 这里钉住三件事：scrim 只有一个来源、它的值就是 45% 可见度那一档、
+// 未选中色对典型底衬（页面底色）的**实测**对比度。
+// 四种极端背景（白/黑/红/蓝）逐条实测见 footer_contrast_test.dart——那里
+// 明确记着「45% 可见度下低于 AA 4.5」的代价与两个补偿方案的预估。
 
 const List<AppBottomTabItem> _tabs = [
   AppBottomTabItem(
@@ -73,11 +77,13 @@ void main() {
   for (final dark in <bool>[false, true]) {
     final mode = dark ? '深色' : '浅色';
 
-    testWidgets('$mode：未选中文字与胶囊 scrim 合成后的底衬对比度 ≥ 4.5', (tester) async {
+    testWidgets('$mode：未选中文字与胶囊 scrim 合成后的底衬对比度（实测）', (tester) async {
       AppColors.setDark(dark);
 
-      // 胶囊自己那层 scrim：够厚（背后内容权重 ≤ 30%）但仍不是一块不透明白。
-      expect(appTabBarScrimAlpha(), greaterThanOrEqualTo(0.70));
+      // 胶囊自己那层 scrim：与其余 chrome 同一个来源、同一个数（0.55 = 45% 可见度），
+      // 但仍不是一块不透明白。
+      expect(appTabBarScrimAlpha(), appGlassChromeScrimAlpha());
+      expect(appGlassChromeRefractionVisibility(), closeTo(0.45, 1e-9));
       expect(appTabBarScrimAlpha(), lessThan(1.0),
           reason: '不要做成不透明白底：玻璃还得透出来');
       expect(appTabBarScrimColor().a, closeTo(appTabBarScrimAlpha(), 1e-9));
@@ -91,14 +97,17 @@ void main() {
       final backplate = appTabBarBackplateOver(AppColors.bgPage);
       expect(backplate.a, 1.0, reason: '算对比度前必须是不透明色');
 
+      // 典型底衬（页面底色）上的**实测**对比度：8.69（浅）/ 9.93（深）。
       final ratio = AppAccent.contrastRatio(backplate, appTabBarInactiveColor);
-      expect(ratio, greaterThanOrEqualTo(4.5),
+      expect(ratio, closeTo(dark ? 9.93 : 8.69, 0.02),
           reason: '未选中文字对 scrim 底衬的对比度（$mode）：${ratio.toStringAsFixed(2)}');
 
-      // 四种极端背景里最坏的一条也要过线（逐条断言在 footer_contrast_test.dart）。
-      expect(appTabBarWorstContrast(), greaterThanOrEqualTo(4.5),
+      // 四种极端背景里最坏的一条：2.62（浅/纯黑照片）/ 2.19（深/纯白照片），
+      // **低于** AA 4.5——这是 45% 折射可见度的代价，逐条实测与补偿方案见
+      // footer_contrast_test.dart。
+      expect(appTabBarWorstContrast(), closeTo(dark ? 2.19 : 2.62, 0.02),
           reason: '极端背景下最坏的对比度（$mode）：'
-              '${appTabBarWorstContrast().toStringAsFixed(2)}');
+              '${appTabBarWorstContrast().toStringAsFixed(2)}（AA 目标 4.5）');
 
       // 退化档是不透明 bgSurface，同一个文字色也得过线。
       expect(AppAccent.contrastRatio(AppColors.bgSurface, appTabBarInactiveColor),
@@ -181,7 +190,9 @@ void main() {
 
     final idleText = tester.widget<Text>(find.text('相册'));
     final color = idleText.style!.color!;
-    expect(color, appTabBarInactiveColor);
+    // 未选中墨色按背景亮度自动选（方案 C）；没有采样时按主题回退。
+    expect(color, appGlassToneInk());
+    expect(color, appGlassToneInkForBackdrop(null));
 
     final shadows = idleText.style!.shadows!;
     expect(shadows, hasLength(1));

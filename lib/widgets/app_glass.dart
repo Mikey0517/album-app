@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -366,34 +367,65 @@ LiquidGlassSettings appCardFrostSettings(BuildContext context) {
   );
 }
 
-/// premium 档的光学参数：**折射**优先。现在只有静态 chrome（底部胶囊，见
-/// [AppGlassSurface.preferPremium]）用这一套——卡片走 standard，见
-/// [AppGlassSurface.kCardQuality] 里「premium 会抓 capture，列表重建时会黑」。
+/// chrome 的斜面厚度：**32**（磨砂档是 12）。
+///
+/// 斜面越深，边缘的 displacement 越大——胶囊的两条长边和圆角能把底下的内容
+/// 推歪，这才是「玻璃」而不是「毛玻璃」。上一轮是 28：scrim 0.76~0.82 时背后
+/// 只剩 18%~24% 的权重，再深的斜面也没内容可弯，所以这一轮随 scrim 一起加大。
+const double appGlassChromeThickness = 32;
+
+/// chrome 的模糊半径：**2**（磨砂档是 8）。
+///
+/// 折射优先，模糊只负责抹掉像素噪点。上一轮是 3，配合的是「背后只剩 24%」的
+/// 重 scrim；scrim 让到 0.55 之后那 45% 正是给折射用的，模糊压到最低档。
+const double appGlassChromeBlur = 2;
+
+/// chrome 的折射率：**1.38**（磨砂档是 1.2）。比磨砂高，斜面处的位移才看得出来。
+const double appGlassChromeRefractiveIndex = 1.38;
+
+/// chrome 的色散强度：**0.14**（上一轮 0.10）。
+///
+/// premium 的 dispersion，边缘那一圈彩色分离。折射可见度只有 45% 时，色散是
+/// 「这块是玻璃」最容易被眼睛抓住的那条线索，所以往上加一档。
+const double appGlassChromeChromaticAberration = 0.14;
+
+/// chrome 的饱和度：**1.3**。把折射采进来的背景色稍微提纯，玻璃才「亮」。
+const double appGlassChromeSaturation = 1.3;
+
+/// premium 档的光学参数：**折射**优先。底部胶囊 / 多选底栏 / 圆形上传按钮
+/// 这三处静态 chrome 全用它（见 [AppGlassSurface.preferPremium]）——卡片走
+/// standard，见 [AppGlassSurface.kCardQuality] 里「premium 会抓 capture，
+/// 列表重建时会黑」。（页内筛选条已经改成 BarTint 浅渐变底衬，不再包玻璃。）
 ///
 /// 和 [appGlassSettings] 的差别都在「折射能不能看出来」这件事上：
-/// - thickness 28（磨砂 12）：斜面越深，边缘的 displacement 越大，胶囊的两条
-///   长边和卡片的圆角能把底下的内容推歪，这才是「玻璃」而不是「毛玻璃」；
-/// - refractiveIndex 1.38（磨砂 1.2）、chromaticAberration 0.10：折射率越高
-///   弯折越明显，色散让边缘出现一圈彩色描边（premium 的 dispersion）；
-/// - blur 3（磨砂 8）：模糊压到最低，折射才不会被糊掉——要的是「透」；
+/// - thickness [appGlassChromeThickness]：斜面越深，边缘的 displacement 越大；
+/// - refractiveIndex [appGlassChromeRefractiveIndex]、
+///   chromaticAberration [appGlassChromeChromaticAberration]：折射率越高弯折
+///   越明显，色散让边缘出现一圈彩色描边（premium 的 dispersion）；
+/// - blur [appGlassChromeBlur]：模糊压到最低，折射才不会被糊掉；
 /// - glassColor 比磨砂更淡（[appGlassChromeTintColor]）：premium 表面自己
 ///   已经会采背景色，再叠一层 tint 就回到磨砂；
 /// - lightIntensity 1.0 + rimShade/rimLight：一圈更亮的高光边。
+///
+/// **这一组数与 [appGlassChromeScrimAlphaLight] = 0.55 是一对**：scrim 让到
+/// 55% 之后，背后只剩 45% 的权重给折射，斜面/色散不加大、模糊不压低，那 45%
+/// 就是一块「更亮的灰板」而不是折射。上一轮的组合是 28 / 0.10 / blur 3 +
+/// scrim 0.76~0.82（折射可见度 24%~18%，几乎看不出来），回退时两个数要一起改。
 ///
 /// 只在 [appGlassPremiumAvailable] 为真时使用；不可用时整块退回
 /// [appGlassSettings]（磨砂）那一套。
 LiquidGlassSettings appGlassChromeSettings(BuildContext context) {
   final dark = AppColors.isDark;
   return LiquidGlassSettings(
-    thickness: 28,
-    blur: 3,
+    thickness: appGlassChromeThickness,
+    blur: appGlassChromeBlur,
     glassColor: appGlassChromeTintColor,
     lightAngle: 2.356,
     lightIntensity: 1.0,
     ambientStrength: dark ? 0.10 : 0.25,
-    refractiveIndex: 1.38,
-    saturation: 1.3,
-    chromaticAberration: 0.10,
+    refractiveIndex: appGlassChromeRefractiveIndex,
+    saturation: appGlassChromeSaturation,
+    chromaticAberration: appGlassChromeChromaticAberration,
     frost: 0.0,
     rimShade: dark ? 0.28 : 0.34,
     rimLight: dark ? 0.34 : 0.42,
@@ -477,25 +509,55 @@ const double appGlassScrimAlphaDark = 0.50;
 double appGlassScrimAlpha() =>
     AppColors.isDark ? appGlassScrimAlphaDark : appGlassScrimAlphaLight;
 
-/// premium 胶囊内部那层 scrim 的不透明度：浅色 20%、深色 24%。
+/// **chrome 的 scrim 只有一个来源**：底部胶囊、多选底栏、圆形上传按钮全部取
+/// 这一组数（[appTabBarScrimAlphaLight] / [appTabBarScrimAlphaDark]
+/// 与 [appGlassPremiumScrimAlpha] 都是它的别名；页内筛选条已改成无玻璃的
+/// BarTint 浅渐变底衬，不再走这一套）。
 ///
-/// 磨砂档要 42%/50% 才托得住灰字，是因为标准 shader 只做「模糊 + tint」，
-/// 底衬随照片每帧在跳；premium 会真的把背景折射进来，压一层 42% 的页面底色
-/// 就把折射糊成一块灰板了。这里只留薄薄一层（页面底色的 20%），把文字从「照片
-/// 上」抬到「有一层极淡冷调的玻璃上」，对比度仍然够（见测试里的 4.5 断言）。
-const double appGlassPremiumScrimAlphaLight = 0.20;
-const double appGlassPremiumScrimAlphaDark = 0.24;
+/// 0.55 = 折射可见度 45%：scrim 是压在玻璃**里面**的那层页面底色，它挡住多少
+/// 背景，折射就少多少可弯的内容（[appGlassChromeRefractionVisibility]）。上一轮
+/// 胶囊用 0.76/0.82（可见度 24%/18%），折射在真机上几乎看不出来；这一轮按需求
+/// 把可见度提到 45%，镜面参数同步加大（[appGlassChromeThickness] 32 /
+/// [appGlassChromeChromaticAberration] 0.14 / [appGlassChromeBlur] 2）。
+///
+/// **回退**：整组数只在这两个常量里。改回 0.76/0.82 就是上一轮的胶囊观感；
+/// 多选底栏 / 上传按钮上一轮是 0.20/0.24。
+///
+/// **代价（实测，见 test/footer_contrast_test.dart）**：未选中文字对四种极端
+/// 背景的最坏对比度从 4.89:1 / 5.82:1（浅/深）掉到 **2.62:1 / 2.19:1**，低于
+/// WCAG AA 的 4.5:1；底衬亮度也重新跟着照片跳（白/黑照片的底衬亮度差
+/// 0.17 → 0.72）。甲（同色 halo）/ 乙（压深未选中色）两个补偿方案的预估数值在
+/// 那份测试里钉着，等产品定，这里只负责把数摆出来。
+const double appGlassChromeScrimAlphaLight = 0.55;
+const double appGlassChromeScrimAlphaDark = 0.55;
 
-/// premium 胶囊当前明暗模式的 scrim 不透明度。
+/// chrome 当前明暗模式的 scrim 不透明度。
+double appGlassChromeScrimAlpha() => AppColors.isDark
+    ? appGlassChromeScrimAlphaDark
+    : appGlassChromeScrimAlphaLight;
+
+/// chrome 的**折射可见度** = 1 − scrim（目标 0.45）。
+///
+/// scrim 挡住多少背景，premium 的斜面就有多少内容可弯。0.45 是这一轮的需求值：
+/// 再高一点（scrim 0.5）底衬更稳但折射更淡，再低一点文字就更难读——两个方向
+/// 都有代价，取舍见 [appGlassChromeScrimAlphaLight] 的代价说明。
+double appGlassChromeRefractionVisibility() => 1 - appGlassChromeScrimAlpha();
+
+/// premium 表面（= 三处 chrome）的 scrim 不透明度：与
+/// [appGlassChromeScrimAlphaLight] / [appGlassChromeScrimAlphaDark] 同一组数。
+const double appGlassPremiumScrimAlphaLight = appGlassChromeScrimAlphaLight;
+const double appGlassPremiumScrimAlphaDark = appGlassChromeScrimAlphaDark;
+
+/// premium 表面当前明暗模式的 scrim 不透明度。
 double appGlassPremiumScrimAlpha() => AppColors.isDark
     ? appGlassPremiumScrimAlphaDark
     : appGlassPremiumScrimAlphaLight;
 
-/// premium 胶囊的 scrim 颜色：页面底色 + [appGlassPremiumScrimAlpha]。
+/// premium 表面的 scrim 颜色：页面底色 + [appGlassPremiumScrimAlpha]。
 Color appGlassPremiumScrimColor() =>
     AppColors.bgPage.withValues(alpha: appGlassPremiumScrimAlpha());
 
-/// premium 胶囊的「稳定底衬」：薄 scrim 叠在「chrome tint 叠页面底色」上，
+/// premium 表面的「稳定底衬」：scrim 叠在「chrome tint 叠页面底色」上，
 /// 给文字对比度一个可算的底。公式与 [appGlassScrimBackplate] 同一条。
 Color appGlassPremiumScrimBackplate() => AppAccent.compositeOver(
       appGlassPremiumScrimColor(),
@@ -511,8 +573,8 @@ Color appGlassScrimColor() =>
 /// 这就是文字实际落上去的那块颜色（页面底色是玻璃背后最典型的底），
 /// 拿它算对比度才有意义；半透明 scrim 单独算不出对比度。
 ///
-/// 只用在这条「磨砂回退」路径上：premium 胶囊走
-/// [appGlassPremiumScrimBackplate]（薄 scrim）。tint 压低之后这条公式的值
+/// 只用在这条「磨砂回退」路径上：premium 表面走
+/// [appGlassPremiumScrimBackplate]（55% scrim）。tint 压低之后这条公式的值
 /// 更接近页面底色，同一套未选中灰字的对比度反而更高。
 Color appGlassScrimBackplate() => AppAccent.compositeOver(
       appGlassScrimColor(),
@@ -565,8 +627,8 @@ Color appGlassCardBackplate({bool premium = true}) => AppAccent.compositeOver(
 ///
 /// **三档的实现差别**：
 /// - premium（[preferPremium] 为真且 [appGlassPremiumAvailable] 为真，只有
-///   静态 chrome 走）：[appGlassChromeSettings] 的深斜面参数 + 薄 scrim
-///   （[appGlassPremiumScrimAlpha]）；
+///   静态 chrome 走）：[appGlassChromeSettings] 的深斜面参数 + 55% scrim
+///   （[appGlassPremiumScrimAlpha] = 折射可见度 45%）；
 /// - standard（卡片 / 显式要 standard 的表面）：**不抓 capture**；卡片 /
 ///   列表（[depth] 为真）走 [appCardFrostSettings]（白雾磨砂：blur 8、
 ///   tint 84%/86%、折射归零），其余走 [appGlassSettings]（轻磨砂）；
@@ -683,11 +745,11 @@ class AppGlassSurface extends StatelessWidget {
   /// 卡片这种底下基本是页面底色的表面不需要——多叠一层只会把玻璃压灰。
   ///
   /// 不透明度跟着档位走：磨砂回退 42%/50%（[appGlassScrimAlpha]），premium
-  /// 20%/24%（[appGlassPremiumScrimAlpha]）——折射要被看见，只留薄薄一层。
+  /// 55%（[appGlassPremiumScrimAlpha]，= 折射可见度 45%）——三处 chrome 同一档。
   final bool scrim;
 
   /// scrim 的颜色；null 时按档位取 [appGlassScrimColor]（42%/50%）或
-  /// [appGlassPremiumScrimColor]（20%/24%）。
+  /// [appGlassPremiumScrimColor]（55%）。
   final Color? scrimColor;
 
   /// 下拉刷新期间是否临时换成**同色不透明表面**（见 [AppGlassRefreshHold]）。
@@ -798,7 +860,7 @@ class AppGlassSurface extends StatelessWidget {
       useOwnLayer: useOwnLayer,
       settings: settings ??
           (premiumActive
-              // 静态 chrome（底部胶囊 / 筛选条 / 多选底栏 / 上传按钮）：折射。
+              // 静态 chrome（底部胶囊 / 多选底栏 / 上传按钮）：折射。
               ? appGlassChromeSettings(context)
               // 卡片 / 列表项：白雾磨砂（[AppGlassSurface.depth] 为真）。
               : depth
@@ -1005,6 +1067,154 @@ int appBackdropDecodeWidth(BuildContext context) {
 /// [RepaintBoundary]。与玻璃卡片共存时不额外开模糊层——模糊由卡片自己的
 /// shader 负责，这里再开一层就是白烧 GPU。
 /// [GlassQuality.minimal] 下照样画——背景是普通绘制，跟玻璃档位无关。
+/// 背景代表色：最近一次「这一页背景长什么样」的采样结果。
+///
+/// **谁写**：[AppGlassBackdrop] 里的采样器（背景变更 / 切明暗时各更新一次）。
+/// **谁读**：玻璃 chrome 的墨色选择（app_glass_tone.dart 的
+/// [appGlassToneInkForBackdrop]）——底衬亮就用深墨，暗就用白。
+/// **为什么是 ValueNotifier**：换背景只该重建 chrome 上那几段文字/图标，
+/// 不该重建整页；null 表示还没采到（此时按主题亮度回退）。
+class AppBackdropSample {
+  AppBackdropSample._();
+
+  /// 背景代表色；null = 还没采到 / 采样失败。
+  static final ValueNotifier<Color?> color = ValueNotifier<Color?>(null);
+
+  /// 测试用：直接注入一次采样结果（不跑解码、不依赖真机渲染）。
+  @visibleForTesting
+  static void report(Color? value) => color.value = value;
+
+  /// 测试用：恢复成「没有采样」。
+  @visibleForTesting
+  static void reset() => color.value = null;
+}
+
+/// 采样 [AppGlassBackdrop] 真正画出来的那层底子，把「代表色」写进
+/// [AppBackdropSample]。
+///
+/// **不每帧截屏，也不 toImageSync**：
+/// - 纯色 → 就是那个颜色；
+/// - 双色渐变 → 两个色标的平均；
+/// - 默认渐变 → 页面底色（主题色只占 6%~10% 的透明度，代表色基本就是底）；
+/// - 图片 → **背景变更时**解码一张 24px 宽的缩略图求均值，再叠上那层可读性
+///   遮罩（instantiateImageCodec(targetWidth: 24)，一次一两毫秒）。
+///
+/// 加起来的开销只落在「用户换背景」「切明暗」这两个瞬间，滚动/翻页/掉帧都
+/// 碰不到它。采样失败（文件被删、不是图片）就当没有采样，调用点按主题回退。
+class _BackdropSampleScope extends StatefulWidget {
+  const _BackdropSampleScope({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_BackdropSampleScope> createState() => _BackdropSampleScopeState();
+}
+
+class _BackdropSampleScopeState extends State<_BackdropSampleScope> {
+  /// 上一次采样的签名（spec + 明暗）：同一个签名不重复解码。
+  String? _signature;
+
+  /// 异步采样的序号：解码回来时已经不是最新一次就丢掉。
+  int _token = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    PageBackdropController.spec.addListener(_onSpecChanged);
+    _scheduleSync();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 切明暗会走到这里：遮罩色与默认渐变的代表色都跟着变。
+    _scheduleSync();
+  }
+
+  @override
+  void dispose() {
+    PageBackdropController.spec.removeListener(_onSpecChanged);
+    super.dispose();
+  }
+
+  // 换背景也在下一帧再采：不在 pickAndSave 的通知链里跑任何 I/O，
+  // 选图那条路（复制文件 + 落盘）就不会被采样拖到。
+  void _onSpecChanged() => _scheduleSync();
+
+  /// 首帧之后再采：build 期间改 notifier 会撞上「build 中标记重建」。
+  void _scheduleSync() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _sync();
+    });
+  }
+
+  void _sync() {
+    final spec = PageBackdropController.spec.value;
+    final signature = spec.encode() + (AppColors.isDark ? '|dark' : '|light');
+    if (signature == _signature) return;
+    _signature = signature;
+    final token = ++_token;
+
+    if (!spec.isImage) {
+      AppBackdropSample.report(_specColor(spec));
+      return;
+    }
+    final file = PageBackdropController.imageFileOf(spec);
+    if (file == null) {
+      AppBackdropSample.report(
+          _specColor(const PageBackdropSpec.defaultGradient()));
+      return;
+    }
+    unawaited(_averageOf(file).then((average) {
+      if (!mounted || token != _token) return;
+      AppBackdropSample.report(average == null
+          ? _specColor(const PageBackdropSpec.defaultGradient())
+          : AppAccent.compositeOver(appBackdropMaskColor(), average));
+    }));
+  }
+
+  /// spec 的代表色（非图片形态）。
+  Color _specColor(PageBackdropSpec spec) => switch (spec.type) {
+        PageBackdropType.color => spec.color ?? AppColors.bgPage,
+        PageBackdropType.gradient => Color.lerp(
+            spec.gradientStart ?? AppColors.bgPage,
+            spec.gradientEnd ?? AppColors.bgPage,
+            0.5,
+          )!,
+        _ => AppColors.bgPage,
+      };
+
+  /// 图片的平均色：解码成 24px 宽的缩略图求均值。
+  Future<Color?> _averageOf(File file) async {
+    try {
+      final bytes = await file.readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes, targetWidth: 24);
+      final frame = await codec.getNextFrame();
+      final data =
+          await frame.image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      frame.image.dispose();
+      codec.dispose();
+      if (data == null) return null;
+      final pixels = data.buffer.asUint8List();
+      var r = 0, g = 0, b = 0, count = 0;
+      for (var i = 0; i + 3 < pixels.length; i += 4) {
+        r += pixels[i];
+        g += pixels[i + 1];
+        b += pixels[i + 2];
+        count++;
+      }
+      if (count == 0) return null;
+      return Color.fromARGB(255, r ~/ count, g ~/ count, b ~/ count);
+    } catch (_) {
+      // 文件被删 / 不是图片：当采样失败，调用点回退主题。
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 class AppGlassBackdrop extends StatelessWidget {
   const AppGlassBackdrop({super.key, required this.child});
 
@@ -1038,18 +1248,28 @@ class AppGlassBackdrop extends StatelessWidget {
   Widget build(BuildContext context) {
     return Stack(
       children: [
+        // 背景两层交给采样器包着：它只读不画，采到的是**背景本身**（不含页面
+        // 内容），供玻璃 chrome 决定文字/图标的明暗（见 [AppBackdropSample]）。
         Positioned.fill(
-          child: DecoratedBox(
-            key: baseKey,
-            decoration: BoxDecoration(color: AppColors.bgPage),
-          ),
-        ),
-        // 四选一：默认渐变 / 纯色 / 双色渐变 / 图片。图片副本丢了（含文件被删）
-        // 原样回退到默认渐变。
-        Positioned.fill(
-          child: ValueListenableBuilder<PageBackdropSpec>(
-            valueListenable: PageBackdropController.spec,
-            builder: (context, spec, _) => _specLayers(context, spec),
+          child: _BackdropSampleScope(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: DecoratedBox(
+                    key: baseKey,
+                    decoration: BoxDecoration(color: AppColors.bgPage),
+                  ),
+                ),
+                // 四选一：默认渐变 / 纯色 / 双色渐变 / 图片。图片副本丢了（含
+                // 文件被删）原样回退到默认渐变。
+                Positioned.fill(
+                  child: ValueListenableBuilder<PageBackdropSpec>(
+                    valueListenable: PageBackdropController.spec,
+                    builder: (context, spec, _) => _specLayers(context, spec),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         Positioned.fill(child: child),

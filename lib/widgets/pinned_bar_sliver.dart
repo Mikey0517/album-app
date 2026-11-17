@@ -9,10 +9,10 @@ import '../core/design/colors.dart';
 ///
 /// **两个调用点现在都把底衬显式传透明**（[background] = `Colors.transparent`）：
 /// 吸顶条垫一层页面底色之后，[AppGlassBackdrop] 的渐变（或背景图）到这里就被
-/// 截成一条白杠。透明之后滚动的照片会从字后面透出，所以两者各自在 child 里带
-/// 一层极轻模糊（[AppSegmentedBarSurface] / [DateHeaderBlur]）—— 模糊必须能采到
-/// 这条带子下面真正的滚动内容，这一层就不能再垫不透明色（垫了模糊只采到那块
-/// 底色，等于什么都没做），这也正是 [color] 的 alpha = 0 时整层不画的原因。
+/// 截成一条白杠；而且吸顶时是「不透明页面底色」，内容流里是「背景」，两者切换
+/// 的那一下会跳。底衬于是交给 child 自己画——两条横条的 child
+/// （[AppSegmentedBarSurface] / DateHeader）各带一层**主题色浅渐变**，吸顶版
+/// 与内容流版因此是同一块材质。这也是 [color] 的 alpha = 0 时整层不画的原因。
 class PinnedBarSliver extends StatelessWidget {
   final double height;
   final Widget child;

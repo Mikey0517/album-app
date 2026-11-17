@@ -10,6 +10,7 @@ import 'package:album_app/models/album.dart';
 import 'package:album_app/models/media.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
 import 'package:album_app/widgets/app_glass.dart';
+import 'package:album_app/widgets/app_glass_tone.dart';
 import 'package:album_app/widgets/app_segmented_bar.dart';
 import 'package:album_app/widgets/selection_footer.dart';
 import 'package:flutter/material.dart';
@@ -21,8 +22,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 // 三处「换玻璃」的控件：多选底栏、上传按钮、分类条。
 //
 // 它们和底部 footer 是**同一块材质**：同一个 [AppGlassSurface]、同一套档位与
-// 光学参数（premium，28 / 1.38 / 0.10 / 3）、同样的 scrim 分支；几何上都是
-// 圆角 = 高度/2（上传按钮是直径 48 的圆，其余是 pill）。这里守四件事：
+// 光学参数（premium，32 / 1.38 / 0.14 / 2）、同样的 scrim 分支（55% = 折射
+// 可见度 45%）；几何上都是圆角 = 高度/2（上传按钮是直径 48 的圆，其余是 pill）。
+// 这里守四件事：
 //   1. 多选底栏是浮动胶囊：左右 18、底部离安全区 8、四个操作等宽；
 //   2. 上传按钮是直径 48 的圆钮、只放「+」图标，且整枚让开右侧 30 宽的时间轴
 //      轨道（断言的是它的外接矩形与轨道不相交）；
@@ -85,10 +87,16 @@ void _expectChromeSettings(WidgetTester tester) {
   final container =
       tester.widget<GlassContainer>(find.byType(GlassContainer).first);
   final settings = container.settings!;
-  expect(settings.thickness, 28, reason: 'chrome 仍是 premium 的深斜面');
-  expect(settings.blur, 3, reason: 'chrome 仍是折射优先的低模糊');
-  expect(settings.refractiveIndex, 1.38);
-  expect(settings.chromaticAberration, 0.10);
+  // 按常量断言（不写死数字）：折射参数与 scrim 是一对，改一处必须改另一处。
+  expect(settings.thickness, appGlassChromeThickness,
+      reason: 'chrome 仍是 premium 的深斜面（28 → 32，配合 45% 折射可见度）');
+  expect(settings.thickness, greaterThan(28), reason: '斜面只许更深，不许变浅');
+  expect(settings.blur, appGlassChromeBlur, reason: 'chrome 的模糊压到 2：折射优先');
+  expect(settings.blur, lessThan(3));
+  expect(settings.refractiveIndex, appGlassChromeRefractiveIndex);
+  expect(settings.chromaticAberration, appGlassChromeChromaticAberration,
+      reason: '0.10 → 0.14：可见度只有 45% 时色散要更明显才看得见');
+  expect(settings.chromaticAberration, greaterThanOrEqualTo(0.14));
   expect(settings.glassColor, appGlassChromeTintColor);
   expect(settings.blur, lessThan(appCardFrostBlur),
       reason: '卡片的白雾模糊不许漏到 chrome 上');
@@ -249,8 +257,8 @@ void main() {
       );
       expect(
         tester.widget<Icon>(find.byIcon(Icons.download_outlined)).color,
-        appTabBarInactiveColor,
-        reason: '普通操作与底部 tab 的未选中态同一档灰',
+        appGlassToneInk(),
+        reason: '普通操作用「按背景亮度自动选」的墨色（方案 C），不是固定灰',
       );
 
       // 点得动（无涟漪，但命中区还在）。
@@ -360,7 +368,7 @@ void main() {
     });
   });
 
-  group('分类条：整条一枚胶囊玻璃', () {
+  group('分类条：整条一枚「无玻璃」的内容带', () {
     AlbumMediaCounts counts() => AlbumMediaCounts.from([
           _media(1),
           _media(2),
@@ -403,24 +411,24 @@ void main() {
 
       final capsule = find.byKey(AppSegmentedBar.surfaceKey);
       expect(capsule, findsOneWidget);
-      final surface = tester.widget<AppGlassSurface>(capsule);
-      expect(surface.requestedQuality, AppBottomTabBar.preferredQuality);
-      expect(surface.preferPremium, isTrue);
-      expect(surface.radius, kAppSegmentedBarPillRadius);
+      // 这条栏**不再包玻璃**：premium 的 capture 在下拉刷新那几帧会画出一条
+      // 近黑带子，底子改成外面那层主题色浅渐变（见 AppSegmentedBarSurface /
+      // BarTint）。所以这里不再有 chrome 光学参数，只守几何 + 选中只换文字颜色。
+      expect(find.byType(GlassContainer), findsNothing,
+          reason: '分类条已经没有玻璃表面（capture 黑条根因）');
+      expect(find.byType(AppGlassSurface), findsNothing);
 
       final pill = tester.getRect(capsule);
-      // 吸顶条 46 高、上下各 7：胶囊正好 32，圆角 = 高度/2。
+      // 吸顶条 46 高、上下各 7：内容带正好 32。
       expect(pill.height, kAppSegmentedBarPillHeight);
       expect(pill.height, kAppSegmentedBarHeight - 14);
-      expect(pill.height / 2, kAppSegmentedBarPillRadius);
       // 整条一枚：宽度铺满吸顶条内部（左右各 12）。
       expect(pill.width, 390 - 24);
-      // 玻璃也只有一块：不是每一段各一块。
-      expect(find.byType(GlassContainer), findsOneWidget);
-      _expectChromeSettings(tester);
 
-      // 选中段 = 主题色文字，未选中 = 与底部 tab 同一档的中性灰。
-      expect(tester.widget<Text>(find.text('全部')).style!.color, AppColors.primary);
+      // 选中段 = 主题色局部加深（[segmentedSelectedInk]），未选中 = 与底部 tab
+      // 同一档的中性灰。
+      expect(tester.widget<Text>(find.text('全部')).style!.color,
+          segmentedSelectedInk);
       expect(
         tester.widget<Text>(find.text('照片')).style!.color,
         appTabBarInactiveColor,
@@ -449,7 +457,8 @@ void main() {
       await tester.tap(find.text('照片'));
       await tester.pumpAndSettle();
       expect(selected, AlbumMediaFilter.photos);
-      expect(tester.widget<Text>(find.text('照片')).style!.color, AppColors.primary);
+      expect(tester.widget<Text>(find.text('照片')).style!.color,
+          segmentedSelectedInk);
       expect(
         tester.widget<Text>(find.text('全部')).style!.color,
         appTabBarInactiveColor,
@@ -458,43 +467,36 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('minimal 档：整条退成同形状的不透明胶囊', (tester) async {
-      _phone(tester);
-      await tester.pumpWidget(
-        _host(
-          Scaffold(
-            body: Align(
-              alignment: Alignment.topCenter,
-              child: bar(AlbumMediaFilter.all, (_) {}),
+    testWidgets('minimal / 无档位：本来就没有玻璃，几何一模一样', (tester) async {
+      for (final quality in <GlassQuality?>[GlassQuality.minimal, null]) {
+        _phone(tester);
+        await tester.pumpWidget(
+          _host(
+            Scaffold(
+              body: Align(
+                alignment: Alignment.topCenter,
+                child: bar(AlbumMediaFilter.all, (_) {}),
+              ),
             ),
+            quality: quality,
           ),
-          quality: GlassQuality.minimal,
-        ),
-      );
-      await tester.pump();
+        );
+        await tester.pump();
 
-      final capsule = find.byKey(AppSegmentedBar.surfaceKey);
-      expect(find.byType(GlassContainer), findsNothing);
-      // 胶囊自己不画玻璃。吸顶底衬那层「极轻模糊」是另一回事：它和档位无关，
-      // 不是玻璃表面（见 AppSegmentedBarSurface），所以只限定在胶囊里查。
-      expect(
-        find.descendant(of: capsule, matching: find.byType(BackdropFilter)),
-        findsNothing,
-      );
-      expect(tester.getRect(capsule).height, kAppSegmentedBarPillHeight);
-
-      final decoration = _firstDecorationUnder(tester, capsule);
-      expect(decoration.color, AppColors.bgSurface);
-      expect(
-        decoration.borderRadius,
-        BorderRadius.circular(kAppSegmentedBarPillRadius),
-      );
-      final border = decoration.border! as Border;
-      expect(border.top.width, 1);
-      expect(border.top.color, AppColors.divider);
-      // 四段文字与数量都还在（没有白屏）。
-      for (final label in ['全部', '照片', '动态照片', '视频']) {
-        expect(find.text(label), findsOneWidget);
+        final capsule = find.byKey(AppSegmentedBar.surfaceKey);
+        // 没有玻璃 = 没有可退化的材质：任何档位都是同一块「浅渐变 + 纯文字」。
+        expect(find.byType(GlassContainer), findsNothing);
+        expect(find.byType(AppGlassSurface), findsNothing);
+        expect(
+          find.descendant(of: capsule, matching: find.byType(BackdropFilter)),
+          findsNothing,
+        );
+        expect(tester.getRect(capsule).height, kAppSegmentedBarPillHeight);
+        // 四段文字与数量都还在（没有白屏）。
+        for (final label in ['全部', '照片', '动态照片', '视频']) {
+          expect(find.text(label), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
       }
     });
   });

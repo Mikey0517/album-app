@@ -4,6 +4,7 @@ import '../core/design/colors.dart';
 import '../core/design/text_styles.dart';
 import 'app_bottom_tab_bar.dart';
 import 'app_glass.dart';
+import 'app_glass_tone.dart';
 
 /// 多选底栏上的一个操作：图标 + 文字。
 class SelectionFooterAction {
@@ -75,35 +76,40 @@ class SelectionFooter extends StatelessWidget {
   Widget build(BuildContext context) {
     final safeBottom =
         safeArea ? MediaQuery.viewPaddingOf(context).bottom : 0.0;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        sideInset,
-        0,
-        sideInset,
-        bottomGap + safeBottom,
-      ),
-      child: AppGlassSurface(
-        radius: radius,
-        requestedQuality: preferredQuality,
-        // 静态 chrome：优先 premium（折射），拿不到时 AppGlassSurface 自己
-        // 退回磨砂档 + 重 scrim，这里不用分支。
-        preferPremium: true,
-        useOwnLayer: usesOwnLayer,
-        // 玻璃后面是滚动的照片：内部叠一层页面底色 scrim，文字才有不随内容
-        // 跳的底衬。薄厚跟着档位走（premium 20%/24%，磨砂回退 42%/50%）。
-        scrim: true,
-        child: SizedBox(
-          height: barHeight,
-          child: Row(
-            children: [
-              for (var index = 0; index < actions.length; index++)
-                Expanded(
-                  child: _ActionButton(
-                    key: actionKey(index),
-                    action: actions[index],
+    // 普通操作的墨色跟底部胶囊同一套规则：按背景合成亮度自动换深/浅（方案 C）。
+    return appGlassToneBuilder(
+      (context, ink) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          sideInset,
+          0,
+          sideInset,
+          bottomGap + safeBottom,
+        ),
+        child: AppGlassSurface(
+          radius: radius,
+          requestedQuality: preferredQuality,
+          // 静态 chrome：优先 premium（折射），拿不到时 AppGlassSurface 自己
+          // 退回磨砂档 + 重 scrim，这里不用分支。
+          preferPremium: true,
+          useOwnLayer: usesOwnLayer,
+          // 玻璃后面是滚动的照片：内部叠一层页面底色 scrim，文字才有底衬。
+          // 薄厚跟着档位走（premium 55%，与底部胶囊 / 上传按钮同一组数 =
+          // 折射可见度 45%；磨砂回退 42%/50%）。
+          scrim: true,
+          child: SizedBox(
+            height: barHeight,
+            child: Row(
+              children: [
+                for (var index = 0; index < actions.length; index++)
+                  Expanded(
+                    child: _ActionButton(
+                      key: actionKey(index),
+                      action: actions[index],
+                      ink: ink,
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -114,7 +120,11 @@ class SelectionFooter extends StatelessWidget {
 class _ActionButton extends StatelessWidget {
   final SelectionFooterAction action;
 
-  const _ActionButton({super.key, required this.action});
+  /// 普通操作的墨色（由 [appGlassToneBuilder] 按背景亮度挑好）；危险动作用
+  /// [AppColors.danger]、禁用态用 [AppColors.textTertiary]，都不跟背景换。
+  final Color ink;
+
+  const _ActionButton({super.key, required this.action, required this.ink});
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +133,7 @@ class _ActionButton extends StatelessWidget {
         ? AppColors.textTertiary
         : action.danger
             ? AppColors.danger
-            : appTabBarInactiveColor;
+            : ink;
     // 同色极轻描边（10%）：内容颜色跳到极端时字边缘也不会糊进玻璃里。
     final halo = enabled ? appTabBarHalo(color) : null;
     return Semantics(

@@ -169,7 +169,7 @@ void main() {
       final container = _glass(tester);
       expect(container.quality, GlassQuality.premium,
           reason: '掉帧不许改档位');
-      expect(container.settings!.thickness, 28,
+      expect(container.settings!.thickness, appGlassChromeThickness,
           reason: '仍是 premium 那一套光学参数（不是磨砂的 12）');
       expect(AppGlassRefreshHold.isActive, isFalse);
     });

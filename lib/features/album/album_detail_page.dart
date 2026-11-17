@@ -26,6 +26,7 @@ import '../../models/media.dart';
 import '../../widgets/album_thumb.dart';
 import '../../widgets/app_bottom_tab_bar.dart';
 import '../../widgets/app_glass.dart';
+import '../../widgets/app_glass_tone.dart';
 import '../../widgets/app_segmented_bar.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
@@ -1447,10 +1448,19 @@ class _AlbumUploadFabState extends State<AlbumUploadFab> {
                 behavior: HitTestBehavior.opaque,
                 onTap: widget.onPressed,
                 child: Center(
-                  child: Icon(
-                    Icons.add,
-                    size: AlbumUploadFab.iconSize,
-                    color: AppColors.primary,
+                  // 「+」的明暗也跟背景走（方案 C）：主题色在底衬上够 3:1 就
+                  // 保留主题色（正常背景仍是紫的），压在极端照片上就换成墨色
+                  // ——见 app_glass_tone.dart 的 appGlassReadableAccent。
+                  child: ValueListenableBuilder<Color?>(
+                    valueListenable: AppBackdropSample.color,
+                    builder: (context, backdrop, _) => Icon(
+                      Icons.add,
+                      size: AlbumUploadFab.iconSize,
+                      color: appGlassReadableAccent(
+                        AppColors.primary,
+                        backdrop: backdrop,
+                      ),
+                    ),
                   ),
                 ),
               ),

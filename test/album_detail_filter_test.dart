@@ -1,4 +1,5 @@
 import 'package:album_app/api/album_api.dart';
+import 'package:album_app/core/design/bar_tint.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/features/album/album_detail_page.dart';
 import 'package:album_app/features/album/album_media_filter.dart';
@@ -699,7 +700,8 @@ void main() {
     expect(scrubber.height, closeTo(844 - filter.bottom, 0.5));
   });
 
-  testWidgets('吸顶筛选条底衬透明：页面背景透上来，靠极轻模糊压住内容', (tester) async {
+  testWidgets('吸顶筛选条底衬：主题色浅渐变叠在页面上，页面背景仍透得上来',
+      (tester) async {
     await _pump(tester, items: _many());
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
     await tester.pumpAndSettle();
@@ -707,16 +709,19 @@ void main() {
     final surface = tester.widget<AppSegmentedBarSurface>(
       find.byType(AppSegmentedBarSurface),
     );
+    // 底衬 = 主题色浅渐变（与日期条同一份，见 BarTint）：不是实底，也不是模糊。
+    expect(surface.gradient.colors.first.a, lessThanOrEqualTo(BarTint.maxAlpha),
+        reason: '底衬透明度全给了渐变：最大 alpha 不许超过上限');
     expect(
-      (surface.color.a * 255.0).round(),
-      0,
-      reason: '底衬透明：AppGlassBackdrop 的渐变要原样穿过这一条',
+      find.descendant(
+        of: find.byType(AppSegmentedBarSurface),
+        matching: find.byType(BackdropFilter),
+      ),
+      findsNothing,
+      reason: '分类条已经不用模糊了（用户要的是渐变）',
     );
-    expect(surface.blur, kAppSegmentedBarBlur,
-        reason: '透明靠一层极轻模糊兜住滚动内容的纹理');
 
-    // 吸顶 sliver 自己不能再垫一层页面底色：垫了那层模糊就只采到这层色，
-    // 页面背景一点也透不上来（等于没改）。
+    // 吸顶 sliver 自己不垫页面底色：垫了就把渐变截成一条白杠。
     final pinnedBar =
         tester.widget<PinnedBarSliver>(find.byType(PinnedBarSliver).first);
     expect((pinnedBar.color.a * 255.0).round(), 0);

@@ -9,8 +9,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'
     show GlassContainer, GlassQuality;
 
-// 底部胶囊要「透亮 + 折射」：premium 档 + 自建渲染层 + **重 scrim**（76%/82%，
-// 拉平复杂背景的底衬，见 test/footer_contrast_test.dart）。
+// 底部胶囊要「透亮 + 折射」：premium 档 + 自建渲染层 + **45% 折射可见度**的
+// scrim（0.55，四处 chrome 同一组数，见 test/footer_contrast_test.dart）。
 // premium 拿不到时（非 Impeller / 自适应降档 / minimal / 玻璃未初始化）
 // 必须整块退回原来的磨砂实现——参数一起换回来，不留半套 premium 参数，
 // 也不能白屏或抛异常。这里把两条分支都钉死。
@@ -157,21 +157,28 @@ void main() {
         tester.element(find.byType(AppBottomTabBar)),
       );
       expect(settings.thickness, fallback.thickness);
-      expect(settings.thickness, greaterThan(20),
+      // 断言的是常量（不写死数字）：折射参数与 scrim 是一对，一起改才不会
+      // 出现「scrim 让到 55% 但斜面还是 28」这种「可见度有了、折射还是看不见」。
+      expect(settings.thickness, appGlassChromeThickness,
           reason: '斜面要深，边缘才有能被看见的 displacement');
+      expect(settings.thickness, greaterThan(28),
+          reason: '28 → 32：45% 可见度下斜面对价要更深');
+      expect(settings.refractiveIndex, appGlassChromeRefractiveIndex);
       expect(settings.refractiveIndex, greaterThan(1.3),
           reason: '折射率低就看不出弯折');
-      expect(settings.chromaticAberration, greaterThanOrEqualTo(0.08),
-          reason: 'premium 的色散要在边缘看得出来');
+      expect(settings.chromaticAberration, appGlassChromeChromaticAberration,
+          reason: 'premium 的色散要在边缘看得出来（0.10 → 0.14）');
+      expect(settings.chromaticAberration, greaterThanOrEqualTo(0.14));
       expect(settings.blur, appTabBarBlur,
-          reason: '胶囊的模糊统一提到 24：重 scrim 之后剩下的 24% 也要揉平');
+          reason: '胶囊的模糊与 chrome 同一档（2）：45% 的背景权重是留给折射的');
+      expect(settings.blur, appGlassChromeBlur);
       expect(settings.glassColor.a, closeTo(appGlassChromeTintColor.a, 1e-9));
       expect(settings.glassColor.a, lessThan(appGlassTintColor.a),
           reason: '胶囊的 tint 比卡片还淡：底色交给折射采进来的背景');
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('scrim 与档位无关（premium / 磨砂同一组 76%/82%），对比度 ≥ 4.5',
+    testWidgets('scrim 与档位无关（premium / 磨砂同一组 0.55），可见度 45%',
         (tester) async {
       await tester.pumpWidget(_tabBar(quality: GlassQuality.premium));
       await tester.pump(const Duration(milliseconds: 50));
@@ -179,18 +186,24 @@ void main() {
       final color = _scrimDecoration(tester).color!;
       expect(color.a, closeTo(appTabBarScrimAlpha(), 1e-9),
           reason: '胶囊的 scrim 只有一个来源（appTabBarScrimAlpha）');
-      expect(color.a, greaterThanOrEqualTo(0.70),
-          reason: '底衬要稳：背后内容的权重不许超过 30%');
+      expect(color.a, closeTo(appGlassChromeScrimAlpha(), 1e-9),
+          reason: '四处 chrome（胶囊 / 筛选条 / 多选底栏 / 上传按钮）同一个数');
+      expect(color.a, lessThan(1.0), reason: '玻璃还得透出来');
 
-      // 底衬按四种极端背景算（白/黑/红/蓝），文字对每一种都要 ≥ 4.5:1；
-      // 逐条断言在 test/footer_contrast_test.dart，这里只守住「最坏的那条」。
+      // 折射可见度 = 1 − scrim：这一轮的目标值 45%。
+      expect(appGlassChromeRefractionVisibility(), closeTo(0.45, 1e-9));
+
+      // 代价（实测，四种极端背景 × 明暗，逐条钉在 footer_contrast_test.dart）：
+      // 45% 可见度下未选中文字最坏只有 2.62:1（浅/纯黑照片）/ 2.19:1
+      // （深/纯白照片），低于 AA 的 4.5。这里不假装它过线，只钉住实测值。
       for (final dark in <bool>[false, true]) {
         AppColors.setDark(dark);
         final ratio = appTabBarWorstContrast();
-        expect(ratio, greaterThanOrEqualTo(4.5),
+        expect(ratio, closeTo(dark ? 2.19 : 2.62, 0.02),
             reason: '未选中文字对 premium 胶囊最坏底衬的对比度（dark=$dark）：'
-                '${ratio.toStringAsFixed(2)}');
+                '${ratio.toStringAsFixed(2)}（AA 目标 4.5，当前低于目标）');
       }
+      AppColors.setDark(false);
     });
   });
 

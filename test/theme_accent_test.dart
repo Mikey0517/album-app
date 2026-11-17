@@ -5,6 +5,7 @@ import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/features/profile/theme_accent_picker_page.dart';
 import 'package:album_app/features/profile/theme_accent_sheet.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
+import 'package:album_app/widgets/app_glass_tone.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -201,13 +202,14 @@ void main() {
 
       final idleIcon =
           tester.widget<Icon>(find.byIcon(Icons.photo_library_outlined));
-      // 未选中是「中性灰压深一档」的胶囊专用色（玻璃上要过 4.5:1），
-      // 不再是裸的 textSecondary——见 appTabBarInactiveColor。
-      expect(idleIcon.color, appTabBarInactiveColor);
+      // 未选中不再是固定中性灰：墨色按背景合成亮度自动选（方案 C，见
+      // app_glass_tone.dart）。没有背景采样时按主题回退（浅色 → 深墨）。
+      expect(idleIcon.color, appGlassToneInk());
+      expect(idleIcon.color, appGlassToneInkForBackdrop(null));
       expect(idleIcon.color, isNot(AppColors.primary));
       final idleText = tester.widget<Text>(find.text('相册'));
       expect(idleText.style!.color, isNot(AppColors.primary));
-      expect(idleText.style!.color, appTabBarInactiveColor);
+      expect(idleText.style!.color, appGlassToneInk());
 
       expect(selectedText.style!.fontSize, inInclusiveRange(10, 11));
       expect(idleText.style!.fontSize, inInclusiveRange(10, 11));

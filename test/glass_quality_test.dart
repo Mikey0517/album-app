@@ -6,6 +6,7 @@ import 'package:album_app/models/post.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
 import 'package:album_app/widgets/app_card.dart';
 import 'package:album_app/widgets/app_glass.dart';
+import 'package:album_app/widgets/app_glass_tone.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'
@@ -185,11 +186,12 @@ void main() {
           AppColors.primary);
       expect(tester.widget<Text>(find.text('朋友圈')).style!.color,
           AppColors.primary);
+      // 未选中墨色按背景亮度自动选（方案 C）；没有采样时是主题回退那一套。
       expect(
           tester.widget<Icon>(find.byIcon(Icons.photo_library_outlined)).color,
-          appTabBarInactiveColor);
+          appGlassToneInk());
       expect(tester.widget<Text>(find.text('相册')).style!.color,
-          appTabBarInactiveColor);
+          appGlassToneInk());
       // 未选中是线框，不会同时出现实心变体。
       expect(find.byIcon(Icons.photo_library), findsNothing);
 
@@ -199,7 +201,7 @@ void main() {
           AppColors.primary);
       expect(
           tester.widget<Icon>(find.byIcon(Icons.people_outline)).color,
-          appTabBarInactiveColor);
+          appGlassToneInk());
       // 选中态只动颜色与图标变体，不叠任何背景层。
       expect(
         find.descendant(

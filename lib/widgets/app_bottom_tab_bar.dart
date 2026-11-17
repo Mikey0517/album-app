@@ -5,6 +5,7 @@ import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'
 import '../core/design/colors.dart';
 import '../core/design/text_styles.dart';
 import 'app_glass.dart';
+import 'app_glass_tone.dart';
 
 /// 底部 tab 的一项。图标分选中/未选中两个变体（实心 / 线框）。
 class AppBottomTabItem {
@@ -54,22 +55,23 @@ List<Shadow> appTabBarHalo(Color color) => [
       Shadow(color: color.withValues(alpha: appTabBarHaloAlpha), blurRadius: 1),
     ];
 
-/// 胶囊内部 scrim 的不透明度：浅色 **76%**、深色 **82%**。
+/// 胶囊内部 scrim 的不透明度：**与其余 chrome 同一组数**
+/// （[appGlassChromeScrimAlphaLight] / [appGlassChromeScrimAlphaDark]，
+/// 现为 0.55 / 0.55 = 折射可见度 45%）。
 ///
-/// 根因不在文字色，而在底衬：玻璃后面是滚动的照片，合成亮度随内容在
-/// 「纯黑照片 ≈ #BCBCBE」到「纯白照片 ≈ #F9FAFB」之间漂，固定文字色不可能
-/// 同时在两端都够看。给文字描边/加粗只能救回零点几的对比度，唯一稳的做法是
-/// 把材质本身的不透明度提到足够高，让合成底色基本恒定，再在这个稳定底色上
-/// 选色——iOS 的 UITabBar 也是这么做的，不是给文字加描边。
-///
-/// 76%/82% 是「底衬够稳」与「还看得出是玻璃」的交点：背后内容的权重只剩
-/// 24%/18%，上面那两端的差被压到 1/4；玻璃质感由 blur [appTabBarBlur] 与
-/// 玻璃自己的折射/高光给，不靠把 scrim 让薄。
+/// 上一轮这里是 0.76 / 0.82：为了让未选中灰字在复杂背景下够稳，把合成底衬压到
+/// 基本恒定，代价是 premium 的折射只剩 24% / 18% 的权重——真机上几乎看不见。
+/// 这一轮按需求把 45% 的背景权重还给折射，底衬稳定性与文字对比度的代价由
+/// test/footer_contrast_test.dart 逐条实测（四种极端背景 × 明暗），补偿方案
+/// （甲/乙）也钉在那里，等产品决定。
 ///
 /// 两档**与玻璃档位无关**：premium 与磨砂回退用同一组数，切档时胶囊的底色
 /// 不会跟着换，未选中文字也就不会「在某个档位突然看不清」。
-const double appTabBarScrimAlphaLight = 0.76;
-const double appTabBarScrimAlphaDark = 0.82;
+///
+/// 回退：把这两个常量指回 [appGlassChromeScrimAlphaLight]/[appGlassChromeScrimAlphaDark]
+/// 之外的值即可（上一轮是 0.76 / 0.82）。
+const double appTabBarScrimAlphaLight = appGlassChromeScrimAlphaLight;
+const double appTabBarScrimAlphaDark = appGlassChromeScrimAlphaDark;
 
 /// 当前明暗模式下胶囊 scrim 的不透明度。
 double appTabBarScrimAlpha() =>
@@ -80,21 +82,22 @@ double appTabBarScrimAlpha() =>
 Color appTabBarScrimColor() =>
     AppColors.bgPage.withValues(alpha: appTabBarScrimAlpha());
 
-/// 胶囊玻璃的模糊半径：**24**。
+/// 胶囊玻璃的模糊半径：**2**（= [appGlassChromeBlur]，premium 的最低档）。
 ///
-/// scrim 提到 76%/82% 之后，背后内容只剩 24%/18% 的权重，模糊大了也揉不出
-/// 新东西；提到 24 是为了把那 24% 充分揉开——同一段照片的明暗细节被抹平成
-/// 一块底色，比 scrim 本身更「抗」复杂背景（白墙照片和深色照片的差别不再有
-/// 纹理，只剩一点整体明暗）。
-const double appTabBarBlur = 24;
+/// 上一轮是 24：scrim 76%/82% 时背后只剩 24%/18% 的权重，糊大一点没代价，
+/// 还能把照片纹理揉成一块底色。scrim 让到 55% 之后，那 45% 正是**要给折射用**
+/// 的内容——再糊 24，斜面采样到的位移被抹平，「45% 可见度」就退化成一块更亮的
+/// 灰板。所以模糊压到与其余 chrome 相同的最低档。
+const double appTabBarBlur = appGlassChromeBlur;
 
 /// 胶囊自己的玻璃参数：光学档位照旧（premium 折射 / 拿不到时磨砂回退），
 /// 只把模糊换成 [appTabBarBlur]。
 ///
 /// 为什么在这里 copy 一份而不是改 [appGlassChromeSettings] /
 /// [appGlassSettings]：那两个函数是**所有** chrome（筛选条、多选底栏、
-/// 上传按钮、强制更新弹窗）共用的参数，胶囊要的是「重 scrim + 大模糊」这一
-/// 套特例，不能连带改掉别人。档位判定与 [AppGlassSurface] 内部那条
+/// 上传按钮、强制更新弹窗）共用的参数，胶囊只把模糊钉成 [appTabBarBlur]
+/// 这一档（现在是和 chrome 相同的 2，给回退留一个按钮），不能连带改掉别人。
+/// 档位判定与 [AppGlassSurface] 内部那条
 /// （preferPremium 为真时 [appGlassPremiumAvailable]）完全一致，所以这里取的
 /// 参数就是那个表面真正会用的参数。
 LiquidGlassSettings appTabBarGlassSettings(BuildContext context) {
@@ -114,16 +117,19 @@ LiquidGlassSettings appTabBarGlassSettings(BuildContext context) {
 /// [appTabBarInactiveColor]，点下去没有涟漪、没有底色、没有 hover 高亮
 /// （[InkWell] 换成了无涟漪的 [GestureDetector] + 显式 [Semantics]）。
 ///
-/// 可读性是这里唯一「加了东西」的地方，两条一起做：
-/// 1. 玻璃内部叠一层**重** scrim（[AppGlassSurface.scrim]）：玻璃后面是滚动的
-///    照片，白墙照片与深色照片的合成亮度差得远，固定文字色不可能两端都够看。
-///    所以先让底衬稳定——[appTabBarScrimAlpha]（76%/82%，两个玻璃档位同一组数）
-///    + [appTabBarBlur]（24），把背后内容的权重压到 24%/18% 并揉平；
+/// 可读性与折射是一对矛盾，这里两边各留一半：
+/// 1. 玻璃内部叠一层 scrim（[AppGlassSurface.scrim]）：玻璃后面是滚动的照片，
+///    白墙照片与深色照片的合成亮度差得远。[appTabBarScrimAlpha]（0.55，与其余
+///    chrome 同一组数）+ [appTabBarBlur]（2）把背后内容的权重定在 45%——
+///    这正是折射可见度（[appGlassChromeRefractionVisibility]）：底衬不再恒定
+///    （代价见 [appGlassChromeScrimAlphaLight] 的实测数字），折射则真的能看见；
 /// 2. 未选中文字/图标带一圈同色 1px 描边（[appTabBarHalo]，10% 透明度）：
 ///    内容颜色跳到极端时，字边缘也不会糊进去。都是「刚好够」，不做发光。
 ///
-/// 顺序很重要：**先把底衬钉住，再在它上面选色**。反过来的做法（固定文字色、
-/// 靠描边/加粗去追背景）在纯黑与纯白照片之间必然有一端失效。
+/// 上一轮的顺序是「先把底衬钉死（scrim 76%/82%），再在它上面选色」——底衬稳
+/// 了，折射也没了。这一轮把 45% 还给折射，文字对比度的缺口用实测数字摊开，
+/// 补偿方案（甲 halo / 乙 压深未选中色）等产品定，见
+/// test/footer_contrast_test.dart。
 ///
 /// **玻璃档位**：胶囊要 premium（折射/边缘扭曲），并且自建渲染层
 /// （[usesOwnLayer]）——premium 的 per-widget settings 只在自建层里生效，
@@ -198,44 +204,48 @@ class AppBottomTabBar extends StatelessWidget {
   Widget build(BuildContext context) {
     // 安全区算进外间距：胶囊自己浮在安全区上面，不贴屏幕底边。
     final safeBottom = MediaQuery.viewPaddingOf(context).bottom;
-    final content = SizedBox(
-      height: barHeight,
-      child: Row(
-        children: [
-          for (var index = 0; index < items.length; index++)
-            Expanded(
-              child: _TabButton(
-                key: tabKey(index),
-                item: items[index],
-                selected: index == selectedIndex,
-                onTap: () => onSelected(index),
-              ),
+    // 未选中文字/图标的墨色跟着**背景合成亮度**走（方案 C）：采样一变就重建
+    // 这 3 个格子，取舍见 app_glass_tone.dart。选中态始终是主题色。
+    return appGlassToneBuilder(
+      (context, ink) => Padding(
+        padding: EdgeInsets.fromLTRB(
+          sideInset,
+          0,
+          sideInset,
+          bottomGap + safeBottom,
+        ),
+        child: AppGlassSurface(
+          radius: radius,
+          requestedQuality: requestedQuality ?? preferredQuality,
+          // 静态 chrome 优先 premium（折射）；拿不到时 AppGlassSurface 自己
+          // 退回磨砂档 + 重 scrim，这里不用分支。
+          preferPremium: true,
+          useOwnLayer: usesOwnLayer,
+          // 玻璃后面是滚动的照片：内部叠一层页面底色 scrim，未选中的文字才有
+          // 底衬。厚度不跟档位走（premium 与回退同一组数，见
+          // [appTabBarScrimAlpha] = 0.55 = 折射可见度 45%）；模糊由
+          // [appTabBarGlassSettings] 压到 [appTabBarBlur]。
+          scrim: true,
+          settings: appTabBarGlassSettings(context),
+          scrimColor: appTabBarScrimColor(),
+          child: SizedBox(
+            height: barHeight,
+            child: Row(
+              children: [
+                for (var index = 0; index < items.length; index++)
+                  Expanded(
+                    child: _TabButton(
+                      key: tabKey(index),
+                      item: items[index],
+                      selected: index == selectedIndex,
+                      ink: ink,
+                      onTap: () => onSelected(index),
+                    ),
+                  ),
+              ],
             ),
-        ],
-      ),
-    );
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        sideInset,
-        0,
-        sideInset,
-        bottomGap + safeBottom,
-      ),
-      child: AppGlassSurface(
-        radius: radius,
-        requestedQuality: requestedQuality ?? preferredQuality,
-        // 静态 chrome 优先 premium（折射）；拿不到时 AppGlassSurface 自己
-        // 退回磨砂档 + 重 scrim，这里不用分支。
-        preferPremium: true,
-        useOwnLayer: usesOwnLayer,
-        // 玻璃后面是滚动的照片：内部叠一层页面底色 scrim，未选中的灰字才有
-        // 一块不随内容跳的底衬。厚度不跟档位走（premium 与回退同一组数，
-        // 见 [appTabBarScrimAlpha]）；模糊由 [appTabBarGlassSettings] 提到 24。
-        scrim: true,
-        settings: appTabBarGlassSettings(context),
-        scrimColor: appTabBarScrimColor(),
-        child: content,
+          ),
+        ),
       ),
     );
   }
@@ -244,18 +254,23 @@ class AppBottomTabBar extends StatelessWidget {
 class _TabButton extends StatelessWidget {
   final AppBottomTabItem item;
   final bool selected;
+
+  /// 未选中文字/图标的墨色（由 [appGlassToneBuilder] 按背景亮度挑好）。
+  final Color ink;
+
   final VoidCallback onTap;
 
   const _TabButton({
     super.key,
     required this.item,
     required this.selected,
+    required this.ink,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? AppColors.primary : appTabBarInactiveColor;
+    final color = selected ? AppColors.primary : ink;
     // 同色极轻描边：两档同等清晰度，不做发光、不加背景块。
     final halo = appTabBarHalo(color);
     // 选中只改颜色（图标实心化 + 主色），不加水波纹、不加背景块。
