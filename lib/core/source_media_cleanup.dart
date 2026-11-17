@@ -75,18 +75,40 @@ Future<void> deleteSourceMedia(
   );
 }
 
-/// 删除结果的文案：三种分支和相册页原来的一致。
+/// 删除结果的文案：说清删了几张、剩下的为什么没删掉。
+///
+/// 以前这里直接把原生异常原文（IllegalArgumentException: All requested items
+/// must be referenced by specific ID）塞给用户，等于什么都没说，现在按原因讲人话。
 @visibleForTesting
 String sourceDeleteMessage(SourceDeleteResult result) {
-  if (result.deleted == 0) {
-    final reason = result.error;
-    if (reason == null || reason.isEmpty) {
-      return '没能删除，请稍后在系统相册里手动删除';
-    }
-    return '没能删除（$reason），请到系统相册里手动删除';
-  }
-  if (result.isPartial) {
+  if (result.deleted > 0) {
+    if (result.failed == 0) return '已删除 ${result.deleted} 张原图';
     return '已删除 ${result.deleted} 张，${result.failed} 张未能删除';
   }
-  return '已删除 ${result.deleted} 张原图';
+  if (result.reason == SourceDeleteFailure.userCancelled) {
+    return '已取消删除，手机相册里的原图还在';
+  }
+  if (result.failed <= 0) return '没能删除，请稍后在系统相册里手动删除';
+  final reasonText = sourceDeleteFailureText(result.reason);
+  return '${result.failed} 项无法删除：$reasonText，请到系统相册里手动删除';
+}
+
+/// 失败原因 → 用户能看懂的一句话。
+@visibleForTesting
+String sourceDeleteFailureText(SourceDeleteFailure? reason) {
+  switch (reason) {
+    case SourceDeleteFailure.userCancelled:
+      return '你在系统确认框里点了取消';
+    case SourceDeleteFailure.notFound:
+      return '手机相册里已经找不到这些条目';
+    case SourceDeleteFailure.typeMismatch:
+      return '照片和视频的类型对不上';
+    case SourceDeleteFailure.unsupported:
+      return '这些条目不在手机相册里';
+    case SourceDeleteFailure.unresolvedPicker:
+      return '系统没能把它们换成相册条目';
+    case SourceDeleteFailure.systemRejected:
+    case null:
+      return '系统不允许这个相册条目被第三方删除';
+  }
 }

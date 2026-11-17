@@ -3,15 +3,16 @@ import 'package:album_app/core/design/colors.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
 import 'package:album_app/widgets/app_glass.dart';
+import 'package:album_app/widgets/app_tab_bar_contrast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 // 底部胶囊的「读得清」两条：
-//   1. 玻璃内部叠一层低透明 scrim（页面底色 42%/50%），未选中的灰字才有一块
-//      不随滚动内容跳的底衬；
+//   1. 玻璃内部叠一层**重** scrim（页面底色 76%/82%，见 appTabBarScrimAlpha），
+//      底衬先稳下来，未选中的灰字才有一块不随滚动内容跳的底；
 //   2. 未选中文字/图标带一圈同色 1px 描边（10%），内容颜色跳到极端时边缘不糊。
 // 这里把「读得清」变成可断言的数：未选中色与 scrim 合成后的底衬对比度 ≥ 4.5，
-// 浅色深色都要成立。
+// 浅色深色都要成立。四种极端背景（白/黑/红/蓝）逐条见 footer_contrast_test.dart。
 
 const List<AppBottomTabItem> _tabs = [
   AppBottomTabItem(
@@ -72,24 +73,32 @@ void main() {
   for (final dark in <bool>[false, true]) {
     final mode = dark ? '深色' : '浅色';
 
-    testWidgets('$mode：未选中文字与 scrim 合成后的底衬对比度 ≥ 4.5', (tester) async {
+    testWidgets('$mode：未选中文字与胶囊 scrim 合成后的底衬对比度 ≥ 4.5', (tester) async {
       AppColors.setDark(dark);
 
-      // scrim 只在这个区间里取值：低于 0.35 托不住文字，高于 0.5 玻璃就看不见了。
-      expect(appGlassScrimAlpha(), inInclusiveRange(0.35, 0.5));
-      expect(appGlassScrimAlpha(), lessThan(1.0),
+      // 胶囊自己那层 scrim：够厚（背后内容权重 ≤ 30%）但仍不是一块不透明白。
+      expect(appTabBarScrimAlpha(), greaterThanOrEqualTo(0.70));
+      expect(appTabBarScrimAlpha(), lessThan(1.0),
           reason: '不要做成不透明白底：玻璃还得透出来');
-      expect(appGlassScrimColor().a, closeTo(appGlassScrimAlpha(), 1e-9));
-      expect(appGlassScrimColor().r, closeTo(AppColors.bgPage.r, 1e-9),
+      expect(appTabBarScrimColor().a, closeTo(appTabBarScrimAlpha(), 1e-9));
+      expect(appTabBarScrimColor().r, closeTo(AppColors.bgPage.r, 1e-9),
           reason: 'scrim 用的是页面底色，不是另一种灰');
 
-      // 底衬 = scrim 叠在「玻璃 tint 叠页面底色」上；半透明色先合成成不透明色。
-      final backplate = appGlassScrimBackplate();
+      // 别的浮层（相册详情条 / 多选底栏）仍用 app_glass 那一档，没被连带改掉。
+      expect(appGlassScrimAlpha(), inInclusiveRange(0.35, 0.5));
+
+      // 底衬 = scrim 叠在背景上；半透明色先合成成不透明色。
+      final backplate = appTabBarBackplateOver(AppColors.bgPage);
       expect(backplate.a, 1.0, reason: '算对比度前必须是不透明色');
 
       final ratio = AppAccent.contrastRatio(backplate, appTabBarInactiveColor);
       expect(ratio, greaterThanOrEqualTo(4.5),
           reason: '未选中文字对 scrim 底衬的对比度（$mode）：${ratio.toStringAsFixed(2)}');
+
+      // 四种极端背景里最坏的一条也要过线（逐条断言在 footer_contrast_test.dart）。
+      expect(appTabBarWorstContrast(), greaterThanOrEqualTo(4.5),
+          reason: '极端背景下最坏的对比度（$mode）：'
+              '${appTabBarWorstContrast().toStringAsFixed(2)}');
 
       // 退化档是不透明 bgSurface，同一个文字色也得过线。
       expect(AppAccent.contrastRatio(AppColors.bgSurface, appTabBarInactiveColor),
@@ -128,7 +137,7 @@ void main() {
     final decoration =
         tester.widget<DecoratedBox>(scrim).decoration as BoxDecoration;
     final color = decoration.color!;
-    expect(color.a, closeTo(appGlassScrimAlpha(), 1e-9));
+    expect(color.a, closeTo(appTabBarScrimAlpha(), 1e-9));
     expect(decoration.borderRadius,
         BorderRadius.circular(AppBottomTabBar.radius));
 

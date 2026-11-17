@@ -191,47 +191,29 @@ String albumVisibleMonthLabel(
 const Key timelineScrubberThumbKey = ValueKey<String>('timeline-scrubber-thumb');
 const Key timelineScrubberLabelKey = ValueKey<String>('timeline-scrubber-label');
 
-/// 右侧轨道的 key：轨道是常驻的（不按键也在），滑块才是拖拽时浮出的。
-const Key timelineScrubberTrackKey = ValueKey<String>('timeline-scrubber-track');
-
 // ---------------------------------------------------------------------------
-// 时间轴的色调：轨道 / 滑块 / 月份气泡三件套全部从主题色里取，**没有一处是
-// 纯白**。三处使用点（相册详情页、朋友圈相册、朋友圈动态流）都走
+// 时间轴的配色：滑块 / 月份气泡两件套从主题色里取，**没有一处是纯白**。
+// 三处使用点（相册详情页、朋友圈相册、朋友圈动态流）都走
 // [PhotoTimelineScrubber]，所以颜色只在这里定义一次，不存在两边不一致。
+//
+// **没有「轨道」这层东西**：早先那条「主色 → 透明」的常驻竖渐变在浅色照片墙
+// 上一直看得见，等于给整屏右侧压了一道常亮的竖条；现在空闲时这一层不存在，
+// 整条时间轴不画任何像素（见 [timelineScrubberIdleAlpha]），只有按住拖动时
+// 才浮出滑块与月份气泡。
 // ---------------------------------------------------------------------------
 
-/// 轨道顶端的不透明度：16%（要求区间 10%~18%）。
+/// 空闲时时间轴的不透明度：0——整条不可见，一个像素都不画。
 ///
-/// 轨道本身是「主色 → 透明」的竖向渐变：顶端 16%、底端 0。照片墙是浅色的，
-/// 一条纯白轨道会直接消失；压在主色上既看得出位置，也不会在深色照片上跳。
-const double timelineScrubberTrackAlpha = 0.16;
-
-/// 轨道宽度：3。滑块 6 宽，正好把它整条盖住。
-const double timelineScrubberTrackWidth = 3;
+/// 素材（轨道）与它带来的对比度问题一起消失了：拖拽时才有滑块 + 气泡，
+/// 那份对比度由 [timelineMonthBubbleColor] 单独保证（白字 ≥ 4.5）。
+const double timelineScrubberIdleAlpha = 0.0;
 
 /// 滑块宽度 / 圆角半径（胶囊形）。
 const double timelineScrubberThumbWidth = 6;
 const double timelineScrubberThumbHeight = 44;
 
-/// 滑块离轨道框右边的距离；轨道在滑块后面居中（见
-/// [_timelineScrubberTrackRight]）。
+/// 滑块离时间轴框右边的距离。
 const double timelineScrubberThumbRight = 6;
-
-/// 轨道在 [_TimelineTrack] 里离右边的距离：滑块居中压住轨道。
-double get _timelineScrubberTrackRight =>
-    timelineScrubberThumbRight +
-    (timelineScrubberThumbWidth - timelineScrubberTrackWidth) / 2;
-
-/// 轨道：主色 → 透明 的竖向渐变（顶端 [timelineScrubberTrackAlpha]）。
-LinearGradient timelineScrubberTrackGradient() => LinearGradient(
-      begin: Alignment.topCenter,
-      end: Alignment.bottomCenter,
-      colors: [
-        AppColors.primary.withValues(alpha: timelineScrubberTrackAlpha),
-        AppColors.primary.withValues(alpha: 0.0),
-      ],
-      stops: const [0, 1],
-    );
 
 /// 滑块的轻微高光：主体是 [AppColors.primary] 实色，这层白色 28% → 0 盖在
 /// 上沿 55%（[BoxDecoration] 先画 color 再画 gradient，所以底仍是实色）。
@@ -269,10 +251,14 @@ Color timelineMonthBubbleColor() {
 /// 右侧的时间轴快速拖拽条，交互对齐小米相册：
 /// 按住上下滑，列表跟手跳到对应位置，同时浮出当前月份，松手后收起。
 ///
-/// 轨道由宿主的 Positioned 给定（相册详情页与朋友圈相册都让它紧贴吸顶区
+/// 可拖拽区域由宿主的 Positioned 给定（相册详情页与朋友圈相册都让它紧贴吸顶区
 /// 下沿，位置由 `album_timeline_layout.dart` 统一算），滑块和月份气泡都不会
-/// 越出轨道边界：拖到最上端时贴住轨道顶边，不会浮到吸顶条上去，也不会悬在
+/// 越出这块区域的边界：拖到最上端时贴住顶边，不会浮到吸顶条上去，也不会悬在
 /// 内容外面。
+///
+/// **空闲时这块区域完全是透明的**：不画轨道、不画底、不画占位，只有手指按住
+/// 之后才出现滑块与月份气泡。所以它既不会在照片墙上留一道常亮的竖条，也不会
+/// 让页面多一层需要解释的材质。
 ///
 /// 两种跳转方式：
 /// - offsets 模式（默认）：按每一项的精确偏移跳转，用于等高网格；
@@ -417,7 +403,7 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
         final height = constraints.maxHeight;
         final thumbY = (_thumbY ?? -1000).clamp(0.0, height);
         final active = _thumbY != null;
-        // 滑块 44 高、以手指为中线；夹在轨道内，顶端不会露出轨道去压吸顶条。
+        // 滑块 44 高、以手指为中线；夹在这块区域内，顶端不会压到吸顶条。
         final thumbTop = (thumbY - timelineScrubberThumbHeight / 2)
             .clamp(0.0, math.max(0.0, height - timelineScrubberThumbHeight))
             .toDouble();
@@ -438,23 +424,9 @@ class _PhotoTimelineScrubberState extends State<PhotoTimelineScrubber> {
             clipBehavior: Clip.none,
             alignment: Alignment.centerRight,
             children: [
-              // 常驻轨道：主色 → 透明的竖向渐变（不按也在）。它只是「位置」
-              // 提示，不参与命中测试——整条轨道的拖拽由外面的 GestureDetector
-              // 接管（translucent），所以这里不需要 IgnorePointer。
-              Positioned(
-                top: 0,
-                bottom: 0,
-                right: _timelineScrubberTrackRight,
-                width: timelineScrubberTrackWidth,
-                child: DecoratedBox(
-                  key: timelineScrubberTrackKey,
-                  decoration: BoxDecoration(
-                    borderRadius:
-                        BorderRadius.circular(timelineScrubberTrackWidth / 2),
-                    gradient: timelineScrubberTrackGradient(),
-                  ),
-                ),
-              ),
+              // 空闲时这里**没有轨道**：整条时间轴不画任何像素（栈里只有拖拽
+              // 时才加的两个孩子）。它仍然整条接管竖向拖拽——手势由外面的
+              // GestureDetector 负责（translucent），跟画不画东西无关。
               if (active) ...[
                 Positioned(
                   top: thumbTop,

@@ -259,7 +259,7 @@ bool appGlassPremiumDecision({
 /// 取值比早期版本（23% / 17%）低一档：这一档只给「透」的表面用（浮层与
 /// chrome 回退），底色由背后的渐变/背景图自己给，玻璃只负责一层极淡的冷调
 /// 与高光。**卡片不用它**：卡片的磨砂 tint 是 [appCardFrostTintColor]
-/// （37%/48% 的白雾）。卡片正文用的是 [AppColors.textPrimary]，对这块底衬的
+/// （84%/86% 的白雾）。卡片正文用的是 [AppColors.textPrimary]，对这块底衬的
 /// 对比度 > 15:1；tint 压低只会让底衬更接近页面底色，文字不会更难读
 /// （底部胶囊另有 scrim，见 [appGlassScrimBackplate]）。
 Color get appGlassTintColor =>
@@ -271,7 +271,7 @@ Color get appGlassTintColor =>
 /// （[appGlassPremiumAvailable] 为假）时静态 chrome 的整块回退。
 ///
 /// **卡片 / 列表不走这一套**：它们要的是「白雾磨砂、不要玻璃透亮感」，见
-/// [appCardFrostSettings]（blur 20 / tint 37%~48% / 折射归零）。
+/// [appCardFrostSettings]（blur 8 / tint 84%~86% / 折射归零）。
 ///
 /// 为什么不用包的 classic 预设：classic 的 tint 只有 12% 白蓝、模糊 5，落在
 /// 纯色页面上「模糊纯色还是纯色」，整块玻璃只剩一点透明度。这里模糊提到 8
@@ -293,19 +293,32 @@ LiquidGlassSettings appGlassSettings(BuildContext context) {
   );
 }
 
-/// 卡片的磨砂 tint：**明确的白雾**，不是一层薄透光。
+/// 卡片的磨砂 tint：**接近实色的白雾**，颜色不随背后的内容漂。
 ///
-/// 浅色 37% 的白（[AppColors.bgSurface] 在浅色就是纯白）、深色 48% 的
-/// [AppColors.bgSurface]（#171B24，比页面底色亮一点）。这层底子是「有颜色
-/// 的雾」：卡片背后的照片/渐变只透出一层轮廓，正文落上去始终是同一块底。
+/// 浅色 84% 的 [AppColors.bgSurface]（浅色就是纯白）、深色 86% 的
+/// [AppColors.bgSurface]（#171B24，比页面底色亮一点）。
+///
+/// **为什么从 37%/48% 提到 84%/86%（下拉刷新时卡片变色）**：磨砂卡片的合成
+/// 是「模糊后的 backdrop × (1 − tintAlpha) + tint」。tint 37% 时背后内容占
+/// 63%，卡片颜色就等于背景的 0.63 倍振幅。下拉刷新那几帧列表被拉伸/位移
+/// （BouncingScrollPhysics 下卡片整体下移 50~60 逻辑像素），玻璃采到的背景
+/// 跟着换了一段，卡片亮度就跟着跳——用户看到的就是「刷新时卡片明显变色」。
+/// 逐帧像素采样（见 test/feed_refresh_color_test.dart）在强对比背景上量到
+/// 37% 时最大通道差 8/255，84% 时降到 2/255，与 (1 − alpha) 的比例对得上
+/// （0.16 / 0.63 ≈ 1/4）。
+///
+/// 为什么不选「冻结 backdrop」（方案 a）：标准档的模糊是 BackdropFilter 现采
+/// 现糊，冻结要另存一张快照图层，滚动列表里每张卡片都得维护自己的快照与失效
+/// 时机，代价远高于把一层雾加厚；而「白雾」本来就是产品要的样子，加厚不影响
+/// 观感。方案 c（刷新期间叠同色蒙版）只在刷新那几秒生效，滚动时该漂还是漂。
 ///
 /// 为什么按 alpha 直接合成而不是包的 adaptive（luminance-preserving）：
 /// adaptive 只取 tint 的色相、把亮度还给背景，白 tint 根本不「加白」，卡片
 /// 还是透的；磨砂要的正是「提亮/压暗背景」这件事本身，所以
 /// [appCardFrostSettings] 里把 [LiquidGlassSettings.bodyMode] 设成
 /// [GlassBodyMode.clear]（按 alpha 精确合成，跨档位一致）。
-const double appCardFrostTintAlphaLight = 0.37;
-const double appCardFrostTintAlphaDark = 0.48;
+const double appCardFrostTintAlphaLight = 0.84;
+const double appCardFrostTintAlphaDark = 0.86;
 
 /// 当前明暗模式下卡片的磨砂 tint。
 Color get appCardFrostTintColor => AppColors.bgSurface.withValues(
@@ -314,15 +327,20 @@ Color get appCardFrostTintColor => AppColors.bgSurface.withValues(
           : appCardFrostTintAlphaLight,
     );
 
-/// 卡片磨砂的模糊半径：落在 18~24 这一档。
-const double appCardFrostBlur = 20;
+/// 卡片磨砂的模糊半径：**极轻**（8）。
+///
+/// tint 提到 84%/86% 之后，backdrop 只剩 14%~16% 的权重，模糊再大也只能在
+/// 这 14% 里揉——实测把 20 降到 8，卡片像素差 ≤ 1/255（见
+/// test/feed_refresh_color_test.dart 的「模糊半径不影响成品颜色」用例）。
+/// 模糊半径只影响成本，不影响观感，所以取小的那一档。
+const double appCardFrostBlur = 8;
 
 /// 卡片 / 列表项的磨砂参数：**白雾**优先，不做玻璃。
 ///
 /// 与 [appGlassSettings]（轻磨砂、透）的差别就是用户说的「不要玻璃透亮感」：
-/// - blur 8 → [appCardFrostBlur]（20）：背后的照片被彻底揉开，只剩明暗；
-/// - tint 15%/10% → [appCardFrostTintColor]（37%/48%）：一层真正的白/深雾，
-///   卡片的底色不再随背后的内容跳；
+/// - blur 8 → [appCardFrostBlur]（8）：模糊只作用在剩下那 14%/16% 上；
+/// - tint 15%/10% → [appCardFrostTintColor]（84%/86%）：一层接近实色的白雾，
+///   卡片的底色不再随背后的内容跳（下拉刷新那几帧也不跳）；
 /// - [LiquidGlassSettings.bodyMode] = [GlassBodyMode.clear]：按 alpha 精确
 ///   合成这层雾（adaptive 会把亮度还给背景，白雾等于没加）；
 /// - lightIntensity 压到 0.65/0.55、ambientStrength 0：表面不再反光，立体感
@@ -505,14 +523,14 @@ Color appGlassScrimBackplate() => AppAccent.compositeOver(
 ///
 /// 卡片不带 scrim（[AppGlassSurface.scrim] 默认 false），所以底衬只有「玻璃
 /// tint 叠页面底色」这一层：磨砂卡片（卡片现在的档位，见
-/// [AppGlassSurface.kCardQuality]）用 [appCardFrostTintColor]（37%/48%），
+/// [AppGlassSurface.kCardQuality]）用 [appCardFrostTintColor]（84%/86%），
 /// premium（静态 chrome 才用）用 [appGlassChromeTintColor]（10%/7%）。
 /// 两者都是半透明色，单独算对比度没有意义——先按 [AppAccent.compositeOver]
 /// 合成成不透明色再算。
 ///
 /// 页面底图/渐变会让真实底衬在这个值上下浮动，所以对比度断言取这条「最典型」
 /// 的底（页面底色），和 [appGlassPremiumScrimBackplate] 是同一个约定。
-/// 磨砂 tint 提到 37%/48% 之后底衬更接近 [AppColors.bgSurface]，卡片小字的
+/// 磨砂 tint 提到 84%/86% 之后底衬就是 [AppColors.bgSurface]，卡片小字的
 /// 对比度只会更高。
 Color appGlassCardBackplate({bool premium = true}) => AppAccent.compositeOver(
       premium ? appGlassChromeTintColor : appCardFrostTintColor,
@@ -550,8 +568,8 @@ Color appGlassCardBackplate({bool premium = true}) => AppAccent.compositeOver(
 ///   静态 chrome 走）：[appGlassChromeSettings] 的深斜面参数 + 薄 scrim
 ///   （[appGlassPremiumScrimAlpha]）；
 /// - standard（卡片 / 显式要 standard 的表面）：**不抓 capture**；卡片 /
-///   列表（[depth] 为真）走 [appCardFrostSettings]（白雾磨砂：blur 20、
-///   tint 37%/48%、折射归零），其余走 [appGlassSettings]（轻磨砂）；
+///   列表（[depth] 为真）走 [appCardFrostSettings]（白雾磨砂：blur 8、
+///   tint 84%/86%、折射归零），其余走 [appGlassSettings]（轻磨砂）；
 /// - 不透明（平台不支持 shader / 注入 minimal / 下拉刷新保持）：不透明
 ///   [AppColors.bgSurface] 圆角块，见 [pauseDuringRefresh]。
 /// 三条路布局完全一致（同样的 margin / padding / 圆角），切档不跳版、不白屏。
@@ -588,8 +606,8 @@ class AppGlassSurface extends StatelessWidget {
   /// 卡片 / 列表项 / 新建相册按钮的材质档位：**一处开关**。
   ///
   /// 现在是 [GlassQuality.standard]：卡片 / 列表走
-  /// [appCardFrostSettings] 的白雾磨砂参数（thickness 12 / blur 20 /
-  /// tint 37%~48% / lightIntensity 0.65~0.55 / refractiveIndex 1 /
+  /// [appCardFrostSettings] 的白雾磨砂参数（thickness 12 / blur 8 /
+  /// tint 84%~86% / lightIntensity 0.65~0.55 / refractiveIndex 1 /
   /// chromaticAberration 0），包的轻量 shader，纯 BackdropFilter。
   ///
   /// **为什么不是 premium（这是「下拉刷新黑卡」的根因）**：premium 在包里是
@@ -923,7 +941,7 @@ class AppSurfaceDepth extends StatelessWidget {
 ///
 /// 取值从 55%/65% 降到 35%/45%：用户选的那张图才是「页面背景」，压到 55%
 /// 之后图的对比度、细节全被抹平，看起来就是「糊」。文字可读性不再靠这层
-/// 遮罩硬撑——卡片自己是 37%/48% 的白雾磨砂（[appCardFrostTintColor]），
+/// 遮罩硬撑——卡片自己是 84%/86% 的白雾磨砂（[appCardFrostTintColor]），
 /// 正文落在卡片上，不落在图上。
 const double appBackdropMaskAlphaLight = 0.35;
 const double appBackdropMaskAlphaDark = 0.45;

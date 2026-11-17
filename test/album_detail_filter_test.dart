@@ -1,5 +1,4 @@
 import 'package:album_app/api/album_api.dart';
-import 'package:album_app/core/design/colors.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/features/album/album_detail_page.dart';
 import 'package:album_app/features/album/album_media_filter.dart';
@@ -675,7 +674,7 @@ void main() {
     expect(scrubber.height, closeTo(844 - filter.bottom, 0.5));
   });
 
-  testWidgets('吸顶筛选条背景不透明，且与页面背景同色', (tester) async {
+  testWidgets('吸顶筛选条底衬透明：页面背景透上来，靠极轻模糊压住内容', (tester) async {
     await _pump(tester, items: _many());
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -600));
     await tester.pumpAndSettle();
@@ -683,18 +682,19 @@ void main() {
     final surface = tester.widget<AppSegmentedBarSurface>(
       find.byType(AppSegmentedBarSurface),
     );
-    expect(surface.color, AppColors.bgPage);
     expect(
       (surface.color.a * 255.0).round(),
-      255,
-      reason: '不透明，滚动内容不会从缝里透出来',
+      0,
+      reason: '底衬透明：AppGlassBackdrop 的渐变要原样穿过这一条',
     );
+    expect(surface.blur, kAppSegmentedBarBlur,
+        reason: '透明靠一层极轻模糊兜住滚动内容的纹理');
 
-    // 吸顶 sliver 自己也垫了一层同色底，任何一个 child 忘了画底也不会透。
+    // 吸顶 sliver 自己不能再垫一层页面底色：垫了那层模糊就只采到这层色，
+    // 页面背景一点也透不上来（等于没改）。
     final pinnedBar =
         tester.widget<PinnedBarSliver>(find.byType(PinnedBarSliver).first);
-    expect(pinnedBar.color, AppColors.bgPage);
-    expect((pinnedBar.color.a * 255.0).round(), 255);
+    expect((pinnedBar.color.a * 255.0).round(), 0);
   });
 
   testWidgets('iPad 竖屏按 5 列排，不溢出', (tester) async {

@@ -1,15 +1,16 @@
-import 'package:album_app/core/design/accent.dart';
 import 'package:album_app/core/design/colors.dart';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/widgets/app_bottom_tab_bar.dart';
 import 'package:album_app/widgets/app_card.dart';
 import 'package:album_app/widgets/app_glass.dart';
+import 'package:album_app/widgets/app_tab_bar_contrast.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart'
     show GlassContainer, GlassQuality;
 
-// 底部胶囊要「透亮 + 折射」：premium 档 + 自建渲染层 + 薄 scrim。
+// 底部胶囊要「透亮 + 折射」：premium 档 + 自建渲染层 + **重 scrim**（76%/82%，
+// 拉平复杂背景的底衬，见 test/footer_contrast_test.dart）。
 // premium 拿不到时（非 Impeller / 自适应降档 / minimal / 玻璃未初始化）
 // 必须整块退回原来的磨砂实现——参数一起换回来，不留半套 premium 参数，
 // 也不能白屏或抛异常。这里把两条分支都钉死。
@@ -136,7 +137,7 @@ void main() {
     });
   });
 
-  group('premium 分支：胶囊真的用 premium + 自建层 + 薄 scrim', () {
+  group('premium 分支：胶囊真的用 premium + 自建层 + 重 scrim', () {
     testWidgets('档位、自建层、光学参数都是 premium 那一套', (tester) async {
       tester.view.physicalSize = const Size(360, 780);
       tester.view.devicePixelRatio = 1.0;
@@ -162,38 +163,40 @@ void main() {
           reason: '折射率低就看不出弯折');
       expect(settings.chromaticAberration, greaterThanOrEqualTo(0.08),
           reason: 'premium 的色散要在边缘看得出来');
-      expect(settings.blur, lessThan(5), reason: '折射优先，模糊压到最低');
+      expect(settings.blur, appTabBarBlur,
+          reason: '胶囊的模糊统一提到 24：重 scrim 之后剩下的 24% 也要揉平');
       expect(settings.glassColor.a, closeTo(appGlassChromeTintColor.a, 1e-9));
       expect(settings.glassColor.a, lessThan(appGlassTintColor.a),
           reason: '胶囊的 tint 比卡片还淡：底色交给折射采进来的背景');
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('scrim 变薄（折射不被糊成灰板），对比度仍然 ≥ 4.5', (tester) async {
+    testWidgets('scrim 与档位无关（premium / 磨砂同一组 76%/82%），对比度 ≥ 4.5',
+        (tester) async {
       await tester.pumpWidget(_tabBar(quality: GlassQuality.premium));
       await tester.pump(const Duration(milliseconds: 50));
 
       final color = _scrimDecoration(tester).color!;
-      expect(color.a, closeTo(appGlassPremiumScrimAlpha(), 1e-9));
-      expect(color.a, lessThan(appGlassScrimAlpha()),
-          reason: 'premium 的 scrim 必须比磨砂回退那层薄');
-      expect(color.a, lessThan(0.35), reason: '再厚就把折射糊掉了');
+      expect(color.a, closeTo(appTabBarScrimAlpha(), 1e-9),
+          reason: '胶囊的 scrim 只有一个来源（appTabBarScrimAlpha）');
+      expect(color.a, greaterThanOrEqualTo(0.70),
+          reason: '底衬要稳：背后内容的权重不许超过 30%');
 
+      // 底衬按四种极端背景算（白/黑/红/蓝），文字对每一种都要 ≥ 4.5:1；
+      // 逐条断言在 test/footer_contrast_test.dart，这里只守住「最坏的那条」。
       for (final dark in <bool>[false, true]) {
         AppColors.setDark(dark);
-        final ratio = AppAccent.contrastRatio(
-          appGlassPremiumScrimBackplate(),
-          appTabBarInactiveColor,
-        );
+        final ratio = appTabBarWorstContrast();
         expect(ratio, greaterThanOrEqualTo(4.5),
-            reason: '未选中灰字对 premium 底衬的对比度（dark=$dark）：'
+            reason: '未选中文字对 premium 胶囊最坏底衬的对比度（dark=$dark）：'
                 '${ratio.toStringAsFixed(2)}');
       }
     });
   });
 
   group('回退分支：premium 不可用时整块回到磨砂实现', () {
-    testWidgets('注入 standard：档位回到 standard，scrim 回到 42%/50%', (tester) async {
+    testWidgets('注入 standard：档位回到 standard，scrim 仍是胶囊那组数',
+        (tester) async {
       await tester.pumpWidget(_tabBar(quality: GlassQuality.standard));
 
       final container = _container(tester);
@@ -203,11 +206,13 @@ void main() {
 
       final settings = container.settings!;
       expect(settings.thickness, 12, reason: '磨砂那套光学参数');
-      expect(settings.blur, 8);
+      expect(settings.blur, appTabBarBlur,
+          reason: '模糊是胶囊自己的那一档，切档不跟着换');
       expect(settings.glassColor.a, closeTo(appGlassTintColor.a, 1e-9));
 
       final color = _scrimDecoration(tester).color!;
-      expect(color.a, closeTo(appGlassScrimAlpha(), 1e-9));
+      expect(color.a, closeTo(appTabBarScrimAlpha(), 1e-9),
+          reason: '回退档用同一份 scrim：底衬不随档位漂');
       expect(tester.takeException(), isNull);
     });
 
@@ -274,8 +279,8 @@ void main() {
       expect(settings.blur, appCardFrostBlur);
       expect(settings.glassColor, appCardFrostTintColor,
           reason: '白雾 tint（不再是 15% 的透光 tint）');
-      expect(settings.glassColor.a, inInclusiveRange(0.35, 0.40),
-          reason: '浅色雾度落在 35%~40%');
+      expect(settings.glassColor.a, inInclusiveRange(0.80, 0.90),
+          reason: '浅色雾度落在 80%~90%（接近实色的白雾）');
       expect(tester.takeException(), isNull);
     });
 

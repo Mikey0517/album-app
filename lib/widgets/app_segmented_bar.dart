@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 
 import '../core/design/colors.dart';
@@ -106,32 +108,76 @@ class AppSegmentedBar extends StatelessWidget {
   }
 }
 
-/// 分段条的吸顶容器：统一高度、内边距和不透明底色。
+/// 吸顶底衬的模糊半径（sigma）。取值见 [AppSegmentedBarSurface.blur]。
+const double kAppSegmentedBarBlur = 8;
+
+/// 分段条的吸顶容器：统一高度、内边距，**透明底衬 + 极轻模糊**。
 ///
 /// 详情页套在 [PinnedBarSliver] 里，选封面时套在 AppBar.bottom 里，两处都用
-/// 这一层，吸顶条的高度、内边距和底色才不会各写各的。
+/// 这一层，吸顶条的高度、内边距和底衬才不会各写各的。
 ///
-/// 底色保持不透明（[AppColors.bgPage]）：吸顶条下面是滚动的照片，这一层没垫实
-/// 就会在接缝处透出内容。玻璃胶囊浮在这块底色上（[AppSegmentedBar]），
-/// 和页面底色的接缝依旧是一条实底。
+/// **为什么不再是 [AppColors.bgPage] 实底**：吸顶条是一条横贯整屏的窄带，垫成
+/// 页面底色之后，[AppGlassBackdrop] 的渐变（或用户挑的背景图）到这里就被截成
+/// 一条白杠——从相册封面往下看，页面上半段是渐变、这一条是纯色，接缝比「透出
+/// 内容」更刺眼。现在底衬是**透明的**（[color] 的 alpha = 0），背景渐变原样穿过
+/// 这一条。
+///
+/// **为什么还要一层模糊**：透明之后，吸顶条下面是滚动的照片。实测（条纹替身
+/// 压在条带下、量条带里相邻像素的平均亮度差）：
+/// - 纯透明：0.2096 —— 条纹一条条看得清清楚楚；
+/// - 加 8% 的 [AppColors.bgPage] 蒙版：0.2087 —— 只压掉 0.4%，等于没加；
+/// - 加 [kAppSegmentedBarBlur] 的模糊：0.0060 —— 与完全不透明底衬（0.0072）
+///   同一档，纹理彻底被揉开，只剩一层柔和色雾。
+/// 所以这里选的是用户给的「极轻 blur」那条兜底，不是蒙版：蒙版按透明度只削掉
+/// 一点亮度，纹理还在；模糊直接把「看得出内容」这件事去掉，同时让背景渐变
+/// 继续穿过（模糊对渐变几乎没有影响）。
+///
+/// 模糊层铺满整条（46 高，含上下 7 的内边距），不是只糊中间那 32——否则条带
+/// 上下边缘会各留一条锋利的内容，反而更脏。
 class AppSegmentedBarSurface extends StatelessWidget {
   final Widget child;
+
+  /// 额外的蒙版色；默认 null = 完全透明。给了颜色就压在模糊层**下面**，
+  /// 吸顶条会变回半透明底衬（调用点自己负责说明为什么）。
   final Color? background;
 
-  const AppSegmentedBarSurface({super.key, required this.child, this.background});
+  /// 底衬的模糊半径（sigma）；0 = 不模糊，纯透明。
+  final double blur;
 
-  /// 吸顶条的底色：默认与页面背景同色，且不透明——滚动内容从它后面经过，
-  /// 半透明就会在接缝处透出来。
-  Color get color => background ?? AppColors.bgPage;
+  const AppSegmentedBarSurface({
+    super.key,
+    required this.child,
+    this.background,
+    this.blur = kAppSegmentedBarBlur,
+  });
+
+  /// 模糊层（[BackdropFilter]）的 key：测试用它断言「底衬是透明 + 轻模糊」。
+  static const Key blurKey = ValueKey<String>('segmented-bar-surface-blur');
+
+  /// 底衬的颜色：默认**完全透明**，让 [AppGlassBackdrop] 透上来。
+  Color get color => background ?? Colors.transparent;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: kAppSegmentedBarHeight,
-      color: color,
+    // 内容先内缩：模糊层要盖住整条（含内边距），所以 padding 在模糊里面。
+    Widget band = Padding(
       padding: const EdgeInsets.fromLTRB(12, 7, 12, 7),
       child: child,
     );
+    if (blur > 0) {
+      band = ClipRect(
+        child: BackdropFilter(
+          key: blurKey,
+          filter: ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+          child: band,
+        ),
+      );
+    }
+    final veil = color;
+    if (veil.a > 0) {
+      band = DecoratedBox(decoration: BoxDecoration(color: veil), child: band);
+    }
+    return SizedBox(height: kAppSegmentedBarHeight, child: band);
   }
 }
 

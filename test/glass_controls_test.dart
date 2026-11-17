@@ -475,7 +475,12 @@ void main() {
 
       final capsule = find.byKey(AppSegmentedBar.surfaceKey);
       expect(find.byType(GlassContainer), findsNothing);
-      expect(find.byType(BackdropFilter), findsNothing);
+      // 胶囊自己不画玻璃。吸顶底衬那层「极轻模糊」是另一回事：它和档位无关，
+      // 不是玻璃表面（见 AppSegmentedBarSurface），所以只限定在胶囊里查。
+      expect(
+        find.descendant(of: capsule, matching: find.byType(BackdropFilter)),
+        findsNothing,
+      );
       expect(tester.getRect(capsule).height, kAppSegmentedBarPillHeight);
 
       final decoration = _firstDecorationUnder(tester, capsule);
@@ -560,7 +565,14 @@ void main() {
       await _pumpAlbum(tester, quality: GlassQuality.minimal);
 
       expect(find.byType(GlassContainer), findsNothing);
-      expect(find.byType(BackdropFilter), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byKey(AlbumUploadFab.surfaceKey),
+          matching: find.byType(BackdropFilter),
+        ),
+        findsNothing,
+        reason: '圆钮自己不画玻璃（页面别处的吸顶条模糊与档位无关，不算在内）',
+      );
 
       final fab = find.byKey(AlbumUploadFab.surfaceKey);
       expect(fab, findsOneWidget);

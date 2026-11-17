@@ -71,6 +71,19 @@ class MainActivity : FlutterFragmentActivity() {
 
         /** 回执之后隔多久结束自己；必须小于上面两个延迟。 */
         const val EXIT_DELAY_MS = 300L
+
+        // 删除失败的原因码：Dart 侧翻译成用户能看懂的一句话，原始异常只进 logcat。
+        // "All requested items must be referenced by specific ID" 对用户没有意义。
+        const val REASON_UNSUPPORTED_URI = "unsupported_uri"
+        const val REASON_UNRESOLVED_PICKER = "unresolved_picker"
+        const val REASON_NOT_FOUND = "not_found"
+        const val REASON_USER_CANCELLED = "user_cancelled"
+        const val REASON_SYSTEM_REJECTED = "system_rejected"
+
+        // createDeleteRequest 只认这两个媒体集合，以及 media 这个 authority。
+        const val COLLECTION_IMAGES = "images"
+        const val COLLECTION_VIDEO = "video"
+        const val MEDIA_AUTHORITY = "media"
     }
 
     private val channelName = "album/media_picker"
@@ -98,6 +111,8 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingDeleteTotal = 0
     // 留着给 Dart 侧显示，方便没有 adb 时也能知道系统为什么拒绝。
     private var lastDeleteError: String? = null
+    // 这一批失败的原因码（见 REASON_*）；原始异常文本只给 logcat 看。
+    private var lastDeleteReason: String? = null
     private val deleteLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
@@ -114,7 +129,7 @@ class MainActivity : FlutterFragmentActivity() {
             mapOf(
                 "deleted" to deleted,
                 "failed" to total - deleted,
-                "error" to if (approved) null else "用户取消了系统确认"
+                "reason" to if (approved) null else REASON_USER_CANCELLED
             )
         )
     }
@@ -254,57 +269,82 @@ class MainActivity : FlutterFragmentActivity() {
                         val raw = call.argument<List<Map<String, Any>>>("items") ?: emptyList()
                         deleteMedia(raw, result)
                     }
+                    // 删除前先核一遍：是不是「带具体 ID 的 MediaStore 单项 URI」、
+                    // 条目还在不在、到底落在 images 还是 video。查库要 IPC，放后台线程。
+                    "resolveDeleteUris" -> {
+                        val raw = call.argument<List<Map<String, Any>>>("items") ?: emptyList()
+                        resolveDeleteUris(raw, result)
+                    }
                     else -> result.notImplemented()
                 }
             }
     }
 
-    /** 优先用系统确认弹窗删除；API < 30 或拿不到 MediaStore URI 时直接删。 */
+    /**
+     * 逐条预校验，返回顺序和入参一一对应。
+     * uri 为 null 表示这条不能交给系统删，reason 说明原因（见 REASON_*）。
+     */
+    private fun resolveDeleteUris(items: List<Map<String, Any>>, result: MethodChannel.Result) {
+        Thread {
+            val resolved = items.map { item ->
+                val candidate = validateDeleteCandidate(item)
+                mapOf<String, Any?>(
+                    "uri" to candidate.uri?.toString(),
+                    "video" to candidate.isVideo,
+                    "reason" to candidate.reason
+                )
+            }
+            runOnUiThread { result.success(mapOf("items" to resolved)) }
+        }.start()
+    }
+
+    /**
+     * 删除手机相册里的原图：API 30+ 走系统确认弹窗，其余（或系统不接受）走直接删除。
+     *
+     * createDeleteRequest 只接受带具体 ID 的 MediaStore 单项 URI。一批里混进一个别的
+     * 形态（picker URI、别的 authority、拼错的集合），系统会整批抛
+     * IllegalArgumentException: All requested items must be referenced by specific ID，
+     * 一条都删不掉。所以进批之前每条都必须过 [validateDeleteCandidate]，
+     * 不合格的单算失败，绝不塞进同一批。
+     */
     private fun deleteMedia(items: List<Map<String, Any>>, result: MethodChannel.Result) {
         if (items.isEmpty()) {
             result.success(mapOf("deleted" to 0, "failed" to 0))
             return
         }
         lastDeleteError = null
-        val picked = ArrayList<Pair<Uri, Boolean>>()
-        for (item in items) {
-            val raw = item["uri"] as? String ?: continue
-            val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: continue
-            picked.add(uri to (item["video"] == true))
-        }
-        if (picked.isEmpty()) {
+        lastDeleteReason = null
+        val candidates = items.map { validateDeleteCandidate(it) }
+        val deletable = candidates.filter { it.uri != null }
+        val firstRejection = candidates.firstOrNull { it.reason != null }?.reason
+        if (deletable.isEmpty()) {
             result.success(
-                mapOf("deleted" to 0, "failed" to items.size, "error" to "无法识别相册地址")
+                mapOf(
+                    "deleted" to 0,
+                    "failed" to items.size,
+                    "reason" to (firstRejection ?: REASON_UNSUPPORTED_URI)
+                )
             )
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // 不同厂商对 picker URI 的支持差别很大（小米尤其严格），
-            // 按“转换后的批量 / 原始批量 / 逐条”依次尝试，哪一档能被系统接住就用哪一档。
-            val converted = picked.mapNotNull { (uri, isVideo) ->
-                runCatching { resolveDeletableUri(uri, isVideo) }.getOrNull()
-                    ?.takeIf { it != uri }
-            }
-            val originals = picked.map { it.first }
-            val batches = ArrayList<List<Uri>>()
-            if (converted.isNotEmpty()) batches.add(converted)
-            batches.add(originals)
-            for (uri in converted.distinct()) batches.add(listOf(uri))
-            for (uri in originals.distinct()) batches.add(listOf(uri))
+            // 不同厂商对批量删除的限制差别很大（小米尤其严格）：
+            // 先整批交给系统，被拒再退回逐条，哪一档能被接住就用哪一档。
             val tried = HashSet<String>()
-            for (batch in batches) {
-                if (batch.isEmpty()) continue
-                if (!tried.add(batch.joinToString("|") { it.toString() })) continue
+            for (batch in deleteBatches(deletable)) {
+                val batchUris = batch.mapNotNull { it.uri }
+                if (batchUris.isEmpty()) continue
+                if (!tried.add(batchUris.joinToString("|"))) continue
                 val sender = try {
-                    MediaStore.createDeleteRequest(contentResolver, batch).intentSender
+                    MediaStore.createDeleteRequest(contentResolver, batchUris).intentSender
                 } catch (e: Exception) {
                     recordDeleteError(e)
-                    Log.w("AlbumMediaStore", "createDeleteRequest 被拒（${batch.size} 项）", e)
+                    Log.w("AlbumMediaStore", "createDeleteRequest 被拒（${batchUris.size} 项）", e)
                     continue
                 }
                 pendingDeleteResult = result
-                pendingDeleteRequested = batch.size
-                pendingDeleteTotal = originals.size
+                pendingDeleteRequested = batchUris.size
+                pendingDeleteTotal = items.size
                 try {
                     deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
                     return
@@ -317,8 +357,10 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
         }
+        // API < 30，或系统连逐条确认都不给：自己删（有写权限才删得掉）。
         var deleted = 0
-        for ((uri, _) in picked) {
+        for (candidate in deletable) {
+            val uri = candidate.uri ?: continue
             try {
                 if (contentResolver.delete(uri, null, null) > 0) deleted++
             } catch (e: Exception) {
@@ -329,13 +371,22 @@ class MainActivity : FlutterFragmentActivity() {
         result.success(
             mapOf(
                 "deleted" to deleted,
-                "failed" to picked.size - deleted,
-                "error" to lastDeleteError
+                "failed" to items.size - deleted,
+                "reason" to (lastDeleteReason ?: firstRejection)
             )
         )
     }
 
+    /** 先整批、再逐条：整批被拒时逐条重试，一条坏数据最多只能拖垮它自己。 */
+    private fun deleteBatches(items: List<DeleteCandidate>): List<List<DeleteCandidate>> {
+        val batches = ArrayList<List<DeleteCandidate>>()
+        batches.add(items)
+        for (item in items) batches.add(listOf(item))
+        return batches
+    }
+
     private fun recordDeleteError(e: Exception) {
+        lastDeleteReason = REASON_SYSTEM_REJECTED
         if (lastDeleteError != null) return
         val message = e.message?.take(120)
         lastDeleteError = if (message.isNullOrBlank()) e.javaClass.simpleName
@@ -343,13 +394,76 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     /**
-     * Photo Picker 返回的是 content://media/picker/0/.../media/<id>，
-     * MediaStore 的删除接口只认 content://media/external/... 这类 URI，必须转换：
-     * 1) Android 13+ 用 MediaStore.getMediaUri（需要读媒体权限，拿不到就走下一步）
-     * 2) 用末尾的媒体 id 直接拼出 images/video 的 MediaStore URI
+     * 一条待删项的校验结论：uri 非空就是可以交给 createDeleteRequest 的
+     * content://media/<volume>/<images|video>/<id>；为空时 reason 说明为什么剔除。
      */
-    private fun resolveDeletableUri(uri: Uri, isVideo: Boolean): Uri {
-        if (!isPickerUri(uri)) return uri
+    private data class DeleteCandidate(
+        val uri: Uri?,
+        val isVideo: Boolean,
+        val reason: String?
+    ) {
+        companion object {
+            fun rejected(isVideo: Boolean, reason: String) =
+                DeleteCandidate(null, isVideo, reason)
+        }
+    }
+
+    /** media URI 的四段：content://media/<volume>/<images|video>/<id>。 */
+    private data class MediaItemParts(val volume: String, val collection: String, val id: Long)
+
+    /** 条目还在不在：查得到 / 明确查不到 / 查不了（没有读权限，空表不能当结论）。 */
+    private enum class Existence { PRESENT, MISSING, UNKNOWN }
+
+    private fun validateDeleteCandidate(item: Map<String, Any>): DeleteCandidate =
+        validateDeleteCandidate(item["uri"] as? String, item["video"] == true)
+
+    /**
+     * 一条待删项到底能不能交给系统删。
+     *
+     * Photo Picker 给的是 content://media/picker/...，删除接口只认 MediaStore 的单项
+     * URI，所以先换成 content://media/<volume>/<images|video>/<id>：
+     * 1) Android 13+ 先试 MediaStore.getMediaUri（它知道条目真实的 volume 和集合）；
+     * 2) 换不出来时用 picker URI 末尾的媒体 id 按声明类型拼一个；
+     * 3) 拼出来的（或本来就是的）URI 再按 id 查一次库，确认条目还在。
+     * 明确查不到就剔除；查不了（没有读权限）交给系统确认框判定。
+     */
+    private fun validateDeleteCandidate(raw: String?, declaredVideo: Boolean): DeleteCandidate {
+        val parsed = raw?.takeIf { it.isNotBlank() }
+            ?.let { runCatching { Uri.parse(it) }.getOrNull() }
+            ?: return DeleteCandidate.rejected(declaredVideo, REASON_UNSUPPORTED_URI)
+        val picker = isPickerUri(parsed)
+        val specific = if (picker) resolvePickerUri(parsed, declaredVideo) else parsed
+        val parts = specific?.let { mediaItemParts(it) }
+            ?: return DeleteCandidate.rejected(
+                declaredVideo,
+                if (picker) REASON_UNRESOLVED_PICKER else REASON_UNSUPPORTED_URI
+            )
+        val uri = ContentUris.withAppendedId(collectionUri(parts.volume, parts.collection), parts.id)
+        val isVideo = parts.collection == COLLECTION_VIDEO
+        return when (probeExistence(uri, isVideo)) {
+            Existence.PRESENT, Existence.UNKNOWN -> DeleteCandidate(uri, isVideo, null)
+            Existence.MISSING -> {
+                // 声明的类型可能和真实集合相反（视频被拼进了 images）：换另一边再确认一次。
+                val other = if (isVideo) COLLECTION_IMAGES else COLLECTION_VIDEO
+                val otherUri =
+                    ContentUris.withAppendedId(collectionUri(parts.volume, other), parts.id)
+                when (probeExistence(otherUri, other == COLLECTION_VIDEO)) {
+                    Existence.PRESENT ->
+                        DeleteCandidate(otherUri, other == COLLECTION_VIDEO, null)
+                    Existence.UNKNOWN -> DeleteCandidate(uri, isVideo, null)
+                    Existence.MISSING -> DeleteCandidate.rejected(isVideo, REASON_NOT_FOUND)
+                }
+            }
+        }
+    }
+
+    /**
+     * picker URI → MediaStore 单项 URI；换不出来返回 null（这条会被剔除）。
+     *
+     * getMediaUri 需要读媒体权限，拿不到时退回「用末尾 id 按声明类型拼」，
+     * 拼错集合的情况由 [probeExistence] 的交叉确认兜住。
+     */
+    private fun resolvePickerUri(uri: Uri, declaredVideo: Boolean): Uri? {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             try {
                 val converted = MediaStore.getMediaUri(this, uri)
@@ -361,24 +475,77 @@ class MainActivity : FlutterFragmentActivity() {
                 Log.w("AlbumMediaStore", "getMediaUri 失败: $uri", e)
             }
         }
-        val id = uri.lastPathSegment?.toLongOrNull()
-        if (id != null) {
-            val base = if (isVideo) {
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            } else {
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-            }
-            val fallback = ContentUris.withAppendedId(base, id)
-            Log.i("AlbumMediaStore", "使用媒体 id 拼出 URI: $uri -> $fallback")
-            return fallback
+        val id = uri.lastPathSegment?.toLongOrNull()?.takeIf { it > 0 } ?: run {
+            Log.w("AlbumMediaStore", "picker URI 里没有可用的媒体 id: $uri")
+            return null
         }
-        Log.w("AlbumMediaStore", "无法识别 picker URI: $uri")
-        return uri
+        val collection = if (declaredVideo) COLLECTION_VIDEO else COLLECTION_IMAGES
+        val built =
+            ContentUris.withAppendedId(collectionUri(MediaStore.VOLUME_EXTERNAL, collection), id)
+        Log.i("AlbumMediaStore", "用媒体 id 拼出 URI: $uri -> $built")
+        return built
     }
+
+    /**
+     * 解析 content://media/<volume>/<images|video>/<id>。
+     * 别的形态（picker、缺 id、audio/file 集合、别的 authority）一律返回 null：
+     * 系统不认，送进 createDeleteRequest 会让整批抛 IllegalArgumentException。
+     */
+    private fun mediaItemParts(uri: Uri): MediaItemParts? {
+        if (uri.scheme != "content" || uri.authority != MEDIA_AUTHORITY) return null
+        val segments = uri.pathSegments
+        if (segments.size != 4 || segments[2] != "media") return null
+        val collection = segments[1]
+        if (collection != COLLECTION_IMAGES && collection != COLLECTION_VIDEO) return null
+        val id = segments[3].toLongOrNull()?.takeIf { it > 0 } ?: return null
+        return MediaItemParts(segments[0], collection, id)
+    }
+
+    private fun collectionUri(volume: String, collection: String): Uri =
+        Uri.Builder()
+            .scheme("content")
+            .authority(MEDIA_AUTHORITY)
+            .appendPath(volume)
+            .appendPath(collection)
+            .appendPath("media")
+            .build()
 
     private fun isPickerUri(uri: Uri): Boolean {
         val segments = uri.pathSegments
         return segments.isNotEmpty() && segments[0] == "picker"
+    }
+
+    /**
+     * 按 id 查一次库，确认这条还在不在。
+     *
+     * 关键取舍：空结果只有在「我们确实有读权限」时才算「不存在」。没有读权限时
+     * scoped storage 会把看不见的条目直接过滤掉，回来的同样是空表；把那种空表当成
+     * 不存在会把用户的照片全部剔除、删除功能直接失效。所以没有读权限时返回 UNKNOWN，
+     * 让系统确认框做最终判定——删除本身不需要读权限，确认弹窗就是授权。
+     */
+    private fun probeExistence(uri: Uri, isVideo: Boolean): Existence {
+        val cursor = try {
+            contentResolver.query(uri, arrayOf(MediaStore.MediaColumns._ID), null, null, null)
+        } catch (e: Exception) {
+            Log.i("AlbumMediaStore", "核对条目是否存在失败，按未知处理: $uri", e)
+            return Existence.UNKNOWN
+        }
+        if (cursor == null) return Existence.UNKNOWN
+        cursor.use {
+            if (it.moveToFirst()) return Existence.PRESENT
+        }
+        return if (hasMediaReadPermission(isVideo)) Existence.MISSING else Existence.UNKNOWN
+    }
+
+    private fun hasMediaReadPermission(isVideo: Boolean): Boolean {
+        val permission = when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ->
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            isVideo -> Manifest.permission.READ_MEDIA_VIDEO
+            else -> Manifest.permission.READ_MEDIA_IMAGES
+        }
+        return ContextCompat.checkSelfPermission(this, permission) ==
+            PackageManager.PERMISSION_GRANTED
     }
 
     // ---- AI 帮写：把本地图片压成 1024px 的 JPEG ----

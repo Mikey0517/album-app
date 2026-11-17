@@ -52,8 +52,12 @@ class AlbumMediaFilterBar extends StatelessWidget {
   }
 }
 
-/// 吸顶版筛选条：高度、内边距、不透明底色由 [PinnedBarSliver] +
+/// 吸顶版筛选条：高度、内边距、底衬由 [PinnedBarSliver] +
 /// [AppSegmentedBarSurface] 决定，和详情页完全相同。
+///
+/// [PinnedBarSliver] 的底衬显式传**透明**：筛选条自己要的是「透明 + 极轻
+/// 模糊」（见 [AppSegmentedBarSurface]），吸顶 sliver 再垫一层页面底色的话，
+/// 那层模糊只会采到这块底色，页面渐变一点也透不上来。
 class AlbumMediaFilterSliver extends StatelessWidget {
   final AlbumMediaCounts counts;
   final AlbumMediaFilter selected;
@@ -70,6 +74,7 @@ class AlbumMediaFilterSliver extends StatelessWidget {
   Widget build(BuildContext context) {
     return PinnedBarSliver(
       height: kAppSegmentedBarHeight,
+      background: Colors.transparent,
       child: AppSegmentedBarSurface(
         child: AlbumMediaFilterBar(
           counts: counts,
