@@ -233,8 +233,13 @@ void main() {
     expect(glassSurface.useOwnLayer, isTrue);
     expect(glassSurface.scrim, isTrue);
     expect(glassSurface.requestedQuality, AppChromeGlassBar.preferredQuality);
-    // 圆角按形态取：分类条是胶囊（高度/2）。
-    expect(glassSurface.radius, kAppSegmentedBarPillRadius);
+    // 圆角按形态取：只有 footer 是胶囊，吸顶分类条是**直边条**（0）。
+    expect(glassSurface.radius, kAppSegmentedBarPinnedRadius);
+    expect(glassSurface.radius, 0, reason: '吸顶直接横贯整屏，两端不留圆弧');
+    // 直边条没有描边/内高光：只剩玻璃本体 + 固定底衬（与日期条同一档）。
+    expect(glassSurface.showBorder, isFalse);
+    expect(glassSurface.showHighlight, isFalse);
+    expect(glassSurface.backplate, isNotNull);
     // 非吸顶那一份（选封面页 AppBar）仍然是渐变：同一个组件两种形态，
     // 渐变与日期条、与原来的参数是同一份（见上面那条单元用例）。
 

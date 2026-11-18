@@ -6,10 +6,11 @@ import 'app_glass_tone.dart';
 
 /// 吸顶日期条（满宽条带）的玻璃圆角：**0**。
 ///
-/// 圆角按各自形态取：footer 与分类条是胶囊（高度/2），日期条是一条横贯整屏的
-/// **条带**，四角不留圆弧——留了的话吸顶条两端会露出后面的照片，条带看上去
-/// 像一枚飘着的胶囊。其余参数与 footer 一字不差（见 [AppChromeGlassBar]）。
-const double kPinnedDateHeaderRadius = 0;
+/// 圆角按各自形态取：只有 footer 是胶囊（高度/2），日期条是一条横贯整屏的
+/// **直边条**，四角不留圆弧——留了的话吸顶条两端会露出后面的照片、留下侧边
+/// 空隙，条带看上去像一枚飘着的胶囊。数取自 [kAppChromePinnedRadius]（三处
+/// 吸顶条同一档），其余参数与 footer 一字不差（见 [AppChromeGlassBar]）。
+const double kPinnedDateHeaderRadius = kAppChromePinnedRadius;
 
 /// 日期分组头：固定高度 + 左右内边距 + **自动墨色的文字**。
 ///
@@ -65,7 +66,10 @@ class DateHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     // 吸顶那一份：墨色由玻璃条按背景采样挑好传进来（与 footer 同一个机制）。
     if (pinned) {
-      return AppChromeGlassBar(
+      // 直边条 + 不要描边/内高光 + 固定底衬（[AppChromeGlassBar.pinned]）：
+      // 吸顶条贴在页面左右边缘，只留玻璃本体，且合成色不随背后滚过的照片漂。
+      // footer 的装饰与材质仍走默认构造，两处互不影响。
+      return AppChromeGlassBar.pinned(
         radius: radius,
         builder: (_, ink) => _content(ink),
       );

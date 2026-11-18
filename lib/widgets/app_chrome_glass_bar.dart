@@ -28,6 +28,28 @@ import '../core/design/text_styles.dart';
 import 'app_glass.dart';
 import 'app_glass_tone.dart';
 
+/// 三处**吸顶悬浮条**共用的圆角：**0**（直边条）。
+///
+/// 圆角按形态只有两档：footer 胶囊取 AppBottomTabBar.radius（高度/2），
+/// 三处吸顶条一律取这个数。吸顶条横贯整屏，四角留圆弧会在屏幕左右两边露出
+/// 后面的照片（看着像一枚飘着的胶囊），也留出侧边空隙——所以吸顶条是直边、
+/// 贴住页面左右边缘。三处的半径只有这一个来源，不各写一个 0。
+const double kAppChromePinnedRadius = 0;
+
+/// 三处**吸顶悬浮条**玻璃下面那层固定底衬的不透明度：**0.9**。
+///
+/// 吸顶条底下是滚动的照片/卡片，玻璃的 scrim 只压 55%——剩下 45% 的背景权重
+/// 会让条带的合成色跟着滚过的内容漂，下拉刷新那几帧最明显（「吸顶日期条会
+/// 变色」）。这层「页面底色 + 0.9」把可漂移权重压到 (1 − 0.9) × 45% ≈ 4.5%，
+/// 合成色基本钉死；玻璃本体（折射/模糊/scrim）仍原样在它上面，Element 不重建。
+///
+/// 取 0.9 而不是更高：再往上（≥0.97）才能把「纯黑照片 ↔ 纯白照片」这种极端
+/// 背景也压到 3/255 以内，那时吸顶条已经等于一块不透明的页面底色，玻璃也就
+/// 没了。0.9 在真实背景（页面底色 ↔ 卡片白）之间只剩不到 1/255 的漂移，照片
+/// 那一档也从 115/255 收到 ~11/255。footer 不画这层底衬（backplateAlpha 默认
+/// 0），观感一点不变。
+const double kAppChromePinnedBackplateAlpha = 0.9;
+
 /// footer 未激活文字/图标那一档：字号。
 ///
 /// 三处吸顶条里的文字（未选中的段 / 数量 / 日期）与 footer 的标签用**同一个
@@ -115,12 +137,21 @@ class AppChromeInk extends InheritedWidget {
   bool updateShouldNotify(AppChromeInk oldWidget) => oldWidget.ink != ink;
 }
 
-/// 一条**与底部 footer 完全相同**的悬浮玻璃条。
+/// 一条**与底部 footer 共用同一份玻璃**的悬浮条。
 ///
-/// 只暴露两样东西：圆角 [radius]（按各自形态取：footer 与分类条是胶囊
-/// = 高度/2，日期条是满宽条带 = 0）与内容 [builder]。其余参数一字不差——
+/// 暴露四样东西：圆角 [radius]（footer 胶囊 = 高度/2，三处吸顶条 =
+/// [kAppChromePinnedRadius] = 0）、描边 [showBorder]、内高光 [showHighlight]
+/// 与固定底衬 [backplateAlpha]（footer 是 true / true / 0，三处吸顶条反过来，
+/// 见 [AppChromeGlassBar.pinned]），以及内容 [builder]。其余参数一字不差——
 /// [preferredQuality]（premium）、[usesOwnLayer]、scrim、参数与 scrim 色都只
 /// 在这里出现一次。
+///
+/// **footer 与吸顶条的差别只有「形状 + 那两层装饰」**：
+/// - footer：胶囊，圆角 28，有 1px 描边与顶部内高光；
+/// - 三处吸顶条：直边条，圆角 0，**没有描边、没有内高光**，只剩玻璃本体 +
+///   scrim（+ 阴影，若有）。吸顶条横贯整屏，贴在页面左右边缘上：直边才不留
+///   侧边空隙，去掉上下两道线才不会把条带和页面切成两块。
+/// 玻璃本体（scrim / 档位 / 光学参数）仍是同一份，不会因为这两个开关分家。
 ///
 /// **刷新不换材质**：[layerKey] 是常量 key 的 [RepaintBoundary]，[surfaceKey]
 /// 挂在 [AppGlassSurface] 上。下拉刷新期间列表会重建，但这两个 key 与位置都不
@@ -131,8 +162,26 @@ class AppChromeGlassBar extends StatelessWidget {
   const AppChromeGlassBar({
     super.key,
     required this.radius,
+    this.showBorder = true,
+    this.showHighlight = true,
+    this.backplateAlpha = 0,
     required this.builder,
-  });
+  }) : assert(backplateAlpha >= 0 && backplateAlpha <= 1);
+
+  /// **三处吸顶悬浮条的唯一构造方式**：直边（[kAppChromePinnedRadius]）、
+  /// 不要描边、不要内高光、玻璃下面加一层固定底衬。
+  ///
+  /// 这四样由构造器写死，调用点不用（也不可能漏）逐个传——三个调用点各传
+  /// 一遍 radius: 0 / showBorder: false / showHighlight: false /
+  /// backplateAlpha: 0.9 迟早会漏一个，而漏掉的那一个正好是「吸顶条看着跟
+  /// 另外两条不一样」。footer 用默认构造：胶囊 + 描边 + 内高光 + 无底衬。
+  const AppChromeGlassBar.pinned({
+    super.key,
+    this.radius = kAppChromePinnedRadius,
+    required this.builder,
+  })  : showBorder = false,
+        showHighlight = false,
+        backplateAlpha = kAppChromePinnedBackplateAlpha;
 
   /// 胶囊想要的玻璃档位：premium（Impeller 全管线，折射/边缘扭曲）。
   ///
@@ -149,8 +198,26 @@ class AppChromeGlassBar extends StatelessWidget {
   /// 玻璃表面的稳定 key：同上，测试用它取 [AppGlassSurface] 的参数。
   static const Key surfaceKey = ValueKey<String>('app-chrome-glass-surface');
 
-  /// 圆角：按各自形态取（胶囊 = 高度/2，条带 = 0）。
+  /// 圆角：按各自形态取（胶囊 = 高度/2，吸顶条 = [kAppChromePinnedRadius] = 0）。
   final double radius;
+
+  /// 是否画那圈 1px 半透明描边（玻璃分支是前景描边，退化分支是细边）。
+  ///
+  /// 默认 true 给 footer 用；[AppChromeGlassBar.pinned] 把它设成 false——
+  /// 直边条上下各一道线，会把玻璃和页面切成两块（见类文档）。布局尺寸完全不变。
+  final bool showBorder;
+
+  /// 是否画顶部内高光层。
+  ///
+  /// 默认 true 给 footer 用；[AppChromeGlassBar.pinned] 把它设成 false——
+  /// 条带只留玻璃本体 + 阴影，不再叠一道白色横杠。
+  final bool showHighlight;
+
+  /// 玻璃下面那层固定底衬的不透明度：0 = 不画（footer 默认）。
+  ///
+  /// 三处吸顶条取 [kAppChromePinnedBackplateAlpha]（见那里的推算），把「背后
+  /// 内容在动 → 条带变色」这件事从合成色里挤出去。
+  final double backplateAlpha;
 
   /// 内容：拿到当前该用的自动墨色 [ink]（见 appGlassToneInk）。
   final Widget Function(BuildContext context, Color ink) builder;
@@ -174,6 +241,14 @@ class AppChromeGlassBar extends StatelessWidget {
           scrim: true,
           settings: appChromeGlassSettings(context),
           scrimColor: appChromeScrimColor(),
+          // 描边与内高光由调用点决定：footer 两样都要（默认），三处吸顶条
+          // 两样都不要（直边条 + 玻璃本体 + 阴影）。
+          showBorder: showBorder,
+          showHighlight: showHighlight,
+          // 固定底衬：0 = 不画。三处吸顶条传 0.9，footer 不画。
+          backplate: backplateAlpha <= 0
+              ? null
+              : AppColors.bgPage.withValues(alpha: backplateAlpha),
           child: builder(context, ink),
         ),
       ),

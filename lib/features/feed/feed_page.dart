@@ -348,7 +348,7 @@ class _FeedPageState extends State<FeedPage> {
       slivers.add(
         const SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.only(top: 20, bottom: 36),
+            padding: EdgeInsets.only(top: 20, bottom: 32),
             child: Center(
               child: Text('已经到底啦', style: AppText.caption),
             ),
@@ -357,9 +357,10 @@ class _FeedPageState extends State<FeedPage> {
       );
     }
 
-    // 末尾余量不用另外加：底部的「已经到底啦」自己带 36 的留白，已经比
-    // 半个胶囊高（[AppBottomTabBar.contentBottomInset] = 28）多一点。再加
-    // 一层会让滚到底时整条列表又缩回胶囊上方，胶囊底下变回空底。
+    // 末尾余量不用另外加：底部的「已经到底啦」自己带 32 的留白，已经比
+    // 半个胶囊高（[AppBottomTabBar.contentBottomInset] = 24）多一点。再加
+    // 一层会让滚到底时整条列表又缩回胶囊上方，胶囊底下变回空底。这两个数
+    // 是跟着 footer 的 bottomGap（8 → 4）一起收的：末尾留白同样少 4。
     return Stack(
       clipBehavior: Clip.none,
       children: [

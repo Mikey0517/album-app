@@ -21,6 +21,11 @@ class VideoView extends StatefulWidget {
   final ValueChanged<bool> onPlayingChanged;
   final VoidCallback? onToggleRotation;
 
+  /// 仅测试用：注入替身控制器，让测试不必依赖真实平台通道就能摆出
+  /// 缓冲中 / 播完 / 重播这几个状态。
+  @visibleForTesting
+  final VideoPlayerController Function(Uri url)? controllerFactory;
+
   const VideoView({
     super.key,
     required this.media,
@@ -31,19 +36,44 @@ class VideoView extends StatefulWidget {
     required this.onUserInteraction,
     required this.onPlayingChanged,
     this.onToggleRotation,
+    this.controllerFactory,
   });
 
   @override
   State<VideoView> createState() => _VideoViewState();
 }
 
+/// 结束 → 重播之间的 seek 必然触发平台层的一次 bufferingStart→bufferingEnd
+/// （见 video_player 的 completed 事件处理器：`pause().then(seekTo(duration))`）。
+/// 那是本地跳转，不是等网络数据，窗口内一律不画转圈。
+const Duration videoBufferingSuppressWindow = Duration(milliseconds: 400);
+
+/// 顶部缓冲转圈该不该出现：只有「真的在等数据」时才出现。
+///
+/// - 播完（[VideoPlayerValue.isCompleted] 或本控件记下的 ended）停在最后一帧，
+///   平台自己那次 seek 到 duration 的 buffering 不算等待；
+/// - 重播 seek 的 [suppressed] 窗口内同样不算等待。
+bool shouldShowVideoBuffering(
+  VideoPlayerValue value, {
+  required bool error,
+  required bool ended,
+  required bool suppressed,
+}) {
+  if (error || !value.isInitialized) return false;
+  if (ended || value.isCompleted) return false;
+  return value.isBuffering && !suppressed;
+}
+
 class _VideoViewState extends State<VideoView> {
   VideoPlayerController? _controller;
   Timer? _ticker;
+  Timer? _bufferingSuppressTimer;
   bool _loading = true;
   bool _error = false;
   bool _ended = false;
   bool _playing = false;
+  bool _buffering = false;
+  bool _suppressBuffering = false;
 
   @override
   void initState() {
@@ -56,10 +86,12 @@ class _VideoViewState extends State<VideoView> {
 
   Future<void> _initialize() async {
     try {
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(fullUrl(widget.media.url)),
-        videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-      );
+      final uri = Uri.parse(fullUrl(widget.media.url));
+      final controller = widget.controllerFactory?.call(uri) ??
+          VideoPlayerController.networkUrl(
+            uri,
+            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+          );
       _controller = controller;
       await controller.initialize();
       controller.addListener(_onValueChanged);
@@ -98,6 +130,11 @@ class _VideoViewState extends State<VideoView> {
       setState(() => _playing = value.isPlaying);
       _notifyPlaying(value.isPlaying);
     }
+    // 缓冲起止要立刻重画，不能等 250ms 的 ticker：那是"窗口内不许出现转圈"
+    // 之所以会闪一下的另一半原因。
+    if (value.isBuffering != _buffering) {
+      setState(() => _buffering = value.isBuffering);
+    }
   }
 
   void _notifyPlaying(bool value) {
@@ -106,9 +143,22 @@ class _VideoViewState extends State<VideoView> {
     widget.onPlayingChanged(value);
   }
 
+  /// 重播 / 从末尾拉起播放都要先 seek 回 0：窗口内屏蔽缓冲转圈。
+  void _suppressBufferingForSeek() {
+    _bufferingSuppressTimer?.cancel();
+    if (!_suppressBuffering && mounted) {
+      setState(() => _suppressBuffering = true);
+    }
+    _bufferingSuppressTimer = Timer(videoBufferingSuppressWindow, () {
+      if (!mounted) return;
+      setState(() => _suppressBuffering = false);
+    });
+  }
+
   Future<void> _replay() async {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
+    _suppressBufferingForSeek();
     await controller.seekTo(Duration.zero);
     await controller.play();
     if (mounted) setState(() => _ended = false);
@@ -133,6 +183,7 @@ class _VideoViewState extends State<VideoView> {
   @override
   void dispose() {
     _ticker?.cancel();
+    _bufferingSuppressTimer?.cancel();
     _controller?.removeListener(_onValueChanged);
     _controller?.dispose();
     super.dispose();
@@ -209,20 +260,16 @@ class _VideoViewState extends State<VideoView> {
                 ],
               ),
             ),
-          if (initialized && controller.value.isBuffering && !_error)
-            const Positioned(
+          if (initialized)
+            Positioned(
               top: 84,
               left: 0,
               right: 0,
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white70,
-                  ),
-                ),
+              child: VideoBufferingIndicator(
+                value: controller.value,
+                ended: _ended,
+                suppressed: _suppressBuffering,
+                error: _error,
               ),
             ),
           if (_ended && initialized)
@@ -255,10 +302,52 @@ class _VideoViewState extends State<VideoView> {
                   controller: controller,
                   onInteraction: widget.onUserInteraction,
                   onToggleRotation: widget.onToggleRotation,
+                  onRestart: _suppressBufferingForSeek,
                 ),
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// 顶部那枚缓冲转圈：真的在等数据时才出现，其余时候是零尺寸的占位。
+///
+/// 播完停在最后一帧、结束→重播的 seek 窗口里都不画（见
+/// [shouldShowVideoBuffering]）。
+class VideoBufferingIndicator extends StatelessWidget {
+  const VideoBufferingIndicator({
+    super.key,
+    required this.value,
+    required this.ended,
+    required this.suppressed,
+    this.error = false,
+  });
+
+  final VideoPlayerValue value;
+  final bool ended;
+  final bool suppressed;
+  final bool error;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!shouldShowVideoBuffering(
+      value,
+      error: error,
+      ended: ended,
+      suppressed: suppressed,
+    )) {
+      return const SizedBox.shrink();
+    }
+    return const Center(
+      child: SizedBox(
+        width: 20,
+        height: 20,
+        child: CircularProgressIndicator(
+          strokeWidth: 2,
+          color: Colors.white70,
+        ),
       ),
     );
   }

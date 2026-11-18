@@ -171,9 +171,10 @@ void main() {
           .widget<GlassContainer>(find.byType(GlassContainer))
           .shape as LiquidRoundedSuperellipse;
       expect(shape.borderRadius, pillRect.height / 2);
-      // 底部：离安全区还有 8~12，安全区自身不算在胶囊里。
+      // 底部：离安全区只有 4~8（胶囊这一轮往下贴了一档），安全区自身不算在
+      // 胶囊里，home indicator 不会被压住。
       final bottomGap = barRect.bottom - pillRect.bottom - 34;
-      expect(bottomGap, inInclusiveRange(8, 12));
+      expect(bottomGap, inInclusiveRange(4, 8));
       expect(barRect.bottom - pillRect.bottom,
           AppBottomTabBar.bottomGap + 34);
     });

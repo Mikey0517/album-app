@@ -4,6 +4,10 @@ import '../../core/design/text_styles.dart';
 import '../../core/formatters.dart';
 import '../../models/media.dart';
 
+/// 顶部栏的恒定 key：播放/暂停、缓冲、结束这些状态变化会让浏览页重建，
+/// 挂一个常量 key 让顶部栏始终命中同一个 Element，不被当成新子树重建。
+const Key viewerTopBarKey = ValueKey<String>('viewer-top-bar');
+
 class ViewerTopBar extends StatelessWidget {
   final Media media;
   final VoidCallback onClose;

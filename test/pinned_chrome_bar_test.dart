@@ -141,6 +141,9 @@ class _Chrome {
   LiquidGlassSettings get settings => surface.settings!;
 
   bool get preferPremium => surface.preferPremium;
+  bool get showBorder => surface.showBorder;
+  bool get showHighlight => surface.showHighlight;
+  Color? get backplate => surface.backplate;
   bool get scrim => surface.scrim;
   bool get useOwnLayer => surface.useOwnLayer;
   GlassQuality? get quality => surface.requestedQuality;
@@ -158,6 +161,52 @@ _Chrome _chromeOf(WidgetTester tester, Finder bar, String name) {
     find.descendant(of: bar, matching: find.byType(AppGlassSurface)),
   );
   return _Chrome(name, surface);
+}
+
+/// 条带里某一层装饰出现了几次（0 = 没画）。
+int _layerCount(WidgetTester tester, Finder bar, Key key) =>
+    find.descendant(of: bar, matching: find.byKey(key)).evaluate().length;
+
+/// footer 的事：胶囊 + 1px 描边 + 顶部内高光，没有固定底衬。
+void _expectFooterDecoration(WidgetTester tester, Finder bar) {
+  expect(_layerCount(tester, bar, AppGlassSurface.strokeKey), 1,
+      reason: 'footer 的 1px 描边没了');
+  expect(_layerCount(tester, bar, AppGlassSurface.highlightKey), 1,
+      reason: 'footer 的顶部内高光没了');
+  expect(_layerCount(tester, bar, AppGlassSurface.backplateKey), 0,
+      reason: 'footer 多了一层底衬：它背后是页面底图，不需要压色');
+  // footer 仍是浮在底部的胶囊：左右各留 sideInset，离底只剩 bottomGap。
+  final rect = tester.getRect(bar);
+  expect(rect.left, AppBottomTabBar.sideInset);
+  expect(tester.view.physicalSize.width - rect.right, AppBottomTabBar.sideInset);
+  expect(tester.view.physicalSize.height - rect.bottom,
+      AppBottomTabBar.bottomGap);
+}
+
+/// 三处吸顶条的事：**没有**描边、**没有**内高光、只有一层固定底衬，
+/// 而且几何上贴住页面左右边缘（不留侧边空隙）。
+void _expectPinnedDecoration(WidgetTester tester, Finder bar, String name) {
+  expect(_layerCount(tester, bar, AppGlassSurface.strokeKey), 0,
+      reason: '$name还有 1px 描边：直边条上下各一条线，会把玻璃和页面切开');
+  expect(_layerCount(tester, bar, AppGlassSurface.highlightKey), 0,
+      reason: '$name还有顶部内高光：直边条上不该再压一道白色横杠');
+  expect(_layerCount(tester, bar, AppGlassSurface.backplateKey), 1,
+      reason: '$name少了固定底衬：背后内容一动，条带就会变色');
+  // 底衬 = 页面底色 + 固定不透明度，铺满整条（连圆角外也不留缝）。
+  final backplate = tester.widget<DecoratedBox>(
+    find.descendant(of: bar, matching: find.byKey(AppGlassSurface.backplateKey)),
+  ).decoration as BoxDecoration;
+  expect(backplate.color!.a, closeTo(kAppChromePinnedBackplateAlpha, 1e-9));
+  expect(backplate.color, AppColors.bgPage.withValues(alpha: kAppChromePinnedBackplateAlpha));
+  expect(tester.getRect(find.descendant(
+    of: bar,
+    matching: find.byKey(AppGlassSurface.backplateKey),
+  )), tester.getRect(bar), reason: '$name的底衬没有铺满外框');
+  // 贴边：吸顶条与屏幕左右边缘对齐，没有侧边空隙。
+  final rect = tester.getRect(bar);
+  expect(rect.left, 0, reason: '$name左边留了空隙');
+  expect(rect.width, tester.view.physicalSize.width,
+      reason: '$name没有横贯整屏（右侧留了空隙）');
 }
 
 Finder _footerBar() => find.descendant(
@@ -213,17 +262,22 @@ void main() {
     await tester.pumpWidget(_footerPage());
     await tester.pump(const Duration(milliseconds: 50));
     final footer = _chromeOf(tester, _footerBar(), 'footer');
+    // footer 的形状与装饰：胶囊 + 描边 + 内高光（三处吸顶条不许有这两层）。
+    _expectFooterDecoration(tester, _footerBar());
 
     await tester.pumpWidget(_albumPage());
     await tester.pumpAndSettle();
     await _scrollAlbum(tester);
     final filter = _chromeOf(tester, _filterBar(), '相册吸顶分类条');
     final albumDate = _chromeOf(tester, _pinnedDateBar(), '相册吸顶日期条');
+    _expectPinnedDecoration(tester, _filterBar(), '相册吸顶分类条');
+    _expectPinnedDecoration(tester, _pinnedDateBar(), '相册吸顶日期条');
 
     addTearDown(installFakeApi(json: _feedJson()));
     await tester.pumpWidget(_feedPage());
     await tester.pumpAndSettle();
     final feedDate = _chromeOf(tester, _pinnedDateBar(), '朋友圈吸顶日期条');
+    _expectPinnedDecoration(tester, _pinnedDateBar(), '朋友圈吸顶日期条');
 
     final sites = <_Chrome>[filter, albumDate, feedDate];
 
@@ -270,13 +324,34 @@ void main() {
     expect(footer.scrimAlpha, closeTo(appGlassChromeScrimAlpha(), 1e-9));
     expect(appGlassChromeRefractionVisibility(), closeTo(0.45, 1e-9));
 
-    // 4. 圆角按各自形态取：胶囊 / 条带。
+    // 4. 圆角按各自形态取：footer 是胶囊（28），三处吸顶条一律 **0**。
     expect(footer.radius, AppBottomTabBar.radius);
     expect(footer.radius, AppBottomTabBar.barHeight / 2, reason: 'footer 是胶囊');
-    expect(filter.radius, kAppSegmentedBarPillRadius, reason: '分类条也是胶囊');
-    expect(albumDate.radius, kPinnedDateHeaderRadius);
-    expect(feedDate.radius, kPinnedDateHeaderRadius);
-    expect(kPinnedDateHeaderRadius, 0, reason: '日期条是满宽条带，四角不留圆弧');
+    expect(footer.radius, 28, reason: 'footer 的胶囊圆角保持 28');
+    expect(kAppChromePinnedRadius, 0, reason: '吸顶条是直边条，圆角只有 0 这一档');
+    expect(kPinnedDateHeaderRadius, kAppChromePinnedRadius);
+    expect(kAppSegmentedBarPinnedRadius, kAppChromePinnedRadius);
+    for (final site in sites) {
+      expect(site.radius, 0, reason: '${site.name} 还有圆角：吸顶时两端会露出照片');
+      expect(site.radius, kAppChromePinnedRadius);
+    }
+    expect(filter.radius, 0, reason: '分类条原来是 16 的胶囊，现在是直边条');
+
+    // 5. 描边 / 内高光 / 底衬：三处吸顶条只留玻璃本体 + 固定底衬；
+    //    footer 仍是「描边 + 高光、无底衬」。
+    for (final site in sites) {
+      expect(site.showBorder, isFalse, reason: '${site.name} 还画着 1px 描边');
+      expect(site.showHighlight, isFalse,
+          reason: '${site.name} 还画着顶部内高光');
+      expect(site.backplate, isNotNull, reason: '${site.name} 少了固定底衬');
+      expect(site.backplate!.a, closeTo(kAppChromePinnedBackplateAlpha, 1e-9));
+      expect(site.backplate,
+          AppColors.bgPage.withValues(alpha: kAppChromePinnedBackplateAlpha),
+          reason: '${site.name} 的底衬不是「页面底色 + 固定不透明度」');
+    }
+    expect(footer.showBorder, isTrue, reason: 'footer 的描边不许跟着吸顶条一起掉');
+    expect(footer.showHighlight, isTrue, reason: 'footer 的内高光要保持');
+    expect(footer.backplate, isNull, reason: 'footer 不加底衬');
     expect(tester.takeException(), isNull);
   });
 

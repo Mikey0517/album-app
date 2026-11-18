@@ -340,6 +340,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                         milliseconds: _uiVisible ? 200 : 300,
                       ),
                       child: ViewerTopBar(
+                        key: viewerTopBarKey,
                         media: current,
                         onClose: _close,
                         onDownload: _downloadCurrent,

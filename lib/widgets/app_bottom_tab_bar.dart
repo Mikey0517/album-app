@@ -149,8 +149,12 @@ class AppBottomTabBar extends StatelessWidget {
   /// 胶囊离屏幕左右两边的边距。
   static const double sideInset = 18;
 
-  /// 胶囊离底部安全区的间距。
-  static const double bottomGap = 8;
+  /// 胶囊离底部安全区的间距：**4**（上一轮是 8）。
+  ///
+  /// 胶囊再往下贴一档：屏幕底部不再多出一条 8px 的缝，画面更「满」。安全区
+  /// （home indicator）仍在它下面——[bottomGap] 是**安全区之上**的间距，胶囊
+  /// 不会压到手势条；[overlayInset] 也仍然把安全区算进去。
+  static const double bottomGap = 4;
 
   /// 胶囊圆角 = 高度/2，正好是 pill。
   static const double radius = barHeight / 2;
@@ -162,12 +166,17 @@ class AppBottomTabBar extends StatelessWidget {
   static double overlayInset(BuildContext context) =>
       barHeight + bottomGap + MediaQuery.viewPaddingOf(context).bottom;
 
-  /// 滚动内容自己的末尾留白：半个胶囊高（28）。
+  /// 滚动内容自己的末尾留白：半个胶囊高再减掉胶囊下移的那 4（28 → 24）。
   ///
   /// 页面不再为胶囊整体让出 [overlayInset]：那样胶囊正下方永远是一块空
   /// 底色，磨砂没有可模糊的东西。留半个胶囊高就够——最后一项能滑到胶囊
   /// 下沿附近，滚的过程中内容一直从胶囊底下穿过。
-  static const double contentBottomInset = barHeight / 2;
+  ///
+  /// [bottomGap] 从 8 收到 4 之后这里同步减 4：胶囊往下贴了 4，列表末尾就让
+  /// 出少 4，最后一项与胶囊的重叠量不变，屏幕底部不会平白多留一截空白。三个
+  /// 页面的末尾留白都取这个常量（朋友圈的「已经到底啦」、我的页与相册总页的
+  /// 卡片区），所以它们一起变。
+  static const double contentBottomInset = barHeight / 2 - 4;
 
   final List<AppBottomTabItem> items;
   final int selectedIndex;

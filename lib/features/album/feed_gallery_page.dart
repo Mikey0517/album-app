@@ -663,7 +663,7 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
             slivers.add(
               const SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.only(top: 20, bottom: 36),
+                  padding: EdgeInsets.only(top: 20, bottom: 32),
                   child: Center(
                     child: Text('时间轴到底了', style: AppText.caption),
                   ),

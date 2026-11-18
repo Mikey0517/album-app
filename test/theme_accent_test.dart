@@ -155,7 +155,7 @@ void main() {
     testWidgets('等宽三格、胶囊 56 高、无涟漪，退化后仍是细边胶囊', (tester) async {
       await pumpBar(tester);
 
-      // 整条栏 = 胶囊 56 + 离底边距 8（这个 host 没有底部安全区）。
+      // 整条栏 = 胶囊 56 + 离底边距 4（这个 host 没有底部安全区）。
       final bar = tester.getSize(find.byType(AppBottomTabBar));
       expect(bar.height, AppBottomTabBar.barHeight + AppBottomTabBar.bottomGap);
       expect(AppBottomTabBar.barHeight, 56);

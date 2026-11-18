@@ -29,14 +29,18 @@ Color get segmentedSelectedInk => Color.lerp(
       kSegmentedSelectedInkDarken,
     )!;
 
-/// 分段条吸顶条内部那枚胶囊的高度：46 减去上下各 7 的内边距。
+/// 吸顶条内部内容带的高度：46 减去上下各 7 的内边距。
 ///
-/// 胶囊是**整条**筛选条的底子（不是每一段各一枚），圆角取它的一半
-/// （[kAppSegmentedBarPillRadius]），所以它是一枚真正的 pill。
+/// 内容带只是四段文字所在的高度，本身不画底子；底子是整条筛选条后面的
+/// 玻璃（[AppChromeGlassBar]）。
 const double kAppSegmentedBarPillHeight = kAppSegmentedBarHeight - 14;
 
-/// 胶囊圆角 = 高度/2。
-const double kAppSegmentedBarPillRadius = kAppSegmentedBarPillHeight / 2;
+/// 吸顶分类条的玻璃圆角：**0**（直边条，与日期条同一档）。
+///
+/// 圆角只有 footer 是胶囊（[AppBottomTabBar.radius]）；三处吸顶条一律取
+/// [kAppChromePinnedRadius]。吸顶条横贯整屏，直边才能贴住页面左右边缘、
+/// 不留侧边空隙，也不会在两端露出后面的照片。
+const double kAppSegmentedBarPinnedRadius = kAppChromePinnedRadius;
 
 /// 分段条上的一段：文案 + 可选数量。
 ///
@@ -159,10 +163,12 @@ class AppSegmentedBarSurface extends StatelessWidget {
   Widget build(BuildContext context) {
     if (pinned) {
       // 吸顶这一条压在滚动的照片上：材质整个交给 [AppChromeGlassBar]
-      // （与底部 footer 同一份），圆角取胶囊（高度/2）。墨色由玻璃条按背景
-      // 采样挑好后经 [AppChromeInk] 传给下面四段。
-      return AppChromeGlassBar(
-        radius: kAppSegmentedBarPillRadius,
+      // （与底部 footer 同一份），但形状是**直边条**（圆角 0，贴住页面左右
+      // 边缘）且不要描边/内高光——吸顶条只留玻璃本体 + 阴影，footer 那两样
+      // 装饰不受影响。墨色由玻璃条按背景采样挑好后经 [AppChromeInk] 传给
+      // 下面四段。
+      return AppChromeGlassBar.pinned(
+        radius: kAppSegmentedBarPinnedRadius,
         builder: (context, ink) => SizedBox(
           height: kAppSegmentedBarHeight,
           width: double.infinity,

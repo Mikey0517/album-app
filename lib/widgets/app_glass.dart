@@ -654,6 +654,9 @@ class AppGlassSurface extends StatelessWidget {
     this.scrimColor,
     this.pauseDuringRefresh = true,
     this.depth = false,
+    this.showBorder = true,
+    this.showHighlight = true,
+    this.backplate,
   });
 
   /// 卡片 / 列表的外层阴影（[depth] 为 true 时才有）。
@@ -667,6 +670,9 @@ class AppGlassSurface extends StatelessWidget {
 
   /// 顶部内高光层（玻璃分支与 [depth] 的卡片都有）。
   static const Key highlightKey = Key('app-glass-highlight');
+
+  /// 表面内部的固定底衬层（只有 [backplate] 非 null 时有）。
+  static const Key backplateKey = Key('app-glass-backplate');
 
   /// 卡片 / 列表项 / 新建相册按钮的材质档位：**一处开关**。
   ///
@@ -782,6 +788,34 @@ class AppGlassSurface extends StatelessWidget {
   /// 叠层（不挡点击）。不做任何按下/悬浮位移动画，列表滚动不会抖。
   final bool depth;
 
+  /// 是否画表面那圈 1px 半透明描边（[strokeKey]）。
+  ///
+  /// 默认 true：footer 胶囊、底栏、弹窗、卡片都要这一圈边，表面才有边界。
+  /// **三处吸顶悬浮条显式传 false**（见 AppChromeGlassBar）：吸顶条是横贯
+  /// 整屏的直边条，描边会在上下沿各留一条看得见的线，把玻璃和页面切开。
+  ///
+  /// false 时玻璃分支不挂 [strokeKey]，不透明分支也不再补 [border] 那圈
+  /// 默认细边（[depth] 卡片由 [AppSurfaceDepth] 自己画，不受影响）。描边本来
+  /// 就是前景绘制，去掉它布局尺寸一点不变。
+  final bool showBorder;
+
+  /// 是否画顶部内高光层（[highlightKey]）。
+  ///
+  /// 默认 true（footer 胶囊、卡片、弹窗）。三处吸顶条传 false：去掉之后条带
+  /// 只剩玻璃本体 + scrim（+ 阴影，若有），斜面与折射自己就是「玻璃」那条边，
+  /// 不再叠一道白色横杠。false 时这一层整个不建（连 DecoratedBox 都没有）。
+  final bool showHighlight;
+
+  /// 表面**内部**的一层固定底衬色：画在玻璃/scrim 之上、内容之下。
+  ///
+  /// null = 不画（footer 胶囊与其余表面保持原样）。**三处吸顶悬浮条**显式传
+  /// 「页面底色 + AppChromeGlassBar 的 kAppChromePinnedBackplateAlpha」：吸顶条底下是
+  /// 滚动的照片/卡片，玻璃的 scrim 只压 55%，剩下 45% 的背景权重会让合成色
+  /// 跟着滚过的内容漂——下拉刷新那几帧最明显（条带会「变色」）。这层固定
+  /// 底衬把可漂移的权重压到 (1 − alpha) × 45%，合成色基本钉死；折射/模糊
+  /// 仍然由它上面那层玻璃提供，Element 与材质都不换。
+  final Color? backplate;
+
   @override
   Widget build(BuildContext context) {
     // 刷新开关一变就重建：开关只在真刷新期间变，平时没有额外开销。
@@ -840,7 +874,7 @@ class AppGlassSurface extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.bgSurface,
           borderRadius: borderRadius,
-          border: depth
+          border: depth || !showBorder
               ? null
               : border ?? Border.all(color: AppColors.divider, width: 1),
         ),
@@ -890,11 +924,25 @@ class AppGlassSurface extends StatelessWidget {
                 ),
               ),
             ),
+          // 固定底衬：画在玻璃之上、内容之下，把「背后内容在动」这件事从
+          // 合成色里挤出去（见 [backplate]）。
+          if (backplate != null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  key: backplateKey,
+                  decoration: BoxDecoration(
+                    color: backplate,
+                    borderRadius: borderRadius,
+                  ),
+                ),
+              ),
+            ),
           padded,
           // 顶部内高光：静态一层，盖在内容上、不参与命中测试。
           // depth 卡片的高光由外层 [AppSurfaceDepth] 画（和 minimal 同一层），
           // 这里不再叠第二层。
-          if (!depth)
+          if (!depth && showHighlight)
             Positioned.fill(
               child: IgnorePointer(
                 child: DecoratedBox(
@@ -916,6 +964,12 @@ class AppGlassSurface extends StatelessWidget {
       final Widget layered = AppSurfaceDepth(radius: radius, child: glass);
       if (margin == null) return layered;
       return Padding(padding: margin!, child: layered);
+    }
+
+    // 不要描边（三处吸顶条）：整块只剩玻璃本体 + scrim，布局尺寸照旧。
+    if (!showBorder) {
+      if (margin == null) return glass;
+      return Padding(padding: margin!, child: glass);
     }
 
     // 1px 半透明描边：前景绘制，布局尺寸一点不变（Container 的 border 会把

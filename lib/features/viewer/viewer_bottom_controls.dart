@@ -72,11 +72,16 @@ class ViewerVideoControls extends StatelessWidget {
   final VoidCallback onInteraction;
   final VoidCallback? onToggleRotation;
 
+  /// 从末尾往回拉（播完再点播放）时会 seek 回 0：调用方用它屏蔽这次 seek
+  /// 引起的 buffering 转圈。
+  final VoidCallback? onRestart;
+
   const ViewerVideoControls({
     super.key,
     required this.controller,
     required this.onInteraction,
     this.onToggleRotation,
+    this.onRestart,
   });
 
   @override
@@ -92,6 +97,7 @@ class ViewerVideoControls extends StatelessWidget {
           controller.pause();
         } else {
           if (value.isCompleted) {
+            onRestart?.call();
             controller.seekTo(Duration.zero);
           }
           controller.play();

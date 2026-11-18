@@ -97,7 +97,7 @@ void main() {
       reason: '卡片要真的和胶囊重叠，不是刚好贴在它上沿',
     );
 
-    // 滚到底：末尾只留「已经到底啦」那点留白（36，≈半个胶囊高），
+    // 滚到底：末尾只留「已经到底啦」那点留白（32，≈半个胶囊高），
     // 内容仍然在胶囊带里，不是整条缩回胶囊上方。
     position.jumpTo(position.maxScrollExtent);
     await tester.pumpAndSettle();

@@ -14,6 +14,7 @@ import 'package:album_app/models/album.dart';
 import 'package:album_app/models/media.dart';
 import 'package:album_app/widgets/app_chrome_glass_bar.dart';
 import 'package:album_app/widgets/app_glass.dart';
+import 'package:album_app/widgets/app_glass_tone.dart';
 import 'package:album_app/widgets/app_segmented_bar.dart';
 import 'package:album_app/widgets/date_header.dart';
 import 'package:album_app/widgets/pinned_bar_sliver.dart';
@@ -56,6 +57,36 @@ const Key _pageKey = Key('refresh-black-bar-page');
 
 /// 条带亮度低于这条线就算「近黑填充」。
 const double kBlackBandLuminanceFloor = 0.5;
+
+/// 刷新四个阶段之间，条带像素允许的最大通道差：**3/255**。
+///
+/// 依据：修复前「页面底色 ↔ 卡片白」这一档（刷新时条带背后真正会变的那一档）
+/// 实测就是 3/255（45% 背景权重 × 8/255）；3 以下人眼在这条 36px 高的柔和条带
+/// 上分辨不出（约 1.2% 亮度）。定位与实测数据见
+/// test/pinned_bar_color_stable_test.dart 的文件头。
+const int kRefreshBandColorDelta = 3;
+
+/// 条带的采样点：只取左侧内边距那一条（文字从 16 起，避开字），量到底衬本身。
+List<Color> _bandColors(_Shot shot, Rect band) => <Color>[
+      for (var dx = 3.0; dx <= 10.0; dx += 1)
+        for (var dy = 2.0; dy <= band.height - 2; dy += 4)
+          shot.at(Offset(band.left + dx, band.top + dy)),
+    ];
+
+int _maxBandDelta(List<Color> a, List<Color> b) {
+  int channel(double v) => (v * 255).round();
+  var worst = 0;
+  for (var i = 0; i < a.length; i++) {
+    final deltas = <int>[
+      (channel(a[i].r) - channel(b[i].r)).abs(),
+      (channel(a[i].g) - channel(b[i].g)).abs(),
+      (channel(a[i].b) - channel(b[i].b)).abs(),
+    ];
+    final delta = deltas.reduce((x, y) => x > y ? x : y);
+    if (delta > worst) worst = delta;
+  }
+  return worst;
+}
 
 class _Shot {
   _Shot(this.bytes, this.width, this.height, this.origin);
@@ -399,6 +430,9 @@ void main() {
 
     Element? glassElement;
     Element? layerElement;
+    // 变色：四个阶段各存一份条带像素与墨色（比「合成色/墨色有没有变」）。
+    final bandColors = <String, List<Color>>{};
+    final inks = <String, Color>{};
 
     Future<void> sample(String phase) async {
       // 玻璃层与它的重绘边界：刷新全程必须是同一个 Element（换掉就是真机上
@@ -424,9 +458,30 @@ void main() {
             reason: '$phase：吸顶日期条的重绘边界被换掉了');
       }
 
+      // 固定底衬：每一帧都在、颜色是同一个（页面底色 + 0.9）。这层把「背后
+      // 内容在动」从合成色里挤出去，也是「刷新时不变色」的实现（见
+      // AppChromeGlassBar.pinned / kAppChromePinnedBackplateAlpha）。
+      // 这一帧的玻璃表面（测试环境里 tier 会退化成不透明，所以量参数本身；
+      // 玻璃分支真的挂上这一层见 test/pinned_chrome_bar_test.dart）。
+      final surface = tester.widget<AppGlassSurface>(
+        find.descendant(of: band, matching: find.byType(AppGlassSurface)),
+      );
+      expect(surface.backplate, isNotNull,
+          reason: '$phase：吸顶日期条没有固定底衬（会跟着背后内容变色）');
+      expect(surface.backplate!.a, closeTo(kAppChromePinnedBackplateAlpha, 1e-9),
+          reason: '$phase：底衬的不透明度被改了');
+      expect(surface.backplate!.withValues(alpha: 1.0),
+          AppColors.bgPage.withValues(alpha: 1.0),
+          reason: '$phase：底衬不是页面底色');
+
+      // 墨色：刷新全程不许翻档（(a) 那条路）。
+      inks[phase] = appGlassToneInk();
+
       // 像素：条带里不许有近黑填充。
       final shot = await _shoot(tester);
-      final darkest = _bandMinLuminance(shot, tester.getRect(band));
+      final rect = tester.getRect(band);
+      bandColors[phase] = _bandColors(shot, rect);
+      final darkest = _bandMinLuminance(shot, rect);
       expect(darkest, greaterThan(kBlackBandLuminanceFloor),
           reason: '$phase：吸顶日期条出现近黑填充（最暗像素 '
               '${darkest.toStringAsFixed(3)}）');
@@ -450,6 +505,21 @@ void main() {
     await sample('刷新中');
     await tester.pumpAndSettle();
     await sample('刷新完成');
+
+    // 变色验收：四个阶段（刷新前 / 下拉中 / 释放瞬间 / 刷新完成 —— 这里还多
+    // 采了「刷新中」）的条带像素，最大通道差 ≤ 3/255。
+    const phases = <String>['刷新前', '下拉中', '释放瞬间', '刷新中', '刷新完成'];
+    expect(bandColors.keys, containsAll(phases));
+    final reference = bandColors['刷新前']!;
+    for (final phase in phases) {
+      final delta = _maxBandDelta(reference, bandColors[phase]!);
+      expect(delta, lessThanOrEqualTo(kRefreshBandColorDelta),
+          reason: '$phase：条带颜色相对「刷新前」差了 $delta/255，用户看到的就是'
+              '「下拉刷新时吸顶日期条变色」');
+    }
+    // (a) 自动墨色翻档这条排除了：四个阶段量到的 ink 是同一个。
+    expect(inks.values.toSet(), hasLength(1),
+        reason: '刷新期间自动墨色翻了档：$inks');
 
     expect(glassElement, isNotNull);
     expect(layerElement, isNotNull);
