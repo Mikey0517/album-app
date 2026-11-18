@@ -444,6 +444,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         final displayItems = [for (final section in sections) ...section.items];
         // 每个日期分组的网格 sliver 一个 key：气泡文案靠它实时取顶部可见项。
         final gridKeys = _gridKeysFor(sections.length);
+        // 吸顶区：一整块玻璃里的分类行 + 日期行。第一组的日期从一开始就摆在
+        // 那块玻璃里（内容流里没有它），所以日期行有没有、摆哪一组，都由
+        // 「第一个带分组头的分组」决定。
+        final firstHeader = timelineFirstHeaderIndex(sections);
+        final dateRowExtent =
+            firstHeader >= 0 ? kTimelineDateHeaderHeight : 0.0;
         // 吸顶栈、偏移表、topInset、气泡定位、吸顶阈值全部由公共组件算：
         // 两页只有「有没有折叠封面头」这一个参数不同。
         final layout = AlbumTimelineLayout.compute(
@@ -455,6 +461,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             headerMin: _headerMinExtent(context),
             headerMax: _headerMaxExtent(context),
             filterExtent: _filterBarExtent,
+            dateRowExtent: dateRowExtent,
             dateHeaderExtent: _dateHeaderExtent,
           ),
           sort: AlbumViewSettings.sort.value,
@@ -476,6 +483,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             context,
             sections: sections,
             gridKeys: gridKeys,
+            firstHeader: firstHeader,
             pinnedSection: _pin.pinnedSection,
             columns: columns,
             tileWidth: tileWidth,
@@ -525,6 +533,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     BuildContext context, {
     required List<AlbumSection> sections,
     required List<GlobalKey> gridKeys,
+    required int firstHeader,
     required int pinnedSection,
     required int columns,
     required double tileWidth,
@@ -535,15 +544,24 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
     if (!widget.coverPickMode) {
       slivers.add(_buildHeader(context));
-      if (_items.isNotEmpty) {
-        slivers.add(
-          AlbumMediaFilterSliver(
-            counts: _counts,
-            selected: _filter,
-            onChanged: _selectFilter,
-          ),
-        );
-      }
+    }
+    if (_items.isNotEmpty) {
+      // 吸顶区只有**一块玻璃**：分类行 + 日期行，一起钉、一起滚。日期行显示
+      // 当前那一组（还没滚到第一组时就是第一组），与两条独立吸顶条相比，
+      // 两行之间既没有接缝，也不会各自吸顶叠成两层。
+      final displayed = pinnedSection >= 0 ? pinnedSection : firstHeader;
+      final section = displayed >= 0 && displayed < sections.length
+          ? sections[displayed]
+          : null;
+      slivers.add(
+        AlbumPinnedChromeSliver(
+          counts: widget.coverPickMode ? null : _counts,
+          selected: _filter,
+          onChanged: _selectFilter,
+          dateText: section?.header,
+          dateCount: section?.items.length,
+        ),
+      );
     }
 
     if (_loading && _items.isEmpty) {
@@ -608,16 +626,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     var sectionStart = 0;
     for (var sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
       final section = sections[sectionIndex];
-      if (section.header != null) {
-        // 只有「当前分组」这一个头吸顶，其余分组头是内容流里的普通 38 高横条。
-        // 两者几何完全一样，所以滚动到阈值时切换不会跳：那一刻它的内容位置
-        // 本来就已经和吸顶位重合。吸顶/不吸顶的切换、头的几何与材质都在
-        // album_timeline_layout.dart 里，和朋友圈相册同一份——吸顶那一份是
-        // footer 同款玻璃，内容流那一份完全透明。
-        // 张数用 [DateHeader.count] 传：它和日期文字用同一套自动墨色。
+      // 第一组的日期摆在吸顶那块玻璃里（见 [AlbumPinnedChromeSliver]），
+      // 内容流里不再有它：多一条就会同一句日期出现两次，而且第一行照片会被
+      // 顶低一个分组头。其余分组的头是内容流里的普通 38 高横条，滚到玻璃
+      // 底下就被盖住——那一刻玻璃里的日期行正好换成这一组。
+      // 张数用 [DateHeader.count] 传：它和日期文字用同一套自动墨色。
+      if (section.header != null && sectionIndex != firstHeader) {
         slivers.add(
           timelineDateHeaderSliver(
-            pinned: sectionIndex == pinnedSection,
             section: section,
             count: section.items.length,
           ),
@@ -813,10 +829,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     );
   }
 
+  /// 吸顶玻璃里分类行的高度：选封面时筛选条挂在 AppBar 上、空相册没有分类行。
   double get _filterBarExtent =>
       widget.coverPickMode || _items.isEmpty ? 0 : kAppSegmentedBarHeight;
 
-  /// 日期分组头的整体高度（含与网格之间的留白）：平铺分组时没有分组头。
+  /// 内容流里日期分组头的整体高度（含与网格之间的留白）：平铺分组时没有。
+  ///
+  /// 玻璃里那一行日期是 [kTimelineDateHeaderHeight]（34，没有那 4px 留白），
+  /// 两者不是同一个数，各管各的。
   double get _dateHeaderExtent =>
       AlbumViewSettings.group.value == AlbumGroup.flat
           ? 0

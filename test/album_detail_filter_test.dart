@@ -8,6 +8,7 @@ import 'package:album_app/core/album_view_settings.dart';
 import 'package:album_app/models/album.dart';
 import 'package:album_app/models/media.dart';
 import 'package:album_app/widgets/album_thumb.dart';
+import 'package:album_app/widgets/app_chrome_glass_bar.dart';
 import 'package:album_app/widgets/app_segmented_bar.dart';
 import 'package:album_app/widgets/date_header.dart';
 import 'package:album_app/widgets/pinned_bar_sliver.dart';
@@ -637,23 +638,24 @@ void main() {
       await tester.pumpAndSettle();
 
       final filter = tester.getRect(find.byType(AppSegmentedBarSurface));
+      // 吸顶区是**一整块玻璃**：分类行与日期行同一个 AppChromeGlassBar，
+      // 不再有两条各自吸顶的玻璃。
+      expect(find.byType(AppChromeGlassBar), findsOneWidget,
+          reason: '吸顶区变成两条各自吸顶的玻璃了');
       final headers = find.byType(DateHeader);
       final pinned = <Rect>[];
       for (var i = 0; i < headers.evaluate().length; i++) {
         final rect = tester.getRect(headers.at(i));
+        // 玻璃里那一行正好接在分类行下沿；其余分组头随内容滚到玻璃底下
+        // （被整块玻璃盖住），不会在吸顶位再叠一条。
         if ((rect.top - filter.bottom).abs() <= 0.5) pinned.add(rect);
-        expect(
-          rect.top,
-          greaterThanOrEqualTo(filter.bottom - 0.5),
-          reason: '日期头不许压到筛选条上，更不许两条叠在吸顶位',
-        );
       }
-      expect(pinned, hasLength(1), reason: '同一时刻只有一个日期头吸顶');
+      expect(pinned, hasLength(1), reason: '同一时刻只有一行日期吸顶');
       final bottom = pinned.single.bottom;
       expect(
         bottom,
-        closeTo(140, 0.5),
-        reason: '吸顶区下沿恒为 140（56 + 46 + 38）',
+        closeTo(136, 0.5),
+        reason: '吸顶区下沿恒为 136（折叠头 56 + 一整块玻璃 46 + 34）',
       );
       sticky ??= bottom;
       expect(bottom, closeTo(sticky, 0.01), reason: '滚动过程中吸顶区高度不变');
@@ -675,11 +677,11 @@ void main() {
       final rect = tester.getRect(headers.at(i));
       if ((rect.top - filter.bottom).abs() <= 0.5) atSlot.add(rect);
     }
-    expect(atSlot, hasLength(1), reason: '展开态也只有一条日期头贴在筛选条下沿');
+    expect(atSlot, hasLength(1), reason: '展开态也只有一行日期贴在分类行下沿');
     expect(
       atSlot.single.bottom,
-      closeTo(220, 0.5),
-      reason: '展开头 136 + 筛选条 46 + 日期头 38',
+      closeTo(216, 0.5),
+      reason: '展开头 136 + 那一块玻璃（分类行 46 + 日期行 34）',
     );
   });
 

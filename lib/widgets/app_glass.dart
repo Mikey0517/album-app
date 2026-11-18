@@ -367,12 +367,14 @@ LiquidGlassSettings appCardFrostSettings(BuildContext context) {
   );
 }
 
-/// chrome 的斜面厚度：**32**（磨砂档是 12）。
+/// chrome 的斜面厚度：**36**（磨砂档是 12）。
 ///
 /// 斜面越深，边缘的 displacement 越大——胶囊的两条长边和圆角能把底下的内容
-/// 推歪，这才是「玻璃」而不是「毛玻璃」。上一轮是 28：scrim 0.76~0.82 时背后
-/// 只剩 18%~24% 的权重，再深的斜面也没内容可弯，所以这一轮随 scrim 一起加大。
-const double appGlassChromeThickness = 32;
+/// 推歪，这才是「玻璃」而不是「毛玻璃」。上一轮是 32：scrim 0.55 之后背后有
+/// 45% 的内容可弯，斜面还能再深一档，边缘的位移才真的看得出来。再往上加之前
+/// 先看 footer 的对比度断言（test/footer_contrast_test.dart）：斜面只影响边缘，
+/// 不参与底衬亮度，但边缘越深，文字落点附近的折射越活跃。
+const double appGlassChromeThickness = 36;
 
 /// chrome 的模糊半径：**2**（磨砂档是 8）。
 ///
@@ -380,14 +382,19 @@ const double appGlassChromeThickness = 32;
 /// 重 scrim；scrim 让到 0.55 之后那 45% 正是给折射用的，模糊压到最低档。
 const double appGlassChromeBlur = 2;
 
-/// chrome 的折射率：**1.38**（磨砂档是 1.2）。比磨砂高，斜面处的位移才看得出来。
-const double appGlassChromeRefractiveIndex = 1.38;
+/// chrome 的折射率：**1.55**（磨砂档是 1.2）。
+///
+/// 折射率越高，斜面处的弯折越明显。上一轮 1.38 只是「比磨砂高一点」；这一轮
+/// 与 36 的斜面、0.22 的色散一起再上一档，边缘的扭曲/彩色分离才是用户要求的
+/// 「看得出是玻璃」。
+const double appGlassChromeRefractiveIndex = 1.55;
 
-/// chrome 的色散强度：**0.14**（上一轮 0.10）。
+/// chrome 的色散强度：**0.22**（上一轮 0.14）。
 ///
 /// premium 的 dispersion，边缘那一圈彩色分离。折射可见度只有 45% 时，色散是
-/// 「这块是玻璃」最容易被眼睛抓住的那条线索，所以往上加一档。
-const double appGlassChromeChromaticAberration = 0.14;
+/// 「这块是玻璃」最容易被眼睛抓住的那条线索，所以再往上加一档：0.22 是在
+/// 1.55 的折射率上刚好不糊成彩虹边的强度（再高边缘会开始发脏）。
+const double appGlassChromeChromaticAberration = 0.22;
 
 /// chrome 的饱和度：**1.3**。把折射采进来的背景色稍微提纯，玻璃才「亮」。
 const double appGlassChromeSaturation = 1.3;
@@ -411,8 +418,10 @@ const double appGlassChromeSaturation = 1.3;
 ///
 /// **这一组数与 [appGlassChromeScrimAlphaLight] = 0.55 是一对**：scrim 让到
 /// 55% 之后，背后只剩 45% 的权重给折射，斜面/色散不加大、模糊不压低，那 45%
-/// 就是一块「更亮的灰板」而不是折射。上一轮的组合是 28 / 0.10 / blur 3 +
-/// scrim 0.76~0.82（折射可见度 24%~18%，几乎看不出来），回退时两个数要一起改。
+/// 就是一块「更亮的灰板」而不是折射。这一轮的组合是 36 / 1.55 / 0.22 / blur 2
+/// （上一轮 32 / 1.38 / 0.14，再上一轮 28 / 0.10 / blur 3 + scrim 0.76~0.82）：
+/// 回退时三个数要一起改，scrim 与 blur 不动——折射可见度 45% 是这一组的基准，
+/// 改了它 footer 的文字对比度就跟着回退（见 [appGlassChromeScrimAlphaLight]）。
 ///
 /// 只在 [appGlassPremiumAvailable] 为真时使用；不可用时整块退回
 /// [appGlassSettings]（磨砂）那一套。
@@ -520,8 +529,8 @@ double appGlassScrimAlpha() =>
 /// 0.55 = 折射可见度 45%：scrim 是压在玻璃**里面**的那层页面底色，它挡住多少
 /// 背景，折射就少多少可弯的内容（[appGlassChromeRefractionVisibility]）。上一轮
 /// 胶囊用 0.76/0.82（可见度 24%/18%），折射在真机上几乎看不出来；这一轮按需求
-/// 把可见度提到 45%，镜面参数同步加大（[appGlassChromeThickness] 32 /
-/// [appGlassChromeChromaticAberration] 0.14 / [appGlassChromeBlur] 2）。
+/// 把可见度提到 45%，镜面参数同步加大（[appGlassChromeThickness] 36 /
+/// [appGlassChromeChromaticAberration] 0.22 / [appGlassChromeBlur] 2）。
 ///
 /// **回退**：整组数只在这两个常量里。改回 0.76/0.82 就是上一轮的胶囊观感；
 /// 多选底栏 / 上传按钮上一轮是 0.20/0.24。

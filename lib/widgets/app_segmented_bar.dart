@@ -35,13 +35,6 @@ Color get segmentedSelectedInk => Color.lerp(
 /// 玻璃（[AppChromeGlassBar]）。
 const double kAppSegmentedBarPillHeight = kAppSegmentedBarHeight - 14;
 
-/// 吸顶分类条的玻璃圆角：**0**（直边条，与日期条同一档）。
-///
-/// 圆角只有 footer 是胶囊（[AppBottomTabBar.radius]）；三处吸顶条一律取
-/// [kAppChromePinnedRadius]。吸顶条横贯整屏，直边才能贴住页面左右边缘、
-/// 不留侧边空隙，也不会在两端露出后面的照片。
-const double kAppSegmentedBarPinnedRadius = kAppChromePinnedRadius;
-
 /// 分段条上的一段：文案 + 可选数量。
 ///
 /// 数量为 0 也照常显示——「视频 0」本身就是有用信息，不用先藏起来。
@@ -121,12 +114,15 @@ class AppSegmentedBar extends StatelessWidget {
   }
 }
 
-/// 分段条的容器：统一高度、内边距；**吸顶那一份是 footer 同款玻璃，非吸顶那
-/// 一份是主题色浅渐变**。
+/// 分段条的容器：统一高度、内边距；**吸顶那一份是一整块玻璃里的一行，非吸顶
+/// 那一份是主题色浅渐变**。
 ///
-/// 详情页套在 [PinnedBarSliver] 里（[pinned] = true），选封面时套在
-/// AppBar.bottom 里（[pinned] = false），两处都用这一层，高度与内边距才不会
-/// 各写各的。
+/// **材质只有一种来源**：这一层自己不画玻璃。
+/// - 相册吸顶区的分类行套在 [AppChromeGlassBar] 的 [AppChromeInk] 里（玻璃与
+///   墨色都由那一块给，分类行与日期行共用）——此时它只排内容；
+/// - 选封面时套在 AppBar.bottom 里（它背后没有内容经过，不需要材质），此时它
+///   铺主题色浅渐变。
+/// 两处都用这一层，高度与内边距才不会各写各的。
 ///
 /// **为什么不再是 [AppColors.bgPage] 实底**：吸顶条是一条横贯整屏的窄带，垫成
 /// 页面底色之后，[AppGlassBackdrop] 的渐变（或用户挑的背景图）到这里就被截成
@@ -145,15 +141,11 @@ class AppSegmentedBar extends StatelessWidget {
 class AppSegmentedBarSurface extends StatelessWidget {
   final Widget child;
 
-  /// 是不是吸顶的那一份：true = 与底部 footer 完全相同的玻璃；false = 原来的
-  /// 主题色浅渐变（不吸顶，下面没有内容经过，不需要材质）。
-  final bool pinned;
+  const AppSegmentedBarSurface({super.key, required this.child});
 
-  const AppSegmentedBarSurface({super.key, required this.child, this.pinned = false});
-
-  /// 非吸顶那一份的底衬渐变：与日期分组条是同一份（[BarTint.gradient]）。
+  /// 不在玻璃里时那一份底衬渐变：与日期分组条是同一份（[BarTint.gradient]）。
   ///
-  /// 吸顶那一份不画渐变——底衬是 [AppChromeGlassBar] 的玻璃。
+  /// 在一整块玻璃里时它不画渐变——底衬是 [AppChromeGlassBar] 的玻璃。
   LinearGradient get gradient => BarTint.gradient;
 
   /// 内容内边距：上下各 7（46 - 14 = 32 的内容带）。
@@ -161,25 +153,18 @@ class AppSegmentedBarSurface extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (pinned) {
-      // 吸顶这一条压在滚动的照片上：材质整个交给 [AppChromeGlassBar]
-      // （与底部 footer 同一份），但形状是**直边条**（圆角 0，贴住页面左右
-      // 边缘）且不要描边/内高光——吸顶条只留玻璃本体 + 阴影，footer 那两样
-      // 装饰不受影响。墨色由玻璃条按背景采样挑好后经 [AppChromeInk] 传给
-      // 下面四段。
-      return AppChromeGlassBar.pinned(
-        radius: kAppSegmentedBarPinnedRadius,
-        builder: (context, ink) => SizedBox(
-          height: kAppSegmentedBarHeight,
-          width: double.infinity,
-          child: AppChromeInk(
-            ink: ink,
-            child: Padding(padding: contentPadding, child: child),
-          ),
-        ),
+    // 已经在一整块玻璃里（相册吸顶区的分类行，[AppChromeInk] 在祖先里）：
+    // 材质与墨色都由那块玻璃给，这一层只排内容——不画渐变、也不再包一层
+    // 玻璃。两条吸顶条各自画材质时，那两层就是两行之间那条接缝。
+    if (AppChromeInk.maybeOf(context) != null) {
+      return SizedBox(
+        height: kAppSegmentedBarHeight,
+        width: double.infinity,
+        child: Padding(padding: contentPadding, child: child),
       );
     }
-    // 渐变铺满整条（含上下 7 的内边距）：内缩的只是内容。
+    // 不在玻璃里（选封面页的 AppBar.bottom）：渐变铺满整条（含上下 7 的
+    // 内边距），内缩的只是内容。
     return SizedBox(
       height: kAppSegmentedBarHeight,
       width: double.infinity,

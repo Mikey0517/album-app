@@ -356,12 +356,13 @@ void main() {
     final after = tester.getRect(find.byType(AppSegmentedBarSurface));
     expect(after.top, closeTo(before.top, 0.5), reason: '筛选条不跟着内容滚走');
     expect(_position(tester).pixels, greaterThan(0), reason: '确实滚动了');
-    // 时间轴轨道从吸顶区下沿开始（筛选条 46 + 日期头 34 = 80），不压吸顶条。
+    // 时间轴轨道从吸顶区下沿开始（那一整块玻璃：分类行 46 + 日期行 34 = 80），
+    // 不压吸顶条。
     final scrubber = tester.getRect(find.byType(PhotoTimelineScrubber));
     expect(
       scrubber.top,
-      closeTo(after.bottom + kTimelineDateHeaderExtent, 0.5),
-      reason: '轨道顶边 = 筛选条 + 日期头（含留白）下沿',
+      closeTo(after.bottom + kTimelineDateHeaderHeight, 0.5),
+      reason: '轨道顶边 = 分类行 + 玻璃里那一行日期的下沿',
     );
   });
 

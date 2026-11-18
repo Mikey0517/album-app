@@ -106,7 +106,7 @@ Future<void> _dragTimelineTo(WidgetTester tester, double ratio) async {
   await gesture.up();
 }
 
-/// 吸顶区下沿：筛选条下沿；有日期头正好钉在它下面时取日期头下沿。
+/// 吸顶区下沿：分类行下沿；玻璃里那一行日期正好接在它下面时取日期行下沿。
 double _stickyBottom(WidgetTester tester) {
   final filter = tester.getRect(find.byType(AppSegmentedBarSurface));
   final headers = find.byType(DateHeader);
@@ -210,7 +210,8 @@ void main() {
 
     // 滚到「11 月最后一行被吸顶条压住一半、10 月第一行刚好露在吸顶条下沿」。
     final inset = _stickyBottom(tester);
-    expect(inset, 140, reason: '折叠后的吸顶区：56 工具栏 + 46 筛选条 + 38 日期头');
+    expect(inset, 136,
+        reason: '折叠后的吸顶区：56 工具栏 + 那一整块玻璃（分类行 46 + 日期行 34）');
     scrollable.position.jumpTo(lastRowOfNovemberTop - inset + 22);
     await tester.pump();
 

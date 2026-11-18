@@ -214,12 +214,21 @@ Finder _footerBar() => find.descendant(
       matching: find.byType(AppChromeGlassBar),
     );
 
-Finder _filterBar() => find.descendant(
-      of: find.byType(AlbumMediaFilterSliver),
+/// 相册吸顶区那一整块玻璃：**一块**同时装分类行与日期行（不是两条各自
+/// 带玻璃的吸顶条，那会在两行之间留一条接缝）。
+Finder _albumChromeBar() => find.descendant(
+      of: find.byType(AlbumPinnedChromeSliver),
       matching: find.byType(AppChromeGlassBar),
     );
 
-/// 吸顶日期条那一块玻璃（内容流里的日期头是透明条，没有玻璃）。
+/// 相册吸顶区里那一行日期（玻璃在它的**祖先**里）。
+Finder _albumDateRow() => find.descendant(
+      of: find.byType(AlbumPinnedChromeSliver),
+      matching: find.byType(DateHeader),
+    );
+
+/// 朋友圈吸顶日期条那一块玻璃（单行，日期头自己带玻璃；内容流里的日期头是
+/// 透明条，没有玻璃）。
 Finder _pinnedDateBar() => find.descendant(
       of: find.byType(DateHeader),
       matching: find.byType(AppChromeGlassBar),
@@ -268,10 +277,13 @@ void main() {
     await tester.pumpWidget(_albumPage());
     await tester.pumpAndSettle();
     await _scrollAlbum(tester);
-    final filter = _chromeOf(tester, _filterBar(), '相册吸顶分类条');
-    final albumDate = _chromeOf(tester, _pinnedDateBar(), '相册吸顶日期条');
-    _expectPinnedDecoration(tester, _filterBar(), '相册吸顶分类条');
-    _expectPinnedDecoration(tester, _pinnedDateBar(), '相册吸顶日期条');
+    // 相册吸顶区：**一块**玻璃同时装两行，所以这里只量到一块（分类行与日期
+    // 行共用同一份材质，不可能各写一套）。
+    expect(_albumChromeBar(), findsOneWidget,
+        reason: '相册吸顶区不是一块玻璃：分类行与日期行各自带玻璃就是两条');
+    expect(_albumDateRow(), findsOneWidget, reason: '两块里只剩一块日期行了');
+    final albumChrome = _chromeOf(tester, _albumChromeBar(), '相册吸顶区');
+    _expectPinnedDecoration(tester, _albumChromeBar(), '相册吸顶区');
 
     addTearDown(installFakeApi(json: _feedJson()));
     await tester.pumpWidget(_feedPage());
@@ -279,7 +291,8 @@ void main() {
     final feedDate = _chromeOf(tester, _pinnedDateBar(), '朋友圈吸顶日期条');
     _expectPinnedDecoration(tester, _pinnedDateBar(), '朋友圈吸顶日期条');
 
-    final sites = <_Chrome>[filter, albumDate, feedDate];
+    // 四处 chrome：footer + 相册吸顶区（分类行 + 日期行同一块）+ 朋友圈日期条。
+    final sites = <_Chrome>[albumChrome, feedDate];
 
     // 1. 开关与 scrim：三处 = footer，逐项。
     for (final site in sites) {
@@ -310,13 +323,13 @@ void main() {
 
     // 3. 而且就是 chrome 那一组常量（参数只有一份来源）。
     expect(footer.thickness, appGlassChromeThickness);
-    expect(footer.thickness, 32);
+    expect(footer.thickness, 36, reason: '这一轮斜面加到 36');
     expect(footer.chroma, appGlassChromeChromaticAberration);
-    expect(footer.chroma, 0.14);
+    expect(footer.chroma, 0.22, reason: '这一轮色散加到 0.22');
     expect(footer.blur, appGlassChromeBlur);
-    expect(footer.blur, 2);
+    expect(footer.blur, 2, reason: '模糊保持 2：折射才不会被糊掉');
     expect(footer.refractiveIndex, appGlassChromeRefractiveIndex);
-    expect(footer.refractiveIndex, 1.38);
+    expect(footer.refractiveIndex, 1.55, reason: '这一轮折射率加到 1.55');
     expect(footer.saturation, appGlassChromeSaturation);
     expect(footer.saturation, 1.3);
     // scrim 0.55 = 折射可见度 45%。
@@ -330,12 +343,10 @@ void main() {
     expect(footer.radius, 28, reason: 'footer 的胶囊圆角保持 28');
     expect(kAppChromePinnedRadius, 0, reason: '吸顶条是直边条，圆角只有 0 这一档');
     expect(kPinnedDateHeaderRadius, kAppChromePinnedRadius);
-    expect(kAppSegmentedBarPinnedRadius, kAppChromePinnedRadius);
     for (final site in sites) {
       expect(site.radius, 0, reason: '${site.name} 还有圆角：吸顶时两端会露出照片');
       expect(site.radius, kAppChromePinnedRadius);
     }
-    expect(filter.radius, 0, reason: '分类条原来是 16 的胶囊，现在是直边条');
 
     // 5. 描边 / 内高光 / 底衬：三处吸顶条只留玻璃本体 + 固定底衬；
     //    footer 仍是「描边 + 高光、无底衬」。
@@ -416,20 +427,11 @@ void main() {
     expect(selected.fontSize, footerLabel.fontSize);
     expect(selected.fontWeight, footerLabel.fontWeight);
 
-    // 相册吸顶日期条：日期文字 + 那一组的张数。
+    // 相册吸顶日期条（玻璃里那一行）：日期文字 + 那一组的张数。
     await _scrollAlbum(tester);
-    final pinnedHeader = find.byType(DateHeader).evaluate().firstWhere(
-          (element) => find
-              .descendant(
-                of: find.byElementPredicate((e) => e == element),
-                matching: find.byType(AppChromeGlassBar),
-              )
-              .evaluate()
-              .isNotEmpty,
-        );
     final dateTexts = tester
         .widgetList<Text>(find.descendant(
-          of: find.byElementPredicate((e) => e == pinnedHeader),
+          of: _albumDateRow(),
           matching: find.byType(Text),
         ))
         .toList();

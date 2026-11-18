@@ -16,8 +16,12 @@ typedef TimelineMetrics = ({List<double> offsets, List<String> labels});
 /// 算时间轴映射：按实际行高 + 分组头高度 + 视口基准偏移推导，
 /// 这样拖到「2024年8月」就真的落在 8 月那一行，不会随距离累积误差。
 ///
-/// [topInset] 是吸顶区（折叠后的头部 + 筛选条 + 分组头）压住的高度：
+/// [topInset] 是吸顶区（折叠后的头部 + 那一整块玻璃）压住的高度：
 /// 偏移减去它，拖到某个月份时那一行才落在吸顶区下面，而不是被盖住。
+///
+/// [firstHeaderInSticky]：第一组的日期摆在吸顶玻璃里（相册页的日期行），
+/// 内容流里没有它的分组头——这一组就不能再加一个 [headerHeight]，否则偏移表
+/// 会比实际内容多算一格，跳转与气泡整体偏下去一个分组头。
 TimelineMetrics buildTimelineMetrics(
   List<AlbumSection> sections, {
   required double width,
@@ -25,6 +29,7 @@ TimelineMetrics buildTimelineMetrics(
   required double headerHeight,
   double base = 0,
   double topInset = 0,
+  bool firstHeaderInSticky = false,
   String Function(Media media)? fallbackLabel,
 }) {
   final offsets = <double>[];
@@ -33,9 +38,15 @@ TimelineMetrics buildTimelineMetrics(
   final tileWidth = (width - spacing * (columns - 1)) / columns;
   final rowHeight = tileWidth + spacing;
   var y = base;
+  // 第一个带分组头的分组：日期已经摆在吸顶玻璃里，内容流里没有它那一行。
+  var headerInSticky = firstHeaderInSticky;
   for (final section in sections) {
     if (section.header != null) {
-      y += headerHeight;
+      if (headerInSticky) {
+        headerInSticky = false;
+      } else {
+        y += headerHeight;
+      }
     }
     final rows = (section.items.length + columns - 1) ~/ columns;
     for (var i = 0; i < section.items.length; i++) {

@@ -140,7 +140,9 @@ Widget _page({ScrollController? controller}) => RepaintBoundary(
               controller: controller,
               slivers: [
                 const SliverToBoxAdapter(child: SizedBox(height: 220)),
-                const AlbumMediaFilterSliver(
+                // 相册页的吸顶区是**一整块玻璃**（分类行 + 日期行）。这一条
+                // 用例只关心分类行，日期行不给（dateText 为 null）。
+                const AlbumPinnedChromeSliver(
                   counts: AlbumMediaCounts(
                     stillPhotos: 12,
                     livePhotos: 3,
@@ -217,10 +219,16 @@ void main() {
 
     final band = find.byType(AppSegmentedBarSurface);
     expect(band, findsOneWidget);
-    final surface = tester.widget<AppSegmentedBarSurface>(band);
-    expect(surface.pinned, isTrue, reason: '这一条是吸顶的那一份');
+    // 这一条是吸顶的那一份：它自己不画材质，玻璃在祖先里（一整块玻璃同时装
+    // 分类行与日期行）。
+    expect(
+      find.ancestor(of: band, matching: find.byType(AppChromeGlassBar)),
+      findsOneWidget,
+      reason: '这一条该在一整块玻璃里',
+    );
     // 吸顶那一份的底衬是玻璃（与 footer 同一个组件、同一组开关），不再是渐变。
-    final glass = find.descendant(
+    // 玻璃是这一行的**祖先**（一整块玻璃同时装分类行与日期行）。
+    final glass = find.ancestor(
       of: band,
       matching: find.byType(AppChromeGlassBar),
     );
@@ -234,7 +242,7 @@ void main() {
     expect(glassSurface.scrim, isTrue);
     expect(glassSurface.requestedQuality, AppChromeGlassBar.preferredQuality);
     // 圆角按形态取：只有 footer 是胶囊，吸顶分类条是**直边条**（0）。
-    expect(glassSurface.radius, kAppSegmentedBarPinnedRadius);
+    expect(glassSurface.radius, kAppChromePinnedRadius);
     expect(glassSurface.radius, 0, reason: '吸顶直接横贯整屏，两端不留圆弧');
     // 直边条没有描边/内高光：只剩玻璃本体 + 固定底衬（与日期条同一档）。
     expect(glassSurface.showBorder, isFalse);
@@ -279,9 +287,10 @@ void main() {
     expect(gradients, isEmpty,
         reason: '吸顶分类条里还画着渐变：这一份的底衬应该整个交给玻璃');
 
-    // 玻璃条必须有可采样/可画的表面（与 footer 同一个组件）。
+    // 玻璃条必须有可采样/可画的表面（与 footer 同一个组件），在一整块玻璃里
+    // ——它在这一行的**祖先**上，不是包里。
     expect(
-      find.descendant(of: band, matching: find.byType(AppGlassSurface)),
+      find.ancestor(of: band, matching: find.byType(AppGlassSurface)),
       findsOneWidget,
     );
     // 像素：条带盖住了页面背景（玻璃 + scrim 画上去了），不是纯透明的一条。

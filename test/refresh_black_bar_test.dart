@@ -226,10 +226,15 @@ void main() {
     void checkBand(String phase, String label, Finder band,
         {required bool pinned}) {
       // 吸顶的那一份是 footer 同款玻璃：AppChromeGlassBar + AppGlassSurface。
-      final glass = find.descendant(
+      // 相册页是一整块玻璃同时装分类行与日期行，所以玻璃是这一行的**祖先**；
+      // 单行形态（朋友圈日期条）才是自己带着玻璃。
+      final inside = find.descendant(
         of: band,
         matching: find.byType(AppChromeGlassBar),
       );
+      final glass = inside.evaluate().isEmpty
+          ? find.ancestor(of: band, matching: find.byType(AppChromeGlassBar))
+          : inside;
       if (!pinned) {
         // 内容流里的日期条是**透明条**：没有玻璃、也没有模糊。
         expect(glass, findsNothing,
@@ -258,10 +263,16 @@ void main() {
                 '「刷新时材质断一下、整条发黑」的那一帧');
       }
       // 玻璃外面那层 RepaintBoundary 也一样：常量 key，位置不变。
-      final layer = find.descendant(
+      final layerInside = find.descendant(
         of: band,
         matching: find.byKey(AppChromeGlassBar.layerKey),
       );
+      final layer = layerInside.evaluate().isEmpty
+          ? find.ancestor(
+              of: band,
+              matching: find.byKey(AppChromeGlassBar.layerKey),
+            )
+          : layerInside;
       expect(layer, findsOneWidget,
           reason: '$phase：$label的玻璃层没有常量 key 的重绘边界');
       final layerElement = layer.evaluate().first;
@@ -380,12 +391,13 @@ void main() {
     // 这条带子的底衬由 AppChromeGlassBar 画（与 footer 同一份），不再是渐变：
     // 这里不再有「主题色浅渐变」那一层。
     final band = find.byType(AppSegmentedBarSurface);
+    // 分类行与日期行在**同一块**玻璃里：玻璃是这一行的祖先。
     expect(
-      find.descendant(of: band, matching: find.byType(AppChromeGlassBar)),
+      find.ancestor(of: band, matching: find.byType(AppChromeGlassBar)),
       findsOneWidget,
     );
     expect(
-      find.descendant(of: band, matching: find.byType(DecoratedBox)),
+      find.ancestor(of: band, matching: find.byType(DecoratedBox)),
       findsWidgets,
       reason: '玻璃的 scrim / 描边 / 高光都是 DecoratedBox：底衬没画上去',
     );

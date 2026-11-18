@@ -9,6 +9,7 @@ import 'package:album_app/models/album.dart';
 import 'package:album_app/models/media.dart';
 import 'package:album_app/models/paged.dart';
 import 'package:album_app/widgets/album_thumb.dart';
+import 'package:album_app/widgets/app_chrome_glass_bar.dart';
 import 'package:album_app/widgets/app_segmented_bar.dart';
 import 'package:album_app/widgets/date_header.dart';
 import 'package:flutter/material.dart';
@@ -155,11 +156,26 @@ void main() {
     await _pumpAlbum(tester);
     final headers = find.byType(DateHeader);
     expect(headers.evaluate(), isNotEmpty);
+    // 两种摆法两个数：吸顶那块玻璃里的一行是 34（没有与网格之间的留白），
+    // 内容流里的分组头是 38（34 文字区 + 4 留白）。
     for (var i = 0; i < headers.evaluate().length; i++) {
+      final rect = tester.getRect(headers.at(i));
+      final inGlass = find
+          .ancestor(
+            of: find.byElementPredicate(
+              (element) => element == headers.evaluate().elementAt(i),
+            ),
+            matching: find.byType(AppChromeGlassBar),
+          )
+          .evaluate()
+          .isNotEmpty;
       expect(
-        tester.getRect(headers.at(i)).height,
-        closeTo(kTimelineDateHeaderExtent, 0.01),
-        reason: '内容流里的日期头也要整块 38 高：留白不许是透明的',
+        rect.height,
+        closeTo(inGlass ? kTimelineDateHeaderHeight : kTimelineDateHeaderExtent,
+            0.01),
+        reason: inGlass
+            ? '玻璃里那一行日期是 34 高（留白不搬进玻璃）'
+            : '内容流里的日期头要整块 38 高：留白不许是透明的',
       );
     }
   });

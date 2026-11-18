@@ -441,7 +441,8 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
 
   /// 网格 + 右侧时间轴。
   ///
-  /// 吸顶栈：筛选条 46 + 日期头 34 = 80（这一页没有折叠封面头）。吸顶栈高度、
+  /// 吸顶区是**一整块玻璃**：分类行 46 + 日期行 34 = 80（这一页没有折叠封面
+  /// 头），两行一起钉住、一起滚，见 [AlbumPinnedChromeSliver]。吸顶栈高度、
   /// 偏移表、topInset、气泡取值、吸顶阈值全部由 [AlbumTimelineLayout] 算，
   /// 和相册详情页是同一份实现，所以两页的手感一致。
   Widget _buildBody() {
@@ -487,14 +488,18 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
         final columns = responsiveColumns(context, 4);
         final dpr = MediaQuery.of(context).devicePixelRatio;
         final tileWidth = (constraints.maxWidth - 2 * (columns - 1)) / columns;
+        // 吸顶区是一整块玻璃：分类行 + 日期行。第一组的日期就摆在那块玻璃里，
+        // 内容流里只有其余分组的头（见 [AlbumPinnedChromeSliver]）。
+        final firstHeader = timelineFirstHeaderIndex(sections);
+        final grouping = AlbumViewSettings.group.value != AlbumGroup.flat;
         final sticky = TimelineStickySpec(
-          // 这一页没有会折叠的页头：吸顶区 = 筛选条 46 + 日期头 34 = 80。
+          // 这一页没有会折叠的页头：吸顶区 = 玻璃（分类行 46 + 日期行 34）。
           headerMin: 0,
           headerMax: 0,
           filterExtent: kAppSegmentedBarHeight,
-          dateHeaderExtent: AlbumViewSettings.group.value == AlbumGroup.flat
-              ? 0
-              : kTimelineDateHeaderExtent,
+          dateRowExtent:
+              grouping && firstHeader >= 0 ? kTimelineDateHeaderHeight : 0,
+          dateHeaderExtent: grouping ? kTimelineDateHeaderExtent : 0,
         );
         final layout = AlbumTimelineLayout.compute(
           sections: sections,
@@ -511,12 +516,40 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
           _scrollController.hasClients ? _scrollController.offset : 0.0,
         );
 
-        // 筛选条压在最上面并吸顶：翻到哪一年它都在，随时能放假筛选。
+        // 吸顶区压在最上面：**一整块玻璃**，分类行与日期行一起钉住。翻到哪
+        // 一年它都在，随时能改筛选；日期行跟着当前那一组换文案。
+        final displayed = _pin.pinnedSection >= 0
+            ? _pin.pinnedSection
+            : firstHeader;
+        final displayedSection =
+            displayed >= 0 && displayed < sections.length
+                ? sections[displayed]
+                : null;
         final slivers = <Widget>[
-          AlbumMediaFilterSliver(
+          AlbumPinnedChromeSliver(
             counts: _counts,
             selected: _filter,
             onChanged: _selectFilter,
+            dateText: displayedSection?.header,
+            dateCount: displayedSection?.items.length,
+            dateTrailing: _selecting && displayedSection != null
+                ? TextButton(
+                    onPressed: _batchDownloading
+                        ? null
+                        : () =>
+                            _toggleSectionSelection(displayedSection.items),
+                    style: TextButton.styleFrom(
+                      minimumSize: const Size(0, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: Text(
+                      _isSectionSelected(displayedSection.items)
+                          ? '取消全选'
+                          : '全选',
+                    ),
+                  )
+                : null,
           ),
         ];
         if (displayItems.isEmpty) {
@@ -533,11 +566,11 @@ class FeedGalleryPageState extends State<FeedGalleryPage> {
               sectionIndex < sections.length;
               sectionIndex++) {
             final section = sections[sectionIndex];
-            if (section.header != null) {
-              // 和相册详情页同一份吸顶实现：只钉当前分组，吸顶区高度恒定。
+            // 和相册详情页同一份实现：第一组的日期在吸顶玻璃里，内容流里只有
+            // 其余分组的头（滚到玻璃底下就被盖住，玻璃里的日期行随之换文案）。
+            if (section.header != null && sectionIndex != firstHeader) {
               slivers.add(
                 timelineDateHeaderSliver(
-                  pinned: sectionIndex == _pin.pinnedSection,
                   section: section,
                   trailing: _selecting
                       ? TextButton(

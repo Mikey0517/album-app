@@ -1,9 +1,14 @@
 /// 一条与底部 footer **完全相同**的悬浮玻璃条：三处吸顶条 + footer 共用这一份。
 ///
 /// **一份材质，四个调用点**：底部 footer 胶囊（AppBottomTabBar）与三处吸顶
-/// 悬浮条（朋友圈吸顶日期条、相册吸顶分类条、相册吸顶日期条）都走
+/// 悬浮条（朋友圈吸顶日期条、相册吸顶分类行 + 日期行）都走
 /// [AppChromeGlassBar]。光学参数、scrim、档位、自建层、描边/高光全部由这里
 /// 给出，调用点只决定**圆角**（按各自形态：胶囊 / 条带）和里面的内容。
+///
+/// **相册页是「一块玻璃、两行」**：分类行与日期行不再各自带玻璃上下堆叠
+/// （那会在两行之间留一条接缝），而是同时塞进同一个 [AppChromeGlassBar.pinned]
+/// 的 [children] 里（见 AlbumPinnedChromeSliver）。行自己从 [AppChromeInk]
+/// 取墨色，材质仍是别处那唯一一份。
 ///
 /// 之前底部胶囊自己写了一份 AppGlassSurface 的参数，三处吸顶条则各写各的
 /// （渐变 / 兜底模糊）。参数一分散就会分家——所以这一轮把它们收成一处：
@@ -101,8 +106,8 @@ double appChromeScrimAlpha() => appGlassChromeScrimAlpha();
 Color appChromeScrimColor() =>
     AppColors.bgPage.withValues(alpha: appChromeScrimAlpha());
 
-/// 玻璃条的光学参数：premium 用 appGlassChromeSettings（thickness 32 /
-/// refractiveIndex 1.38 / chromaticAberration 0.14 / saturation 1.3），拿不到
+/// 玻璃条的光学参数：premium 用 appGlassChromeSettings（thickness 36 /
+/// refractiveIndex 1.55 / chromaticAberration 0.22 / saturation 1.3），拿不到
 /// premium 时整块回退 appGlassSettings（磨砂），只把模糊钉成
 /// [appChromeBlur]。
 ///
@@ -142,9 +147,9 @@ class AppChromeInk extends InheritedWidget {
 /// 暴露四样东西：圆角 [radius]（footer 胶囊 = 高度/2，三处吸顶条 =
 /// [kAppChromePinnedRadius] = 0）、描边 [showBorder]、内高光 [showHighlight]
 /// 与固定底衬 [backplateAlpha]（footer 是 true / true / 0，三处吸顶条反过来，
-/// 见 [AppChromeGlassBar.pinned]），以及内容 [builder]。其余参数一字不差——
-/// [preferredQuality]（premium）、[usesOwnLayer]、scrim、参数与 scrim 色都只
-/// 在这里出现一次。
+/// 见 [AppChromeGlassBar.pinned]），以及内容（单行 [builder] 或**多行**
+/// [children]）。其余参数一字不差——[preferredQuality]（premium）、
+/// [usesOwnLayer]、scrim、参数与 scrim 色都只在这里出现一次。
 ///
 /// **footer 与吸顶条的差别只有「形状 + 那两层装饰」**：
 /// - footer：胶囊，圆角 28，有 1px 描边与顶部内高光；
@@ -166,7 +171,8 @@ class AppChromeGlassBar extends StatelessWidget {
     this.showHighlight = true,
     this.backplateAlpha = 0,
     required this.builder,
-  }) : assert(backplateAlpha >= 0 && backplateAlpha <= 1);
+  })  : children = const <Widget>[],
+        assert(backplateAlpha >= 0 && backplateAlpha <= 1);
 
   /// **三处吸顶悬浮条的唯一构造方式**：直边（[kAppChromePinnedRadius]）、
   /// 不要描边、不要内高光、玻璃下面加一层固定底衬。
@@ -175,13 +181,23 @@ class AppChromeGlassBar extends StatelessWidget {
   /// 一遍 radius: 0 / showBorder: false / showHighlight: false /
   /// backplateAlpha: 0.9 迟早会漏一个，而漏掉的那一个正好是「吸顶条看着跟
   /// 另外两条不一样」。footer 用默认构造：胶囊 + 描边 + 内高光 + 无底衬。
+  ///
+  /// 内容两种给法（二选一，构造器里有断言）：
+  /// - [builder]：**单行**，朋友圈吸顶日期条这一种；
+  /// - [children]：**多行**，相册吸顶区（分类行 + 日期行）这一种——两行在
+  ///   同一块玻璃里，中间不存在第二条底衬/描边，接缝从结构上就没有。
   const AppChromeGlassBar.pinned({
     super.key,
     this.radius = kAppChromePinnedRadius,
-    required this.builder,
+    this.builder,
+    this.children = const <Widget>[],
   })  : showBorder = false,
         showHighlight = false,
-        backplateAlpha = kAppChromePinnedBackplateAlpha;
+        backplateAlpha = kAppChromePinnedBackplateAlpha,
+        assert(
+          (builder == null) != (children.length == 0),
+          '内容只有一种给法：要么 builder（单行，自己构建），要么 children（多行）',
+        );
 
   /// 胶囊想要的玻璃档位：premium（Impeller 全管线，折射/边缘扭曲）。
   ///
@@ -219,8 +235,21 @@ class AppChromeGlassBar extends StatelessWidget {
   /// 内容在动 → 条带变色」这件事从合成色里挤出去。
   final double backplateAlpha;
 
-  /// 内容：拿到当前该用的自动墨色 [ink]（见 appGlassToneInk）。
-  final Widget Function(BuildContext context, Color ink) builder;
+  /// 单行内容：拿到当前该用的自动墨色 [ink]（见 appGlassToneInk）。
+  ///
+  /// 只有 [AppChromeGlassBar.pinned] 允许不传它（改传 [children]）。
+  final Widget Function(BuildContext context, Color ink)? builder;
+
+  /// **多行内容**：一块玻璃里上下排几行，每行自己从 [AppChromeInk] 取墨色。
+  ///
+  /// 为什么要这个：相册页的吸顶区要同时放「分类行 + 日期行」，两行必须在
+  /// **同一块玻璃**里——分成两条各自带玻璃的吸顶 sliver 上下堆叠，两行之间
+  /// 就会露出一条接缝（两条玻璃的底衬/描边叠在一起）。这里把多行塞进同一个
+  /// [AppGlassSurface]，接缝从结构上就不存在（见 AlbumPinnedChromeSliver）。
+  ///
+  /// 行自己读墨色的机制与三处单行条一致：[AppChromeInk] 由这一层放进 scope，
+  /// 行里的 [AppSegmentedBarSurface] / [DateHeader] 会自己取（见各自的 build）。
+  final List<Widget> children;
 
   @override
   Widget build(BuildContext context) {
@@ -249,8 +278,23 @@ class AppChromeGlassBar extends StatelessWidget {
           backplate: backplateAlpha <= 0
               ? null
               : AppColors.bgPage.withValues(alpha: backplateAlpha),
-          child: builder(context, ink),
+          child: _content(context, ink),
         ),
+      ),
+    );
+  }
+
+  /// 玻璃里的内容：单行（[builder]）或**多行**（[children]，包一层
+  /// [AppChromeInk] 让每行自己取墨色）。
+  Widget _content(BuildContext context, Color ink) {
+    final build = builder;
+    if (build != null) return build(context, ink);
+    return AppChromeInk(
+      ink: ink,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
       ),
     );
   }

@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import '../../core/album_view_settings.dart';
 import '../../models/media.dart';
 import '../../widgets/date_header.dart';
-import '../../widgets/pinned_bar_sliver.dart';
 import 'photo_timeline_scrubber.dart';
 
 /// 相册详情页与朋友圈相册的吸顶栈 / 时间轴几何：**只在这里算一次**。
@@ -46,16 +45,35 @@ const double kTimelineMinTrackHeight = 120;
 /// 右侧轨道的宽度。
 const double kTimelineTrackWidth = 30;
 
-/// 日期分组头的内边距：左右 16（相册页 12 的网格留白 + 4，两页同值），
-/// 下面 4 = 与网格之间的留白，跟着分组头一起算进吸顶条的高度。
+/// 日期条的左右内边距：16（相册页 12 的网格留白 + 4，两页同值）。
+///
+/// 内容流的分组头与玻璃里的日期行共用这一份，日期文字在两种摆法里落在同一
+/// 条竖线上。
+const double kTimelineDateHeaderSidePadding = 16;
+
+/// 日期分组头的内边距：左右 [kTimelineDateHeaderSidePadding]，下面 4 =
+/// 与网格之间的留白，跟着分组头一起算进它的高度。
 const EdgeInsets kTimelineDateHeaderPadding = EdgeInsets.fromLTRB(
-  16,
+  kTimelineDateHeaderSidePadding,
   0,
-  16,
+  kTimelineDateHeaderSidePadding,
   kTimelineSectionGap,
 );
 
-/// 吸顶栈的组成：折叠页头 + 筛选条 + 日期分组头。
+/// 吸顶玻璃里**日期行**的内边距：左右同 [kTimelineDateHeaderSidePadding]，
+/// **下面 0**。
+///
+/// 那 4px（[kTimelineSectionGap]）是内容流分组头与下面网格之间的留白；玻璃里
+/// 没有「下一段内容」，留着就是在玻璃里多一条 4px 的空白带。日期行因此是
+/// [kTimelineDateHeaderHeight] = 34 高（内容流里是 38）。
+const EdgeInsets kPinnedDateRowPadding = EdgeInsets.fromLTRB(
+  kTimelineDateHeaderSidePadding,
+  0,
+  kTimelineDateHeaderSidePadding,
+  0,
+);
+
+/// 吸顶栈的组成：折叠页头 + **一整块玻璃**（分类行 + 日期行）。
 ///
 /// [headerMin] 是折叠后的页头（朋友圈相册没有页头，传 0），[headerMax] 是
 /// 展开的页头。两者之差就是「跳转时页头顺带收起」的那一段。
@@ -64,29 +82,41 @@ class TimelineStickySpec {
     required this.headerMin,
     required this.headerMax,
     required this.filterExtent,
+    required this.dateRowExtent,
     required this.dateHeaderExtent,
   });
 
   final double headerMin;
   final double headerMax;
 
-  /// 筛选条高度（没有筛选条时传 0）。
+  /// 吸顶玻璃块里**分类行**的高度（没有分类行时传 0）。
   final double filterExtent;
 
-  /// 日期分组头高度（平铺分组时传 0）。
+  /// 吸顶玻璃块里**日期行**的高度（平铺分组时传 0）。
+  ///
+  /// 它与 [dateHeaderExtent] 不是一回事：日期行在玻璃里、只有 34 高（
+  /// [kTimelineDateHeaderHeight]），没有与网格之间的那 4px 留白；内容流里的
+  /// 分组头是 38（34 + 4，见 [kTimelineDateHeaderExtent]）。
+  final double dateRowExtent;
+
+  /// 内容流里**除第一组以外**每个日期分组头的高度（平铺分组时传 0）。
   final double dateHeaderExtent;
 
-  /// 吸顶区总高 = 折叠头 + 筛选条 + 日期头。轨道顶边与 topInset 都取它：
-  /// 被吸顶条压住的那一行既不是跳转目标，也不该用来报月份。
-  double get stickyBottom => headerMin + filterExtent + dateHeaderExtent;
+  /// 吸顶区总高 = 折叠头 + 那一块玻璃（分类行 46 + 日期行 34）。轨道顶边与
+  /// topInset 都取它：被吸顶条压住的那一行既不是跳转目标，也不该用来报月份。
+  double get stickyBottom => headerMin + filterExtent + dateRowExtent;
 
-  /// 内容流里第一组的基准偏移 = 展开头 + 筛选条。
-  double get contentBase => headerMax + filterExtent;
+  /// 内容流里第一组的基准偏移 = 展开头 + 那一块玻璃。
+  double get contentBase => headerMax + filterExtent + dateRowExtent;
 
   /// 每个分组在内容里占的高度 = 分组头（已含与网格之间的留白，见
   /// [kTimelineDateHeaderExtent]）。留白不再单独加一次，否则吸顶条下沿与第一
   /// 行照片之间会多出一条页面底色。
   double get headerAdvance => dateHeaderExtent;
+
+  /// 第一组的日期摆在那块玻璃里（不在内容流里）：偏移表不能给它再加一个
+  /// 分组头，否则第一行照片会比吸顶区下沿低整整一个分组头。
+  bool get firstHeaderInSticky => dateRowExtent > 0;
 }
 
 /// 一页时间轴的几何与文案定位，两页共用同一份计算。
@@ -140,6 +170,7 @@ class AlbumTimelineLayout {
       width: width,
       columns: columns,
       headerHeight: sticky.headerAdvance,
+      firstHeaderInSticky: sticky.firstHeaderInSticky,
       // 基准偏移就是内容流里第一组的起点。分组头自己吃掉了与网格之间的留白
       // （[kTimelineDateHeaderExtent]），网格顶部不再另加内边距，所以这里也不
       // 需要再补 kTimelineSectionGap：补了第一行就会比吸顶区下沿低一截。
@@ -186,6 +217,18 @@ class AlbumTimelineLayout {
   }
 }
 
+/// 第一个带日期分组头的分组下标（-1 = 没有分组头 / 平铺分组）。
+///
+/// 相册页的吸顶区是**一整块玻璃**：第一个分组头的日期就摆在那块玻璃里，
+/// 内容流里不再有它（否则同一句日期会出现两次，且第一行照片会被顶低一个
+/// 分组头）。其余分组的头留在内容流里，滚到玻璃底下就被盖住。
+int timelineFirstHeaderIndex(List<AlbumSection> sections) {
+  for (var i = 0; i < sections.length; i++) {
+    if (sections[i].header != null) return i;
+  }
+  return -1;
+}
+
 /// 扁平化后每条分组网格的第一个子项下标，[VisibleItemLocator] 用它换算下标。
 List<int> timelineSliverStarts(List<AlbumSection> sections) {
   final starts = <int>[];
@@ -203,9 +246,9 @@ List<int> timelineSliverStarts(List<AlbumSection> sections) {
 /// 高度取 [kTimelineDateHeaderExtent]（34 + 4）：与网格之间的留白是它自己的
 /// 下内边距，两版都铺满整条（含这段留白）。
 ///
-/// 材质按 [pinned] 分两份（见 [DateHeader]）：吸顶那一份是底部 footer 同款
-/// **玻璃**（[AppChromeGlassBar]），内容流那一份**完全透明**，日期文字直接压
-/// 在页面背景上。两份的几何与文字完全一致，切换时只有材质不同。
+/// 材质按 [pinned] 分两份（见 [DateHeader]）：自带玻璃那一份是底部 footer 同款
+/// **玻璃**（[AppChromeGlassBar]，朋友圈动态流顶部用），内容流那一份**完全
+/// 透明**，日期文字直接压在页面背景上。两份的几何与文字完全一致。
 Widget timelineDateHeader(
   AlbumSection section, {
   int? count,
@@ -222,39 +265,23 @@ Widget timelineDateHeader(
   );
 }
 
-/// 只钉当前分组：吸顶的那一个头套 [PinnedBarSliver]，其余分组头是内容流里
-/// 的普通横条。多个 pinned 头在 Flutter 里会互相堆叠，吸顶区就随滚动越叠
-/// 越厚（每组 38px），照片被一条条空白顶下去。
+/// 内容流里的日期分组头：**完全透明**的普通横条，日期文字直接压在页面背景上。
 ///
-/// 吸顶版与内容流版同高（[kTimelineDateHeaderExtent]）：吸顶那一刻分组头的
-/// 位置本来就正好在吸顶位，两者不会互相挤动，吸顶条下沿也不会漏缝。
+/// **吸顶的那一行日期不在这里**：相册页的吸顶区是一整块玻璃（分类行 + 日期
+/// 行，见 AlbumPinnedChromeSliver），当前分组的日期摆在玻璃里，随滚动换文案。
+/// 这里只剩第一组之后的分组头：它们随内容滚上来，滚到玻璃底下就被盖住——
+/// 那一刻玻璃里的日期行正好换成这一组（阈值见 [TimelineStickySpec] /
+/// pinThresholds），所以既不会出现两句日期，也不会有一条谁也没画的缝。
 ///
-/// 底衬（两版都由 [DateHeader] 自己画）：吸顶 sliver 的底衬显式传**透明**
-/// （[PinnedBarSliver] 读到 alpha = 0 就整层不画）—— 垫一层
-/// [AppColors.bgPage] 的话，日期条顶上会多出一条白杠，玻璃也就没有内容可采。
-///
-/// 两版的差别就是材质：吸顶版是**底部 footer 同款玻璃**（padding 与参数见
-/// [DateHeader.pinned] / [AppChromeGlassBar]），内容流版**完全透明**。
+/// 第一组没有这一条（它的日期从一开始就在玻璃里，见
+/// [timelineFirstHeaderIndex] / [TimelineStickySpec.firstHeaderInSticky]）。
 Widget timelineDateHeaderSliver({
-  required bool pinned,
   required AlbumSection section,
   int? count,
   Widget? trailing,
 }) {
-  if (!pinned) {
-    return SliverToBoxAdapter(
-      child: timelineDateHeader(section, count: count, trailing: trailing),
-    );
-  }
-  return PinnedBarSliver(
-    height: kTimelineDateHeaderExtent,
-    background: Colors.transparent,
-    child: timelineDateHeader(
-      section,
-      count: count,
-      trailing: trailing,
-      pinned: true,
-    ),
+  return SliverToBoxAdapter(
+    child: timelineDateHeader(section, count: count, trailing: trailing),
   );
 }
 

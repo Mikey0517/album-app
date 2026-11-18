@@ -5,6 +5,7 @@ import 'package:album_app/features/album/photo_timeline_scrubber.dart';
 import 'package:album_app/features/feed/feed_page.dart';
 import 'package:album_app/models/media.dart';
 import 'package:album_app/models/paged.dart';
+import 'package:album_app/widgets/app_chrome_glass_bar.dart';
 import 'package:album_app/widgets/app_segmented_bar.dart';
 import 'package:album_app/widgets/date_header.dart';
 import 'package:flutter/material.dart';
@@ -130,22 +131,38 @@ void main() {
         reason: '筛选条高度不随滚动变',
       );
 
+      // 吸顶区是**一整块玻璃**：分类行与日期行在同一个 AppChromeGlassBar 里，
+      // 不再有第二条自带玻璃的吸顶条（那会在两行之间留一条接缝）。
+      expect(
+        find.byType(AppChromeGlassBar),
+        findsOneWidget,
+        reason: '吸顶区又变成两条各自吸顶的玻璃了',
+      );
+      // 整块玻璃的 rect（玻璃条本身是 Box；外面的 sliver 不是）。
+      final block = tester.getRect(find.byType(AppChromeGlassBar));
+      expect(block.top, closeTo(0, 0.5), reason: '整块玻璃吸在顶部');
+      expect(
+        block.height,
+        closeTo(kAppSegmentedBarHeight + kTimelineDateHeaderHeight, 0.5),
+        reason: '整块玻璃 = 分类行 46 + 日期行 34',
+      );
+
       final headers = find.byType(DateHeader);
       final pinned = <Rect>[];
       for (var i = 0; i < headers.evaluate().length; i++) {
         final rect = tester.getRect(headers.at(i));
+        // 玻璃里那一行：顶边正好接在分类行下沿。其余分组头随内容滚到玻璃
+        // 底下（被整块玻璃盖住）或还在这块玻璃下面，都不在吸顶位。
         if ((rect.top - filter.bottom).abs() <= 0.5) pinned.add(rect);
-        expect(
-          rect.top,
-          greaterThanOrEqualTo(filter.bottom - 0.5),
-          reason: '日期头不许压到筛选条上，更不许两条叠在吸顶位',
-        );
       }
-      expect(pinned, hasLength(1), reason: '同一时刻只有一个日期头吸顶');
+      expect(pinned, hasLength(1), reason: '同一时刻只有一行日期在吸顶位');
+      expect(pinned.single.height, closeTo(kTimelineDateHeaderHeight, 0.5),
+          reason: '玻璃里那一行是 34 高（没有与网格之间的那 4px）');
       expect(
         pinned.single.bottom,
-        closeTo(kTimelineDateHeaderExtent + kAppSegmentedBarHeight, 0.5),
-        reason: '吸顶区 = 筛选条 46 + 日期头 38',
+        closeTo(kTimelineDateHeaderHeight + kAppSegmentedBarHeight, 0.5),
+        reason: '吸顶区 = 那一整块玻璃：分类行 46 + 日期行 34 = 80（不是两条'
+            '各自带玻璃的吸顶条叠出来的 84）',
       );
       expect(
         tester.getRect(find.byType(PhotoTimelineScrubber)).top -
@@ -169,9 +186,9 @@ void main() {
     expect(
       thumb.top,
       greaterThanOrEqualTo(
-        kAppSegmentedBarHeight + kTimelineDateHeaderExtent - 0.01,
+        kAppSegmentedBarHeight + kTimelineDateHeaderHeight - 0.01,
       ),
-      reason: '滑块不许盖住吸顶筛选条与日期头',
+      reason: '滑块不许盖住吸顶那块玻璃（分类行 + 日期行）',
     );
     await gesture.up();
     await tester.pumpAndSettle();

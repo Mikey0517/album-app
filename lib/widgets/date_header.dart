@@ -18,14 +18,16 @@ const double kPinnedDateHeaderRadius = kAppChromePinnedRadius;
 /// `features/album/album_timeline_layout.dart`，两页同一份）；朋友圈动态流
 /// 的日期头高 36，也套这一层。
 ///
-/// **两种形态，一套文字**：
-/// - [pinned] 为真（吸顶的那一份）：底衬是**与底部 footer 完全相同的玻璃**
-///   （[AppChromeGlassBar]，折射可见度 45% 的 scrim + 最低档模糊），照片从它
-///   下面滚过去时条带自己就是一块玻璃。之前这里是「主题色浅渐变 + 一层兜底
-///   模糊」，用户要求统一成 footer 的材质；
-/// - [pinned] 为假（内容流里的普通日期头）：**完全透明**——没有渐变、没有
-///   模糊、没有玻璃。底衬就是它背后的页面背景（渐变或用户挑的背景图），
-///   日期文字直接压在上面。
+/// **三种摆法，一套文字**：
+/// - 在**一整块玻璃**里（相册吸顶区的日期行，[AppChromeInk] 在祖先里）：
+///   材质由那块玻璃给，这一层只排文字——分类行与日期行之间因此没有第二条
+///   底衬/描边，也就没有接缝（见 AlbumPinnedChromeSliver）；
+/// - [pinned] 为真（**自带**玻璃的那一份，朋友圈动态流顶部）：底衬是
+///   **与底部 footer 完全相同的玻璃**（[AppChromeGlassBar]，折射可见度 45%
+///   的 scrim + 最低档模糊），照片从它下面滚过去时条带自己就是一块玻璃；
+/// - [pinned] 为假且不在玻璃里（内容流里的普通日期头）：**完全透明**——没有
+///   渐变、没有模糊、没有玻璃。底衬就是它背后的页面背景（渐变或用户挑的
+///   背景图），日期文字直接压在上面。
 ///
 /// **文字为什么用自动墨色**：非吸顶那一份背后是任意背景（可以是纯白照片，
 /// 也可以是深色背景图），固定一种颜色在两端总有一头读不出来。这里与 footer
@@ -45,7 +47,11 @@ class DateHeader extends StatelessWidget {
   /// 右侧数量（相册分组里那一组的张数）；与 [text] 同一套文字。
   final int? count;
 
-  /// 是不是吸顶的那一份：true = footer 同款玻璃，false = 纯透明。
+  /// 是不是**自带** footer 同款玻璃的那一份。
+  ///
+  /// true = 自己包一层 [AppChromeGlassBar]（朋友圈动态流顶部那一条）；
+  /// false = 不自带材质：祖先里有玻璃（相册吸顶区那一整块，[AppChromeInk]
+  /// 在 scope 里）就用那块玻璃的墨色，没有就完全透明（内容流里的日期头）。
   final bool pinned;
 
   /// 玻璃圆角（只在 [pinned] 时有效）。
@@ -64,7 +70,13 @@ class DateHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 吸顶那一份：墨色由玻璃条按背景采样挑好传进来（与 footer 同一个机制）。
+    // 已经在一整块玻璃里（相册吸顶区把分类行与日期行放进了同一个
+    // AppChromeGlassBar）：材质与墨色都由那块玻璃给，这一层只排文字——再包
+    // 一层玻璃就是两行之间那条接缝的来源。
+    final chromeInk = AppChromeInk.maybeOf(context);
+    if (chromeInk != null) return _content(chromeInk);
+    // 自带玻璃的那一份（朋友圈动态流顶部）：墨色由玻璃条按背景采样挑好传进来
+    // （与 footer 同一个机制）。
     if (pinned) {
       // 直边条 + 不要描边/内高光 + 固定底衬（[AppChromeGlassBar.pinned]）：
       // 吸顶条贴在页面左右边缘，只留玻璃本体，且合成色不随背后滚过的照片漂。

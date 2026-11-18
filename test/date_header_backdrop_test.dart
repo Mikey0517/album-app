@@ -145,7 +145,17 @@ Widget _page({required bool pinned, bool stripes = true}) => RepaintBoundary(
             body: CustomScrollView(
               slivers: [
                 const SliverToBoxAdapter(child: SizedBox(height: 220)),
-                timelineDateHeaderSliver(pinned: pinned, section: _section),
+                // 两种摆法：自带玻璃的吸顶条（朋友圈动态流那一条）与内容流里
+                // 的透明条。相册页把日期行塞进**一整块玻璃**（分类行 + 日期行）
+                // 的那种摆法，见 test/album_pinned_chrome_test.dart。
+                if (pinned)
+                  PinnedBarSliver(
+                    height: kTimelineDateHeaderExtent,
+                    background: Colors.transparent,
+                    child: timelineDateHeader(_section, pinned: true),
+                  )
+                else
+                  timelineDateHeaderSliver(section: _section),
                 SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, index) => _stripes(),
@@ -500,10 +510,19 @@ void main() {
           final bars = find
               .ancestor(of: thisHeader, matching: find.byType(PinnedBarSliver))
               .evaluate();
-          final glass = find
-              .descendant(
-                  of: thisHeader, matching: find.byType(AppChromeGlassBar))
-              .evaluate();
+          // 吸顶区那一行日期的玻璃：要么在它自己子树里（单行形态，自己带
+          // 玻璃），要么在它的**祖先**里（相册页：一整块玻璃同时装分类行与
+          // 日期行）。两种摆法的材质是同一份。
+          final glass = <Element>[
+            ...find
+                .descendant(
+                    of: thisHeader, matching: find.byType(AppChromeGlassBar))
+                .evaluate(),
+            ...find
+                .ancestor(
+                    of: thisHeader, matching: find.byType(AppChromeGlassBar))
+                .evaluate(),
+          ];
           if (bars.isEmpty) {
             expect(header.pinned, isFalse);
             expect(glass, isEmpty,
@@ -524,10 +543,19 @@ void main() {
             );
             continue;
           }
-          expect(header.pinned, isTrue,
-              reason: '${page.$1}@$target 吸顶日期头没切到玻璃形态');
           expect(glass, hasLength(1),
               reason: '${page.$1}@$target 吸顶日期头缺 footer 同款玻璃');
+          // 自带玻璃的那一份 pinned 为 true；整块玻璃里那一行是 false（玻璃在
+          // 祖先里，它自己只排文字）。
+          expect(
+            header.pinned,
+            find
+                .descendant(
+                    of: thisHeader, matching: find.byType(AppChromeGlassBar))
+                .evaluate()
+                .isNotEmpty,
+            reason: '${page.$1}@$target 日期头的 pinned 与它是否自带玻璃不一致',
+          );
           // 吸顶那一条：sliver 自己不垫色，底衬只有玻璃。
           final bar = tester.widget<PinnedBarSliver>(
             find.byElementPredicate((element) => element == bars.first),
