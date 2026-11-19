@@ -255,7 +255,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
         MediaQuery.orientationOf(context) == Orientation.landscape;
     final backgroundOpacity =
         (1 - _dragOffset / 400).clamp(0.3, 1.0).toDouble();
-    return AnnotatedRegion<SystemUiOverlayStyle>(
+    final viewer = AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.light,
@@ -410,5 +410,9 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
         ),
       ),
     );
+    // 全屏页自己用平台**原始**的 insets（沉浸时就是 0）：顶部关闭按钮、视频
+    // 进度条与缩略图条仍贴着屏幕边缘。主界面那一层是钉住的（见
+    // lib/widgets/stable_view_insets.dart），两者互不影响。
+    return MediaQuery.fromView(view: View.of(context), child: viewer);
   }
 }

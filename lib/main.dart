@@ -24,7 +24,7 @@ import 'core/upload_manager.dart';
 import 'core/video_orientation.dart';
 import 'widgets/app_glass.dart';
 import 'widgets/brand_mark.dart';
-import 'widgets/upload_status_overlay.dart';
+import 'widgets/stable_view_insets.dart';
 import 'features/auth/login_page.dart';
 import 'features/home/home_page.dart';
 import 'features/update/changelog_dialog.dart';
@@ -94,6 +94,11 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
   bool? _loggedIn;
   bool _readyForResumeCheck = false;
   Future<bool>? _updateCheckFuture;
+
+  /// [MaterialApp.builder] 那一层（稳定安全区 + 上传状态浮层）。建一次就存下：
+  /// 每帧给 MaterialApp 一个新的 builder 会让 Builder 白重建一遍。
+  late final Widget Function(BuildContext, Widget?) _chromeBuilder =
+      appChromeBuilder(_navigatorKey);
 
   @override
   void initState() {
@@ -306,10 +311,7 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
       title: '家庭相册',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(dark: dark),
-      builder: (context, child) => UploadStatusOverlay(
-        navigatorKey: _navigatorKey,
-        child: child ?? const SizedBox.shrink(),
-      ),
+      builder: _chromeBuilder,
       home: AnimatedSwitcher(
         duration: const Duration(milliseconds: 250),
         switchInCurve: Curves.easeOutCubic,
