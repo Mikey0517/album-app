@@ -26,13 +26,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_http.dart';
 
-// **三处吸顶悬浮条 = 底部 footer 的同一块玻璃**：朋友圈吸顶日期条、
-// 相册吸顶分类条、相册吸顶日期条都走 [AppChromeGlassBar]，参数只在那里写一次。
+// **三处吸顶悬浮条 = 底部 footer 的同一块玻璃，只差折射那一档**：朋友圈吸顶
+// 日期条、相册吸顶分类条、相册吸顶日期条都走 [AppChromeGlassBar]，参数只在那里
+// 写一次。
 //
 // 这份文件守四件事：
-// 1. 三处与 footer 的光学参数**逐项相等**（scrim / scrimAlpha / thickness /
-//    chroma / blur / refractiveIndex / saturation / 档位 / 自建层），不是「看着
-//    差不多」；
+// 1. 三处与 footer 共用的那几项**逐项相等**（scrim / scrimAlpha / blur /
+//    saturation / tint / 档位 / 自建层 / 光照），折射三数**逐项不同**：
+//    吸顶条 44 / 1.75 / 0.32，footer 36 / 1.55 / 0.22；
 // 2. 圆角按各自形态取：footer 与分类条是胶囊（高度/2），日期条是满宽条带（0）；
 // 3. 三处的文字是 footer **未激活**那一套：appGlassToneInk() 的自动墨色、
 //    字号 / 行高 / 字重与 footer 标签完全相同（分类条的选中段仍是主题色）；
@@ -154,6 +155,10 @@ class _Chrome {
   double get chroma => settings.chromaticAberration;
   double get refractiveIndex => settings.refractiveIndex;
   double get saturation => settings.saturation;
+  double get lightIntensity => settings.lightIntensity;
+  double get edgeAbsorption => settings.edgeAbsorption;
+  double get rimShade => settings.rimShade;
+  double get tintAlpha => settings.glassColor.a;
 }
 
 _Chrome _chromeOf(WidgetTester tester, Finder bar, String name) {
@@ -265,7 +270,8 @@ void main() {
     AppBackdropSample.reset();
   });
 
-  testWidgets('三处吸顶条与 footer 的光学参数逐项相等', (tester) async {
+  testWidgets('三处吸顶条与 footer：共用项逐项相等，折射三数吸顶条更高一档',
+      (tester) async {
     _phone(tester);
 
     await tester.pumpWidget(_footerPage());
@@ -283,12 +289,14 @@ void main() {
         reason: '相册吸顶区不是一块玻璃：分类行与日期行各自带玻璃就是两条');
     expect(_albumDateRow(), findsOneWidget, reason: '两块里只剩一块日期行了');
     final albumChrome = _chromeOf(tester, _albumChromeBar(), '相册吸顶区');
+    final albumRect = tester.getRect(_albumChromeBar());
     _expectPinnedDecoration(tester, _albumChromeBar(), '相册吸顶区');
 
     addTearDown(installFakeApi(json: _feedJson()));
     await tester.pumpWidget(_feedPage());
     await tester.pumpAndSettle();
     final feedDate = _chromeOf(tester, _pinnedDateBar(), '朋友圈吸顶日期条');
+    final feedRect = tester.getRect(_pinnedDateBar());
     _expectPinnedDecoration(tester, _pinnedDateBar(), '朋友圈吸顶日期条');
 
     // 四处 chrome：footer + 相册吸顶区（分类行 + 日期行同一块）+ 朋友圈日期条。
@@ -307,31 +315,57 @@ void main() {
           reason: '${site.name} 的 scrim 不透明度与 footer 不一致');
     }
 
-    // 2. 光学参数：三处 = footer，一项一项比（不是「大致同一档」）。
+    // 2. 共用那一半：模糊 / 饱和度 / 光照 / 边缘吸收三处 = footer，一项一项比
+    //    （不是「大致同一档」）。吸顶条只在折射三数上分家。
     for (final site in sites) {
-      expect(site.thickness, footer.thickness,
-          reason: '${site.name} 的斜面厚度与 footer 不一致');
-      expect(site.chroma, footer.chroma,
-          reason: '${site.name} 的色散与 footer 不一致');
       expect(site.blur, footer.blur,
           reason: '${site.name} 的模糊半径与 footer 不一致');
-      expect(site.refractiveIndex, footer.refractiveIndex,
-          reason: '${site.name} 的折射率与 footer 不一致');
       expect(site.saturation, footer.saturation,
           reason: '${site.name} 的饱和度与 footer 不一致');
+      expect(site.lightIntensity, footer.lightIntensity,
+          reason: '${site.name} 的光照强度与 footer 不一致');
+      expect(site.edgeAbsorption, closeTo(footer.edgeAbsorption, 1e-9),
+          reason: '${site.name} 的边缘吸收与 footer 不一致（暗边会被放大）');
+      expect(site.rimShade, closeTo(footer.rimShade, 1e-9),
+          reason: '${site.name} 的 rimShade 与 footer 不一致');
+      expect(site.tintAlpha, closeTo(footer.tintAlpha, 1e-9),
+          reason: '${site.name} 的 tint 与 footer 不一致');
     }
-
-    // 3. 而且就是 chrome 那一组常量（参数只有一份来源）。
-    expect(footer.thickness, appGlassChromeThickness);
-    expect(footer.thickness, 36, reason: '这一轮斜面加到 36');
-    expect(footer.chroma, appGlassChromeChromaticAberration);
-    expect(footer.chroma, 0.22, reason: '这一轮色散加到 0.22');
     expect(footer.blur, appGlassChromeBlur);
     expect(footer.blur, 2, reason: '模糊保持 2：折射才不会被糊掉');
-    expect(footer.refractiveIndex, appGlassChromeRefractiveIndex);
-    expect(footer.refractiveIndex, 1.55, reason: '这一轮折射率加到 1.55');
     expect(footer.saturation, appGlassChromeSaturation);
     expect(footer.saturation, 1.3);
+
+    // 3. 折射那一档：footer = 旧的一组（36 / 1.55 / 0.22，不许跟着吸顶条变），
+    //    三处吸顶条 = 新的一组（44 / 1.75 / 0.32），而且是**真的更高一档**。
+    expect(footer.thickness, appGlassChromeThickness);
+    expect(footer.thickness, 36, reason: 'footer 的斜面保持 36');
+    expect(footer.chroma, appGlassChromeChromaticAberration);
+    expect(footer.chroma, 0.22, reason: 'footer 的色散保持 0.22');
+    expect(footer.refractiveIndex, appGlassChromeRefractiveIndex);
+    expect(footer.refractiveIndex, 1.55, reason: 'footer 的折射率保持 1.55');
+    for (final site in sites) {
+      expect(site.thickness, appGlassPinnedThickness,
+          reason: '${site.name} 的斜面厚度不是吸顶条那一档');
+      expect(site.thickness, 44, reason: '${site.name} 的斜面是 44（footer 36）');
+      expect(site.refractiveIndex, appGlassPinnedRefractiveIndex,
+          reason: '${site.name} 的折射率不是吸顶条那一档');
+      expect(site.refractiveIndex, 1.75,
+          reason: '${site.name} 的折射率是 1.75（footer 1.55）');
+      expect(site.chroma, appGlassPinnedChromaticAberration,
+          reason: '${site.name} 的色散不是吸顶条那一档');
+      expect(site.chroma, 0.32, reason: '${site.name} 的色散是 0.32（footer 0.22）');
+      // 「更高一档」不是三个不相干的数：逐项都比 footer 高。
+      expect(site.thickness, greaterThan(footer.thickness),
+          reason: '${site.name} 的斜面没有比 footer 更深');
+      expect(site.refractiveIndex, greaterThan(footer.refractiveIndex),
+          reason: '${site.name} 的折射率没有比 footer 更高');
+      expect(site.chroma, greaterThan(footer.chroma),
+          reason: '${site.name} 的色散没有比 footer 更强');
+      // 而且不是「顺手把 footer 一起改了」：两边的参数确实不是同一份。
+      expect(site.settings, isNot(equals(footer.settings)),
+          reason: '${site.name} 与 footer 用的是同一份参数：这一档没生效');
+    }
     // scrim 0.55 = 折射可见度 45%。
     expect(footer.scrimAlpha, closeTo(0.55, 1e-9));
     expect(footer.scrimAlpha, closeTo(appGlassChromeScrimAlpha(), 1e-9));
@@ -363,6 +397,38 @@ void main() {
     expect(footer.showBorder, isTrue, reason: 'footer 的描边不许跟着吸顶条一起掉');
     expect(footer.showHighlight, isTrue, reason: 'footer 的内高光要保持');
     expect(footer.backplate, isNull, reason: 'footer 不加底衬');
+
+    // 6. 直边 + 更深的斜面，不许把最矮的那条压出「上下暗边」。
+    //
+    //    包内的斜面宽度按物理像素计、再按 dpr/3 折算，所以**逻辑斜面宽 =
+    //    thickness / 3**（与 dpr 无关）：36 → 12 lp，44 → 14.7 lp。直边条的
+    //    斜面只落在上下两条长边上，两条斜面把中间的平台面夹在中间——平台面
+    //    一旦被吃光，上下两条暗边就接成一条，整条带子发灰。
+    double bevel(double thickness) => thickness / 3;
+    // 最矮的一块是朋友圈吸顶日期条（相册那块是 46 + 34 = 80），实测而不是写死。
+    expect(feedRect.height, 36, reason: '朋友圈吸顶日期条高 36，是最矮的一块');
+    expect(albumRect.height, 80, reason: '相册吸顶区 = 分类行 46 + 日期行 34');
+    for (final site in <({String name, Rect rect})>[
+      (name: '朋友圈吸顶日期条', rect: feedRect),
+      (name: '相册吸顶区', rect: albumRect),
+    ]) {
+      final flat = site.rect.height - bevel(appGlassPinnedThickness) * 2;
+      expect(flat, greaterThan(0),
+          reason: '${site.name} 上下两条斜面已经叠到一起：整条都在斜面上，'
+              '这就是「上下暗边」');
+      expect(flat, greaterThan(4),
+          reason: '${site.name} 中间只剩 ${flat.toStringAsFixed(1)} lp 平台面：'
+              '44 的斜面把它压成两条暗边夹一条缝');
+    }
+    // 比 footer 那一档只宽 ~2.7 lp：暗边本身是细线（见 appGlassPinnedThickness
+    // 的推算），不是两条带；两档的量级一样，观感不会分家。
+    expect(
+      bevel(appGlassPinnedThickness) - bevel(appGlassChromeThickness),
+      lessThan(3),
+      reason: '吸顶条的斜面比 footer 宽了不止 3 lp：直边会被两条更粗的暗边夹住',
+    );
+    expect(bevel(appGlassPinnedThickness), lessThan(16),
+        reason: '斜面宽过 16 lp 就该降 thickness 或挪 lightIntensity 了');
     expect(tester.takeException(), isNull);
   });
 

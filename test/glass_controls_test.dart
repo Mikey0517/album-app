@@ -22,8 +22,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 // 三处「换玻璃」的控件：多选底栏、上传按钮、分类条。
 //
 // 它们和底部 footer 是**同一块材质**：同一个 [AppGlassSurface]、同一套档位与
-// 光学参数（premium，32 / 1.38 / 0.14 / 2）、同样的 scrim 分支（55% = 折射
-// 可见度 45%）；几何上都是圆角 = 高度/2（上传按钮是直径 48 的圆，其余是 pill）。
+// 光学参数（premium，36 / 1.55 / 0.22 / 2；吸顶条自己那一档 44 / 1.75 / 0.32
+// 不在这里）、同样的 scrim 分支（55% = 折射可见度 45%）；几何上都是
+// 圆角 = 高度/2（上传按钮是直径 48 的圆，其余是 pill）。
 // 这里守四件事：
 //   1. 多选底栏是浮动胶囊：左右 18、底部离安全区 8、四个操作等宽；
 //   2. 上传按钮是直径 48 的圆钮、只放「+」图标，且整枚让开右侧 30 宽的时间轴
@@ -82,10 +83,17 @@ BoxDecoration _firstDecorationUnder(WidgetTester tester, Finder frame) {
 ///
 /// 卡片改成白雾磨砂（[appCardFrostSettings]）是卡片自己的事，底部胶囊 /
 /// 筛选条 / 多选底栏 / 上传按钮仍是 [appGlassChromeSettings]（折射优先的
-/// premium 那套）；这里逐个数点名，谁被连带改掉都会红。
-void _expectChromeSettings(WidgetTester tester) {
-  final container =
-      tester.widget<GlassContainer>(find.byType(GlassContainer).first);
+/// premium 那套，36 / 1.55 / 0.22）；这里逐个数点名，谁被连带改掉都会红。
+///
+/// **三处吸顶条不在这一档**：它们比 footer 深一档（44 / 1.75 / 0.32，见
+/// app_glass.dart 的 appGlassPinnedSettings），所以在相册页这类「吸顶条与控件
+/// 同屏」的树上要用 [within] 点名控件自己那块玻璃，不能取第一块 GlassContainer。
+void _expectChromeSettings(WidgetTester tester, {Finder? within}) {
+  final container = tester.widget<GlassContainer>(within == null
+      ? find.byType(GlassContainer).first
+      : find
+          .descendant(of: within, matching: find.byType(GlassContainer))
+          .first);
   final settings = container.settings!;
   // 按常量断言（不写死数字）：折射参数与 scrim 是一对，改一处必须改另一处。
   expect(settings.thickness, appGlassChromeThickness,
@@ -516,7 +524,7 @@ void main() {
         find.descendant(of: fab, matching: find.byType(GlassContainer)),
         findsOneWidget,
       );
-      _expectChromeSettings(tester);
+      _expectChromeSettings(tester, within: fab);
 
       // 圆的**外接矩形**就是正方形，边长 = 直径 48；宽度不再由内容撑开。
       final fabRect = tester.getRect(fab);

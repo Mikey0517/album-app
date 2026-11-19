@@ -235,18 +235,39 @@ void main() {
     final surface = tester.widget<AppGlassSurface>(
       find.descendant(of: _glass(), matching: find.byType(AppGlassSurface)),
     );
-    expect(surface.settings!.thickness, appGlassChromeThickness);
-    expect(surface.settings!.thickness, 36, reason: '这一轮的斜面 36');
-    expect(surface.settings!.refractiveIndex, appGlassChromeRefractiveIndex);
-    expect(surface.settings!.refractiveIndex, 1.55, reason: '这一轮的折射率 1.55');
+    // 吸顶条是**自己那一档折射**（比 footer 深一档）：44 / 1.75 / 0.32。
+    // footer / 多选底栏 / 上传按钮仍是 36 / 1.55 / 0.22，两份参数只在折射这三
+    // 个数上分家（逐项对比见 test/pinned_chrome_bar_test.dart）。
+    expect(surface.settings!.thickness, appGlassPinnedThickness);
+    expect(surface.settings!.thickness, 44, reason: '吸顶条的斜面 44（footer 36）');
+    expect(surface.settings!.thickness, greaterThan(appGlassChromeThickness),
+        reason: '吸顶条没比 footer 更深一档');
+    expect(surface.settings!.refractiveIndex, appGlassPinnedRefractiveIndex);
+    expect(surface.settings!.refractiveIndex, 1.75,
+        reason: '吸顶条的折射率 1.75（footer 1.55）');
+    expect(
+      surface.settings!.refractiveIndex,
+      greaterThan(appGlassChromeRefractiveIndex),
+    );
     expect(
       surface.settings!.chromaticAberration,
-      appGlassChromeChromaticAberration,
+      appGlassPinnedChromaticAberration,
     );
-    expect(surface.settings!.chromaticAberration, 0.22,
-        reason: '这一轮的色散 0.22');
+    expect(surface.settings!.chromaticAberration, 0.32,
+        reason: '吸顶条的色散 0.32（footer 0.22）');
+    expect(
+      surface.settings!.chromaticAberration,
+      greaterThan(appGlassChromeChromaticAberration),
+    );
+    // 模糊 / 光照 / 边缘吸收与 footer 是同一套：吸顶条只调折射，不碰对比度
+    // 赖以成立的那几项。
     expect(surface.settings!.blur, appGlassChromeBlur);
     expect(surface.settings!.blur, 2, reason: '模糊保持 2');
+    expect(surface.settings!.lightIntensity,
+        appGlassChromeSettings(tester.element(_glass())).lightIntensity,
+        reason: '吸顶条的光照强度与 footer 同一档（没有为了暗边改光）');
+    expect(surface.settings!.edgeAbsorption, 0.12,
+        reason: '边缘吸收与 footer 同一档：直边 44 没有出现上下暗边，不用补偿');
     expect(surface.scrimColor!.a, closeTo(0.55, 1e-9),
         reason: 'scrim 保持 0.55（折射可见度 45%）');
 

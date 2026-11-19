@@ -374,6 +374,9 @@ LiquidGlassSettings appCardFrostSettings(BuildContext context) {
 /// 45% 的内容可弯，斜面还能再深一档，边缘的位移才真的看得出来。再往上加之前
 /// 先看 footer 的对比度断言（test/footer_contrast_test.dart）：斜面只影响边缘，
 /// 不参与底衬亮度，但边缘越深，文字落点附近的折射越活跃。
+///
+/// **三处吸顶条不取这个数**：它们用更深的一档 [appGlassPinnedThickness]=44
+/// （直边条，没有胶囊圆角那一圈顾虑）。
 const double appGlassChromeThickness = 36;
 
 /// chrome 的模糊半径：**2**（磨砂档是 8）。
@@ -387,6 +390,8 @@ const double appGlassChromeBlur = 2;
 /// 折射率越高，斜面处的弯折越明显。上一轮 1.38 只是「比磨砂高一点」；这一轮
 /// 与 36 的斜面、0.22 的色散一起再上一档，边缘的扭曲/彩色分离才是用户要求的
 /// 「看得出是玻璃」。
+///
+/// 吸顶条另有更深的一档 [appGlassPinnedRefractiveIndex]=1.75。
 const double appGlassChromeRefractiveIndex = 1.55;
 
 /// chrome 的色散强度：**0.22**（上一轮 0.14）。
@@ -394,17 +399,22 @@ const double appGlassChromeRefractiveIndex = 1.55;
 /// premium 的 dispersion，边缘那一圈彩色分离。折射可见度只有 45% 时，色散是
 /// 「这块是玻璃」最容易被眼睛抓住的那条线索，所以再往上加一档：0.22 是在
 /// 1.55 的折射率上刚好不糊成彩虹边的强度（再高边缘会开始发脏）。
+///
+/// 吸顶条另有 [appGlassPinnedChromaticAberration]=0.32。
 const double appGlassChromeChromaticAberration = 0.22;
 
 /// chrome 的饱和度：**1.3**。把折射采进来的背景色稍微提纯，玻璃才「亮」。
 const double appGlassChromeSaturation = 1.3;
 
-/// premium 档的光学参数：**折射**优先。底部胶囊 / 多选底栏 / 圆形上传按钮，
-/// 以及三处**吸顶悬浮条**（朋友圈吸顶日期条、相册吸顶分类条、相册吸顶日期条）
-/// 全用它（见 [AppGlassSurface.preferPremium]；四处 chrome 的具体接线见
+/// premium 档的光学参数：**折射**优先。底部胶囊 / 多选底栏 / 圆形上传按钮
+/// 用它（见 [AppGlassSurface.preferPremium]；chrome 的具体接线见
 /// app_chrome_glass_bar.dart 的 AppChromeGlassBar）——卡片走 standard，见
 /// [AppGlassSurface.kCardQuality] 里「premium 会抓 capture，列表重建时会黑」。
 /// 非吸顶的页内筛选条与内容流日期条不包玻璃（渐变 / 透明，见 BarTint）。
+///
+/// **三处吸顶悬浮条不取这一组**：它们另有一档更深的折射数
+/// （[appGlassPinnedSettings]，44 / 1.75 / 0.32）；这里这一组仍是 footer 的
+/// 那一组（36 / 1.55 / 0.22），除了折射三数之外两者完全共用。
 ///
 /// 和 [appGlassSettings] 的差别都在「折射能不能看出来」这件事上：
 /// - thickness [appGlassChromeThickness]：斜面越深，边缘的 displacement 越大；
@@ -425,18 +435,86 @@ const double appGlassChromeSaturation = 1.3;
 ///
 /// 只在 [appGlassPremiumAvailable] 为真时使用；不可用时整块退回
 /// [appGlassSettings]（磨砂）那一套。
-LiquidGlassSettings appGlassChromeSettings(BuildContext context) {
+LiquidGlassSettings appGlassChromeSettings(BuildContext context) =>
+    _appGlassPremiumChrome(
+      context,
+      thickness: appGlassChromeThickness,
+      refractiveIndex: appGlassChromeRefractiveIndex,
+      chromaticAberration: appGlassChromeChromaticAberration,
+    );
+
+/// **吸顶悬浮条**的斜面厚度：**44**（footer / 多选底栏 / 上传按钮仍是 36）。
+///
+/// 斜面越深，边缘的 displacement 越大。吸顶条可以比 footer 再深一档，是因为
+/// 它横贯整屏、直边（[kAppChromePinnedRadius] = 0）：斜面只落在上下两条长边
+/// 上，不会像胶囊那样在半径 28 的圆角上把位移、描边、内高光挤成一圈。
+///
+/// **直边下 44 会不会出现上下暗边**：不会。
+/// - 包内的斜面宽度按物理像素计、再按 dpr/3 折算，所以**逻辑宽度 =
+///   thickness / 3**（与 dpr 无关）：36 → 12 lp，44 → 14.7 lp。最矮的一条是
+///   朋友圈吸顶日期条（36 lp 高），上下各 14.7 lp 之后中间仍留 6.7 lp 的平台
+///   面——两条斜面不会在中间相遇，也就没有「上下暗边叠成一条」。
+/// - 真正会发暗的是边缘吸收（[LiquidGlassSettings.edgeAbsorption] 0.12，最深处
+///   对背景压 ~17%），它的剖面只在斜面**外侧 18%** 上（44 → ~2.7 lp，36 →
+///   ~2.2 lp），是两条细边而不是两条带；而且吸顶条在玻璃之上还铺了一层 0.9 的
+///   页面底色底衬（[kAppChromePinnedBackplateAlpha]），这层暗边到屏幕只剩
+///   ≤1.7% 的亮度差。
+/// 所以厚度加到 44 不需要在 [LiquidGlassSettings.edgeAbsorption] /
+/// [LiquidGlassSettings.lightIntensity] 上做补偿，光照那一组仍与 footer 相同。
+const double appGlassPinnedThickness = 44;
+
+/// **吸顶悬浮条**的折射率：**1.75**（footer 1.55）。
+///
+/// 折射率越高，斜面处的弯折越明显。footer 停在 1.55 是因为胶囊的两端圆角上
+/// 弯折会先糊成彩边；吸顶条是直边，同样的折射率在上下两条长边上只表现为
+/// 「底下的照片被推开一点」，所以可以再上一档。
+const double appGlassPinnedRefractiveIndex = 1.75;
+
+/// **吸顶悬浮条**的色散强度：**0.32**（footer 0.22）。
+///
+/// 色散是「这块是玻璃」最容易被眼睛抓住的线索。吸顶条比 footer 深一档的斜面
+/// 与折射率配 0.32：再高（≥0.4）边缘开始发脏成彩虹边；0.32 与 1.75 是一对，
+/// 改一个另一个要跟着看。
+const double appGlassPinnedChromaticAberration = 0.32;
+
+/// **吸顶悬浮条**的 premium 参数：与 [appGlassChromeSettings] **只差三个折射
+/// 数**（[appGlassPinnedThickness] / [appGlassPinnedRefractiveIndex] /
+/// [appGlassPinnedChromaticAberration]）。
+///
+/// scrim（0.55）、blur（2）、tint、光照（lightIntensity 1.0 / rimShade /
+/// rimLight）、饱和度、边缘吸收全部与 footer 相同——所以「吸顶条更玻璃」不会
+/// 顺带改掉文字对比度赖以成立的那几条（底衬亮度、描边高光）。
+///
+/// 只在 [appGlassPremiumAvailable] 为真时使用（见 app_chrome_glass_bar.dart 的
+/// appChromeGlassSettings）；不可用时与 footer 一样整块退回
+/// [appGlassSettings]（磨砂）那一套。
+LiquidGlassSettings appGlassPinnedSettings(BuildContext context) =>
+    _appGlassPremiumChrome(
+      context,
+      thickness: appGlassPinnedThickness,
+      refractiveIndex: appGlassPinnedRefractiveIndex,
+      chromaticAberration: appGlassPinnedChromaticAberration,
+    );
+
+/// premium chrome 的唯一一份参数表：footer 与三处吸顶条只在三个折射数上分家，
+/// 其余（tint / 光照 / 饱和度 / 边缘吸收 / 模糊）**只能是同一份**。
+LiquidGlassSettings _appGlassPremiumChrome(
+  BuildContext context, {
+  required double thickness,
+  required double refractiveIndex,
+  required double chromaticAberration,
+}) {
   final dark = AppColors.isDark;
   return LiquidGlassSettings(
-    thickness: appGlassChromeThickness,
+    thickness: thickness,
     blur: appGlassChromeBlur,
     glassColor: appGlassChromeTintColor,
     lightAngle: 2.356,
     lightIntensity: 1.0,
     ambientStrength: dark ? 0.10 : 0.25,
-    refractiveIndex: appGlassChromeRefractiveIndex,
+    refractiveIndex: refractiveIndex,
     saturation: appGlassChromeSaturation,
-    chromaticAberration: appGlassChromeChromaticAberration,
+    chromaticAberration: chromaticAberration,
     frost: 0.0,
     rimShade: dark ? 0.28 : 0.34,
     rimLight: dark ? 0.34 : 0.42,

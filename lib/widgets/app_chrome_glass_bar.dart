@@ -1,9 +1,15 @@
-/// 一条与底部 footer **完全相同**的悬浮玻璃条：三处吸顶条 + footer 共用这一份。
+/// 一条与底部 footer **同一份材质**的悬浮玻璃条：三处吸顶条 + footer 共用这一份。
 ///
 /// **一份材质，四个调用点**：底部 footer 胶囊（AppBottomTabBar）与三处吸顶
 /// 悬浮条（朋友圈吸顶日期条、相册吸顶分类行 + 日期行）都走
-/// [AppChromeGlassBar]。光学参数、scrim、档位、自建层、描边/高光全部由这里
-/// 给出，调用点只决定**圆角**（按各自形态：胶囊 / 条带）和里面的内容。
+/// [AppChromeGlassBar]。scrim、档位、自建层、模糊、tint、光照、边缘吸收
+/// 全部由这里给出，调用点只决定**圆角**（按各自形态：胶囊 / 条带）和里面的内容。
+///
+/// **唯一的差别是折射数**：[AppChromeGlassBar.pinned] 的三处吸顶条比 footer
+/// 深一档（thickness 44 / 折射率 1.75 / 色散 0.32，见 app_glass.dart 的
+/// appGlassPinnedSettings；footer 仍是 36 / 1.55 / 0.22）。直边条没有胶囊
+/// 圆角把位移挤回条内，所以能再深一档；scrim 与模糊两处仍完全相同，
+/// 文字对比度与「刷新不变色」不受影响。
 ///
 /// **相册页是「一块玻璃、两行」**：分类行与日期行不再各自带玻璃上下堆叠
 /// （那会在两行之间留一条接缝），而是同时塞进同一个 [AppChromeGlassBar.pinned]
@@ -11,10 +17,10 @@
 /// 取墨色，材质仍是别处那唯一一份。
 ///
 /// 之前底部胶囊自己写了一份 AppGlassSurface 的参数，三处吸顶条则各写各的
-/// （渐变 / 兜底模糊）。参数一分散就会分家——所以这一轮把它们收成一处：
-/// 只要写在这里的 scrim / thickness / chroma / blur / refractiveIndex 变了，
-/// footer 与三处吸顶条同时变，不可能出现「footer 是玻璃、吸顶条还是另一套」
-/// 的中间态（test/pinned_chrome_bar_test.dart 逐项对比三处与 footer）。
+/// （渐变 / 兜底模糊）。参数一分散就会分家——所以这里把它们收成一处：scrim /
+/// 模糊 / 档位 / 光照只有一份，折射那三个数只有两组（footer 一组、吸顶条
+/// 一组），逐项钉在 test/pinned_chrome_bar_test.dart（哪几项必须相等、哪几项
+/// 必须不同）。
 ///
 /// **刷新不换材质**：玻璃层挂着一个常量 key 的 RepaintBoundary
 /// （[AppChromeGlassBar.layerKey]）+ 固定位置的 AppGlassSurface
@@ -106,18 +112,25 @@ double appChromeScrimAlpha() => appGlassChromeScrimAlpha();
 Color appChromeScrimColor() =>
     AppColors.bgPage.withValues(alpha: appChromeScrimAlpha());
 
-/// 玻璃条的光学参数：premium 用 appGlassChromeSettings（thickness 36 /
-/// refractiveIndex 1.55 / chromaticAberration 0.22 / saturation 1.3），拿不到
-/// premium 时整块回退 appGlassSettings（磨砂），只把模糊钉成
-/// [appChromeBlur]。
+/// 玻璃条的光学参数：premium 时按 [pinned] 二选一——
+/// - footer 等多选底栏 / 上传按钮：appGlassChromeSettings（thickness 36 /
+///   refractiveIndex 1.55 / chromaticAberration 0.22 / saturation 1.3）；
+/// - 三处吸顶悬浮条：appGlassPinnedSettings（44 / 1.75 / 0.32），**只差这三个
+///   折射数**，scrim / 模糊 / tint / 光照 / 边缘吸收仍是同一份。
 ///
-/// 档位判定与 AppGlassSurface 内部那条（appGlassPremiumAvailable）完全一致，
-/// 所以这里取到的就是那个表面真正会用的参数，不会出现「scrim 按 premium 算、
-/// 参数却按磨砂画」的半套中间态。
-LiquidGlassSettings appChromeGlassSettings(BuildContext context) {
-  final base = appGlassPremiumAvailable(context)
-      ? appGlassChromeSettings(context)
-      : appGlassSettings(context);
+/// 拿不到 premium 时两者都整块回退 appGlassSettings（磨砂），只把模糊钉成
+/// [appChromeBlur]。档位判定与 AppGlassSurface 内部那条
+/// （appGlassPremiumAvailable）完全一致，所以这里取到的就是那个表面真正会用
+/// 的参数，不会出现「scrim 按 premium 算、参数却按磨砂画」的半套中间态。
+LiquidGlassSettings appChromeGlassSettings(
+  BuildContext context, {
+  bool pinned = false,
+}) {
+  final base = !appGlassPremiumAvailable(context)
+      ? appGlassSettings(context)
+      : pinned
+          ? appGlassPinnedSettings(context)
+          : appGlassChromeSettings(context);
   return base.copyWith(blur: appChromeBlur);
 }
 
@@ -149,14 +162,17 @@ class AppChromeInk extends InheritedWidget {
 /// 与固定底衬 [backplateAlpha]（footer 是 true / true / 0，三处吸顶条反过来，
 /// 见 [AppChromeGlassBar.pinned]），以及内容（单行 [builder] 或**多行**
 /// [children]）。其余参数一字不差——[preferredQuality]（premium）、
-/// [usesOwnLayer]、scrim、参数与 scrim 色都只在这里出现一次。
+/// [usesOwnLayer]、scrim、模糊与 scrim 色都只在这里出现一次；折射三数只有
+/// 两组（footer 一组、吸顶条一组，见 [pinned]）。
 ///
-/// **footer 与吸顶条的差别只有「形状 + 那两层装饰」**：
-/// - footer：胶囊，圆角 28，有 1px 描边与顶部内高光；
+/// **footer 与吸顶条的差别只有「形状 + 那两层装饰 + 折射那一档」**：
+/// - footer：胶囊，圆角 28，有 1px 描边与顶部内高光，折射 36 / 1.55 / 0.22；
 /// - 三处吸顶条：直边条，圆角 0，**没有描边、没有内高光**，只剩玻璃本体 +
-///   scrim（+ 阴影，若有）。吸顶条横贯整屏，贴在页面左右边缘上：直边才不留
-///   侧边空隙，去掉上下两道线才不会把条带和页面切成两块。
-/// 玻璃本体（scrim / 档位 / 光学参数）仍是同一份，不会因为这两个开关分家。
+///   scrim（+ 阴影，若有），折射 44 / 1.75 / 0.32。吸顶条横贯整屏，贴在页面
+///   左右边缘上：直边才不留侧边空隙，去掉上下两道线才不会把条带和页面切成
+///   两块。
+/// scrim（0.55）、模糊（2）、档位、tint、光照仍是同一份，不会因为这几处差异
+/// 分家。
 ///
 /// **刷新不换材质**：[layerKey] 是常量 key 的 [RepaintBoundary]，[surfaceKey]
 /// 挂在 [AppGlassSurface] 上。下拉刷新期间列表会重建，但这两个 key 与位置都不
@@ -172,15 +188,18 @@ class AppChromeGlassBar extends StatelessWidget {
     this.backplateAlpha = 0,
     required this.builder,
   })  : children = const <Widget>[],
+        pinned = false,
         assert(backplateAlpha >= 0 && backplateAlpha <= 1);
 
   /// **三处吸顶悬浮条的唯一构造方式**：直边（[kAppChromePinnedRadius]）、
-  /// 不要描边、不要内高光、玻璃下面加一层固定底衬。
+  /// 不要描边、不要内高光、玻璃下面加一层固定底衬、折射取更深的那一档
+  /// （[pinned] = true → appGlassPinnedSettings）。
   ///
-  /// 这四样由构造器写死，调用点不用（也不可能漏）逐个传——三个调用点各传
+  /// 这五样由构造器写死，调用点不用（也不可能漏）逐个传——三个调用点各传
   /// 一遍 radius: 0 / showBorder: false / showHighlight: false /
-  /// backplateAlpha: 0.9 迟早会漏一个，而漏掉的那一个正好是「吸顶条看着跟
-  /// 另外两条不一样」。footer 用默认构造：胶囊 + 描边 + 内高光 + 无底衬。
+  /// backplateAlpha: 0.9 / 折射那一档 迟早会漏一个，而漏掉的那一个正好是
+  /// 「吸顶条看着跟另外两条不一样」。footer 用默认构造：胶囊 + 描边 + 内高光
+  /// + 无底衬 + footer 的那一档折射。
   ///
   /// 内容两种给法（二选一，构造器里有断言）：
   /// - [builder]：**单行**，朋友圈吸顶日期条这一种；
@@ -191,7 +210,8 @@ class AppChromeGlassBar extends StatelessWidget {
     this.radius = kAppChromePinnedRadius,
     this.builder,
     this.children = const <Widget>[],
-  })  : showBorder = false,
+  })  : pinned = true,
+        showBorder = false,
         showHighlight = false,
         backplateAlpha = kAppChromePinnedBackplateAlpha,
         assert(
@@ -228,6 +248,16 @@ class AppChromeGlassBar extends StatelessWidget {
   /// 默认 true 给 footer 用；[AppChromeGlassBar.pinned] 把它设成 false——
   /// 条带只留玻璃本体 + 阴影，不再叠一道白色横杠。
   final bool showHighlight;
+
+  /// 是不是**吸顶悬浮条**那一档折射（footer 为 false）。
+  ///
+  /// true 由 [AppChromeGlassBar.pinned] 写死，调用点不传。唯一的差别是
+  /// [appChromeGlassSettings] 取哪一组数：吸顶条走 appGlassPinnedSettings
+  /// （thickness 44 / 折射率 1.75 / 色散 0.32），footer 走
+  /// appGlassChromeSettings（36 / 1.55 / 0.22）。scrim、模糊、tint、光照、
+  /// 固定底衬的接线与开关**一个都没分家**，所以两处的文字对比度、
+  /// 刷新不变色仍由同一套机制保证（见 test/pinned_chrome_bar_test.dart）。
+  final bool pinned;
 
   /// 玻璃下面那层固定底衬的不透明度：0 = 不画（footer 默认）。
   ///
@@ -268,7 +298,7 @@ class AppChromeGlassBar extends StatelessWidget {
           // 未选中的文字才有稳定底衬。厚度不跟档位走（见
           // [appChromeScrimAlpha] = 0.55 = 折射可见度 45%）。
           scrim: true,
-          settings: appChromeGlassSettings(context),
+          settings: appChromeGlassSettings(context, pinned: pinned),
           scrimColor: appChromeScrimColor(),
           // 描边与内高光由调用点决定：footer 两样都要（默认），三处吸顶条
           // 两样都不要（直边条 + 玻璃本体 + 阴影）。
