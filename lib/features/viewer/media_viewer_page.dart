@@ -79,14 +79,17 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
         : widget.initialIndex.clamp(0, widget.items.length - 1).toInt();
     _pageController = PageController(initialPage: _index);
     _applyEntryOrientation();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    // **这里不切系统 UI 模式**：以前进来切 immersiveSticky、dispose 里再切回
+    // edgeToEdge。系统栏一藏一露，退出后主界面会整页重排一次（真机上就是
+    // 「退出全屏抖一下」，量到的数见 lib/widgets/stable_view_insets.dart）。
+    // 满屏靠的是内容自己铺到屏幕边缘：Scaffold 透明 + 黑色底，顶部栏和缩略图条
+    // 各自让开安全区，状态栏文字在照片上仍是浅色（见 build 里的 AnnotatedRegion）。
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
     _pageController.dispose();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     unawaited(lockAppPortrait());
     super.dispose();
   }
@@ -353,12 +356,14 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                   Positioned(
                     left: 0,
                     right: 0,
+                    // 系统栏留在屏幕上（见上面 build 的注释）：底部那一块安全区
+                    // 两种媒体都要让开，否则缩略图条会压在导航手势条底下。
                     bottom: current.isVideo
                         ? viewerThumbnailStripBottom(
                             landscape: landscape,
                             bottomInset: MediaQuery.paddingOf(context).bottom,
                           )
-                        : 12,
+                        : 12 + MediaQuery.paddingOf(context).bottom,
                     child: IgnorePointer(
                       ignoring: !_uiVisible,
                       child: AnimatedOpacity(
@@ -384,7 +389,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                   Positioned(
                     left: 0,
                     right: 0,
-                    bottom: 34,
+                    bottom: 34 + MediaQuery.paddingOf(context).bottom,
                     child: Center(
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -410,9 +415,9 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
         ),
       ),
     );
-    // 全屏页自己用平台**原始**的 insets（沉浸时就是 0）：顶部关闭按钮、视频
-    // 进度条与缩略图条仍贴着屏幕边缘。主界面那一层是钉住的（见
-    // lib/widgets/stable_view_insets.dart），两者互不影响。
+    // 全屏页自己用平台**原始**的 insets：顶部关闭按钮、视频进度条与缩略图条
+    // 一律贴着屏幕边缘，不被主界面那一层钉住的安全区影响（见
+    // lib/widgets/stable_view_insets.dart）。两者互不影响。
     return MediaQuery.fromView(view: View.of(context), child: viewer);
   }
 }

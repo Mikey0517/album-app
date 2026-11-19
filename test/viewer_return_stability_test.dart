@@ -89,7 +89,8 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('进/出全屏浏览页：主界面尺寸与底部胶囊 rect 一动不动，列表不重建', (tester) async {
+  testWidgets('进/出全屏浏览页：不切系统 UI 模式，主界面尺寸与底部胶囊 rect 一动不动，列表不重建',
+      (tester) async {
     await usePhone(tester);
     addTearDown(installFakeApi(json: '{"items": [], "next_cursor": null}'));
 
@@ -135,26 +136,39 @@ void main() {
 
     counting = true;
 
-    // 1. 进入：浏览页在首帧就切 immersiveSticky，系统栏随即消失、安全区归零。
+    // 1. 进入：浏览页一次都不动系统 UI 模式（旧实现切 immersiveSticky，退出再切
+    //    回 edgeToEdge —— 那一下在不少 ROM 上连窗口尺寸一起变，钉住 padding 也
+    //    救不回来，所以现在整条路径上没有 inset 变化）。
     navigatorKey.currentState!.push(
       MediaViewerPage.route(items: [_photo(1)], initialIndex: 0),
     );
     await tester.pump();
-    await setInsets(tester, _hiddenBars);
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(MediaViewerPage), findsOneWidget);
+    expect(uiModes, isEmpty,
+        reason: '浏览页不许切系统 UI 模式：实测调用 = $uiModes');
 
-    // 钉住的只是主界面那一层：全屏页自己照旧读平台原始安全区（沉浸时是 0），
-    // 顶部关闭按钮 / 视频控制条不会因为这次修复被抬起来。
+    // 满屏照旧：照片铺到屏幕四边（含状态栏/导航条底下那两块），全屏靠的是
+    // 内容铺满 + 状态栏透明，不是靠藏系统栏。
+    expect(
+      tester.getRect(find.byType(ImageView)),
+      Rect.fromLTWH(0, 0, _phone.width, _phone.height),
+      reason: '浏览页必须仍然满屏',
+    );
+    // 全屏页自己读平台原始安全区（不是主界面那一层钉住的值），控制条照样躲开
+    // 系统栏。
     expect(
       MediaQuery.paddingOf(tester.element(find.byType(ImageView))).bottom,
-      0,
-      reason: '全屏页用的是原始 insets，不是被钉住的那一份',
+      _visibleBars.bottom,
+      reason: '全屏页用的是原始 insets',
     );
 
-    // 2. 退出：220ms 反向动画跑完后 dispose 才恢复 edgeToEdge，系统栏最后一步
-    //    才回来。先让动画跑完、系统栏仍「没回来」——真机上主界面就是在这个瞬间
-    //    整屏可见，48px 的跳动紧接着落在这一帧。
+    // 2. 顺手压一遍钉住那一层：就算平台真把安全区报成 0（下拉通知栏、系统手势
+    //    提示、分屏拖动都会），主界面也不许动。
+    await setInsets(tester, _hiddenBars);
+    await tester.pump();
+
+    // 3. 退出：220ms 反向动画跑完，页面整屏可见。
     navigatorKey.currentState!.pop();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
@@ -164,29 +178,18 @@ void main() {
     expect(
       tester.getRect(barFinder),
       barBefore,
-      reason: '系统栏还没回来的那一帧，胶囊就已经不许动了',
+      reason: '安全区报成 0 的那一帧，胶囊就已经不许动了',
     );
     expect(tester.getRect(pillFinder), pillBefore);
 
-    // 3. 系统栏这时才补上（平台在恢复 edgeToEdge 之后上报 insets）。
+    // 4. 安全区补回来。
     await setInsets(tester, _visibleBars);
     await tester.pump();
     counting = false;
 
     expect(find.byType(MediaViewerPage), findsNothing);
-    // 系统 UI 模式确实被切过两次：这条用例测的是真链路，不是空转。
-    expect(
-      uiModes.first,
-      contains('immersiveSticky'),
-      reason: '浏览页进入时切到 immersiveSticky',
-    );
-    expect(
-      uiModes.last,
-      contains('edgeToEdge'),
-      reason: '浏览页退出时恢复 edgeToEdge',
-    );
 
-    // 3. 返回后一切照旧：Scaffold 尺寸、胶囊外框、胶囊玻璃，逐项相等。
+    // 5. 返回后一切照旧：Scaffold 尺寸、胶囊外框、胶囊玻璃，逐项相等。
     expect(tester.getRect(scaffoldFinder), scaffoldBefore,
         reason: 'Scaffold 尺寸/位置在退出前后必须完全一致');
     expect(tester.getRect(barFinder), barBefore,
@@ -194,7 +197,7 @@ void main() {
     expect(tester.getRect(pillFinder), pillBefore,
         reason: '胶囊玻璃本体不许移动');
 
-    // 4. 没有重建，也没有整棵子树被换掉。
+    // 6. 没有重建，也没有整棵子树被换掉。
     expect(
       rebuilds,
       isEmpty,
