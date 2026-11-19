@@ -15,6 +15,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 FLUTTER=${FLUTTER:-flutter}
+# 下面生成补丁用 dart run：优先用 Flutter 自带的那份，别指望调用者的 PATH 里有 dart。
+case "$FLUTTER" in
+  */*) export PATH="$(cd "$(dirname "$FLUTTER")" && pwd):$PATH" ;;
+esac
 
 VERSION_LINE=$(grep '^version:' pubspec.yaml | sed 's/version: *//')
 VERSION_NAME=${VERSION_LINE%%+*}
