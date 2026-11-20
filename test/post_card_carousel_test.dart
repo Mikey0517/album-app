@@ -3,6 +3,7 @@ import 'package:album_app/features/feed/post_card.dart';
 import 'package:album_app/models/media.dart';
 import 'package:album_app/models/post.dart';
 import 'package:album_app/widgets/album_thumb.dart';
+import 'package:album_app/widgets/app_glass.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -57,26 +58,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// 卡片内容区（玻璃内的那一列）：大图必须和它一样宽。
-  Rect contentRect(WidgetTester tester) => tester.getRect(
-        find
-            .descendant(
-              of: find.byType(PostCard),
-              matching: find.byType(Column),
-            )
-            .first,
-      );
-
-  testWidgets('单图：占满卡片宽度，按 16:9 出图，不套轮播也没有页码', (tester) async {
+  testWidgets('大图：不套卡片、没有边框，一张图铺满屏宽', (tester) async {
     await pump(tester, _post([_photo(1)]));
 
+    expect(find.byType(AppGlassSurface), findsNothing,
+        reason: '大图模式不套卡片');
     final thumb = tester.getRect(find.byType(AlbumThumb));
-    final content = contentRect(tester);
-    expect(thumb.width, content.width, reason: '一张图占满宽度');
-    expect(thumb.width, 326, reason: '390 - 卡片外边距 16×2 - 卡片内边距 16×2');
-    expect(thumb.height, closeTo(326 * 9 / 16, 0.5), reason: '16:9 的图按比例出高度');
-    expect(find.byType(PageView), findsNothing, reason: '一张图不该套轮播');
-    expect(find.text('1/1'), findsNothing, reason: '只有一张时不显示页码');
+    expect(thumb.width, 390, reason: '铺满屏宽（没有卡片内边距）');
+    expect(thumb.left, 0);
+    expect(thumb.height, closeTo(390 * 9 / 16, 0.5), reason: '16:9 按比例出高度');
+    expect(find.byType(PostPageDots), findsNothing, reason: '只有一张没有圆点');
   });
 
   testWidgets('长图/全景图被收在 4:5 ~ 1.91:1 之间', (tester) async {
@@ -89,37 +80,76 @@ void main() {
     expect(wide.height, closeTo(wide.width / 1.91, 0.5), reason: '全景图收在 1.91:1');
   });
 
-  testWidgets('多图：一次一张、左右滑动切换，页码在右上角', (tester) async {
+  testWidgets('多图：一次一张，页码是底部居中的小圆点', (tester) async {
     await pump(tester, _post([_photo(1), _photo(2), _photo(3)]));
 
-    final content = contentRect(tester);
     final carousel = tester.getRect(find.byType(PageView));
-    expect(carousel.width, content.width);
-    // 一次只建一页：相邻的照片在屏外，没滑过去就不建，也就不会同时露出两张。
+    expect(carousel.width, 390);
     expect(
       find.descendant(
         of: find.byType(PageView),
         matching: find.byType(AlbumThumb),
       ),
       findsOneWidget,
+      reason: '一次只建一页，不会同时露出两张',
     );
+
+    final dots = find.byType(PostPageDots);
+    expect(dots, findsOneWidget);
+    expect(tester.widget<PostPageDots>(dots).count, 3);
+    expect(tester.widget<PostPageDots>(dots).index, 0);
+    final dotsRect = tester.getRect(dots);
+    expect(dotsRect.center.dx, closeTo(carousel.center.dx, 1),
+        reason: '圆点在底部居中，不在右上角');
+    expect(dotsRect.bottom, closeTo(carousel.bottom - 10, 0.5),
+        reason: '贴着图片底边 10');
+    expect(find.text('1/3'), findsNothing, reason: '不再是 1/3 那种页码');
+
+    await tester.drag(find.byType(PageView), const Offset(-300, 0));
+    await tester.pumpAndSettle();
+    expect(tester.widget<PostPageDots>(find.byType(PostPageDots)).index, 1,
+        reason: '滑一张圆点跟着走');
+  });
+
+  testWidgets('右上角是模式切换图标：大图 ↔ 九宫格', (tester) async {
+    await pump(tester, _post([_photo(1), _photo(2), _photo(3)]));
+
+    final toggle = find.byKey(postMediaModeToggleKey);
+    expect(toggle, findsOneWidget, reason: '右上角那枚切换图标必须画出来');
+    final media = tester.getRect(find.byType(PageView));
+    final rect = tester.getRect(toggle);
+    expect(rect.right, closeTo(media.right - 8, 0.5), reason: '贴右上角');
+    expect(rect.top, closeTo(media.top + 8, 0.5));
     expect(
-      tester.getRect(find.byType(AlbumThumb)),
-      carousel,
-      reason: '当前这一张正好铺满轮播区',
+      find.descendant(of: toggle, matching: find.byIcon(Icons.grid_view_rounded)),
+      findsOneWidget,
+      reason: '大图状态下图标表示「切成九宫格」',
     );
 
-    expect(find.text('1/3'), findsOneWidget);
-    final counter = tester.getRect(find.text('1/3'));
-    expect(counter.right, closeTo(carousel.right - 10 - 8, 0.5));
-    expect(counter.top, closeTo(carousel.top + 10 + 3, 0.5));
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(PageView), const Offset(-300, 0));
+    // 九宫格：卡片回来了，三张图一次全露出来。
+    expect(find.byType(AppGlassSurface), findsOneWidget, reason: '九宫格仍然在卡片里');
+    expect(find.byType(PageView), findsNothing);
+    expect(find.byType(PostPageDots), findsNothing);
+    final tiles = tester.widgetList<AlbumThumb>(find.byType(AlbumThumb));
+    expect(tiles, hasLength(3));
+    final first = tester.getRect(find.byType(AlbumThumb).at(0));
+    expect(first.width, closeTo((326 - 8) / 3, 0.5), reason: '卡片内容宽度 326 三列');
+    expect(
+      find.descendant(
+        of: find.byKey(postMediaModeToggleKey),
+        matching: find.byIcon(Icons.fullscreen_rounded),
+      ),
+      findsOneWidget,
+      reason: '九宫格状态下图标表示「切成大图」',
+    );
+
+    await tester.tap(find.byKey(postMediaModeToggleKey));
     await tester.pumpAndSettle();
-    expect(find.text('2/3'), findsOneWidget, reason: '滑一张页码跟着变');
-    await tester.drag(find.byType(PageView), const Offset(-300, 0));
-    await tester.pumpAndSettle();
-    expect(find.text('3/3'), findsOneWidget);
+    expect(find.byType(PageView), findsOneWidget, reason: '点回去又是大图');
+    expect(find.byType(AppGlassSurface), findsNothing);
   });
 
   testWidgets('文字在图片下面（Instagram 那样先图后文）', (tester) async {
@@ -152,5 +182,19 @@ void main() {
     await tester.tapAt(carousel.center);
     await tester.pumpAndSettle();
     expect(opened, [0, 1], reason: '滑到第二张再点，打开的是第二张');
+  });
+
+  testWidgets('九宫格模式点格子也打开查看器，索引是格子自己的', (tester) async {
+    final opened = <int>[];
+    await pump(
+      tester,
+      _post([_photo(1), _photo(2), _photo(3)]),
+      onOpen: (_, index) => opened.add(index),
+    );
+    await tester.tap(find.byKey(postMediaModeToggleKey));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(AlbumThumb).at(2));
+    await tester.pumpAndSettle();
+    expect(opened, [2]);
   });
 }
