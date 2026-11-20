@@ -18,6 +18,14 @@ bool shouldAutoPlayMotionPhoto(List<ConnectivityResult> results) {
       results.contains(ConnectivityResult.ethernet);
 }
 
+/// 右下角播放按钮的恒定 key：播放状态一变整棵子树会重建，挂常量 key 让它
+/// 始终命中同一个 Element（和 [viewerTopBarKey] 同一个理由）。
+const Key livePhotoPlayButtonKey = ValueKey<String>('live-photo-play');
+
+/// 动图播放按钮的直径与到右/下边缘的距离（微信那枚圆形按钮的尺寸）。
+const double livePhotoPlayButtonSize = 48;
+const double livePhotoPlayButtonInset = 16;
+
 /// 动态照片：静态图 + 内嵌 MP4。点击播放/停止，播完自动回静态图。
 class LivePhotoView extends StatefulWidget {
   final Media media;
@@ -25,6 +33,14 @@ class LivePhotoView extends StatefulWidget {
   final String heroTag;
   final ValueChanged<bool> onPlayingChanged;
   final ValueChanged<bool>? onZoomChanged;
+
+  /// 浏览页的控制层是否可见（点一下屏幕会整体隐藏）：播放按钮跟着一起隐，
+  /// 不然「全屏看图」时右下角永远挂着一个圈。
+  final bool uiVisible;
+
+  /// 播放按钮下面还要让开的高度：底部有缩略图条时由浏览页传 [thumbnailStripHeight]，
+  /// 按钮就浮到缩略图条上方，不会压住可以点的缩略图。
+  final double bottomClearance;
 
   /// 仅测试用：注入替身控制器，让测试不必依赖真实平台通道就能看到
   /// 「正在播放」这一帧的画面。
@@ -38,6 +54,8 @@ class LivePhotoView extends StatefulWidget {
     required this.heroTag,
     required this.onPlayingChanged,
     this.onZoomChanged,
+    this.uiVisible = true,
+    this.bottomClearance = 0,
     this.controllerFactory,
   });
 
@@ -205,11 +223,59 @@ class _LivePhotoViewState extends State<LivePhotoView> {
     return width / height;
   }
 
+  /// 右下角那枚圆形按钮：一个圈 + 一个播放箭头（播放中换成暂停）。
+  ///
+  /// 放在 [ZoomablePhoto] **外面**：双指放大时按钮不能跟着一起放大、也不能飘走，
+  /// 它得始终钉在屏幕右下角。点「播放」和点画面走的是同一个 [_toggle]，两处
+  /// 入口不会各说各话。
+  Widget _buildPlayButton(BuildContext context) {
+    final bottom = livePhotoPlayButtonInset +
+        widget.bottomClearance +
+        MediaQuery.paddingOf(context).bottom;
+    return Positioned(
+      right: livePhotoPlayButtonInset,
+      bottom: bottom,
+      child: IgnorePointer(
+        ignoring: !widget.uiVisible,
+        child: AnimatedOpacity(
+          opacity: widget.uiVisible ? 1 : 0,
+          duration: Duration(milliseconds: widget.uiVisible ? 200 : 300),
+          child: IconButton(
+            key: livePhotoPlayButtonKey,
+            onPressed: _toggle,
+            tooltip: _playing ? '暂停动图' : '播放动图',
+            iconSize: 26,
+            style: IconButton.styleFrom(
+              fixedSize: const Size(
+                livePhotoPlayButtonSize,
+                livePhotoPlayButtonSize,
+              ),
+              backgroundColor: Colors.black.withValues(alpha: 0.42),
+              foregroundColor: Colors.white,
+              side: BorderSide(
+                color: Colors.white.withValues(alpha: 0.55),
+                width: 1.2,
+              ),
+              shape: const CircleBorder(),
+            ),
+            icon: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 150),
+              child: Icon(
+                _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                key: ValueKey<bool>(_playing),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final video = _video;
     final showVideo = _playing && video != null && video.value.isInitialized;
-    return ZoomablePhoto(
+    final photo = ZoomablePhoto(
       onTap: _toggle,
       // 动态照片用单击播放/暂停，双指缩放，双击缩放会和单击抢等待时间。
       enableDoubleTap: false,
@@ -256,6 +322,15 @@ class _LivePhotoViewState extends State<LivePhotoView> {
             ),
         ],
       ),
+    );
+    // 没有内嵌动态视频的普通照片不该出现播放按钮：点了也没东西可播。
+    if (!_canPlay) return photo;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        photo,
+        _buildPlayButton(context),
+      ],
     );
   }
 }

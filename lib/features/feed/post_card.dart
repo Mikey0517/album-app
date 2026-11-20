@@ -35,6 +35,111 @@ class PostCard extends StatefulWidget {
   State<PostCard> createState() => _PostCardState();
 }
 
+/// 大图模式的页高：宽度铺满，高度按图片自身比例，但收在 4:5 ~ 1.91:1 之间
+/// （和 Instagram 同一档）。收窄下界是为了长截图不把一屏占满，收窄上界是为了
+/// 全景图不把卡片撑成一条线；比例拿不到时按 1:1 处理。
+double feedMediaAspectRatio(Media media) {
+  final width = media.width ?? 0;
+  final height = media.height ?? 0;
+  if (width <= 0 || height <= 0) return 1;
+  return (width / height).clamp(4 / 5, 1.91).toDouble();
+}
+
+/// 一条动态的大图轮播：一次一张、左右滑动切换，右上角是「第几张/共几张」。
+class _PostMediaCarousel extends StatefulWidget {
+  final List<Media> medias;
+  final void Function(List<Media> medias, int index) onOpen;
+  final double width;
+
+  const _PostMediaCarousel({
+    required this.medias,
+    required this.onOpen,
+    required this.width,
+  });
+
+  @override
+  State<_PostMediaCarousel> createState() => _PostMediaCarouselState();
+}
+
+class _PostMediaCarouselState extends State<_PostMediaCarousel> {
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final medias = widget.medias;
+    if (medias.isEmpty) return const SizedBox.shrink();
+    final index = _index.clamp(0, medias.length - 1);
+    final height = widget.width / feedMediaAspectRatio(medias.first);
+    final cacheWidth =
+        (widget.width * MediaQuery.of(context).devicePixelRatio).round();
+
+    Widget page(int i, {required double radius}) {
+      final media = medias[i];
+      return AlbumThumb(
+        media: media,
+        radius: radius,
+        cacheWidth: cacheWidth,
+        heroTag: 'feed_${media.id}',
+        onTap: () => widget.onOpen(medias, i),
+        onMotionLongPress: () => widget.onOpen(medias, i),
+      );
+    }
+
+    // 只有一张时不套 PageView：没有可滑的东西，多一层滚动容器只会多一堆手势。
+    if (medias.length == 1) {
+      return SizedBox(
+        width: widget.width,
+        height: height,
+        child: page(0, radius: AppRadius.md),
+      );
+    }
+
+    return SizedBox(
+      width: widget.width,
+      height: height,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            child: PageView.builder(
+              itemCount: medias.length,
+              onPageChanged: (value) => setState(() => _index = value),
+              itemBuilder: (context, i) => page(i, radius: 0),
+            ),
+          ),
+          // 切换指示放右上角：底部留给文字，左右留给手势。
+          Positioned(
+            top: 10,
+            right: 10,
+            child: IgnorePointer(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${index + 1}/${medias.length}',
+                  style: AppText.caption.copyWith(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PostCardState extends State<PostCard> {
   bool _collapsed = false;
   bool _deleting = false;
@@ -126,20 +231,22 @@ class _PostCardState extends State<PostCard> {
                 padding: const EdgeInsets.all(16),
                 requestedQuality: AppGlassSurface.kCardQuality,
                 depth: true,
+                // 大图模式（Instagram 那样）：先图、后文字。一张图占满卡片宽度，
+                // 多张左右滑动切换，右上角标页码；文字挪到图下面当说明。
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildHeader(),
+                    if (widget.post.medias.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      _buildMedia(),
+                    ],
                     if ((widget.post.content ?? '').trim().isNotEmpty) ...[
                       const SizedBox(height: AppSpacing.md),
                       Text(
                         widget.post.content!,
                         style: AppText.body,
                       ),
-                    ],
-                    if (widget.post.medias.isNotEmpty) ...[
-                      const SizedBox(height: AppSpacing.md),
-                      _buildMediaGrid(),
                     ],
                   ],
                 ),
@@ -217,60 +324,18 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  Widget _buildMediaGrid() {
-    final medias = widget.post.medias;
+  Widget _buildMedia() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // iPad 上单条动态很宽时，九宫格限制在 640 宽以内，避免格子过大。
-        final maxWidth =
-            constraints.maxWidth > 640 ? 640.0 : constraints.maxWidth;
-        if (medias.length == 1) {
-          final side = maxWidth < 200 ? maxWidth : 200.0;
-          return Align(
-            alignment: Alignment.centerLeft,
-            child: SizedBox(
-              width: side,
-              height: side,
-              child: AlbumThumb(
-                media: medias.first,
-                radius: AppRadius.md,
-                cacheWidth:
-                    (side * MediaQuery.of(context).devicePixelRatio).round(),
-                heroTag: 'feed_${medias.first.id}',
-                onTap: () => widget.onOpenMedia(medias, 0),
-                onMotionLongPress: () => widget.onOpenMedia(medias, 0),
-              ),
-            ),
-          );
-        }
-
-        final int columns;
-        if (medias.length == 2 || medias.length == 4) {
-          columns = 2;
-        } else {
-          columns = 3;
-        }
-        const gap = 4.0;
-        final tile = (maxWidth - gap * (columns - 1)) / columns;
-        return Wrap(
-          spacing: gap,
-          runSpacing: gap,
-          children: [
-            for (var i = 0; i < medias.length; i++)
-              SizedBox(
-                width: tile,
-                height: tile,
-                child: AlbumThumb(
-                  media: medias[i],
-                  radius: AppRadius.sm,
-                  cacheWidth:
-                      (tile * MediaQuery.of(context).devicePixelRatio).round(),
-                  heroTag: 'feed_${medias[i].id}',
-                  onTap: () => widget.onOpenMedia(medias, i),
-                  onMotionLongPress: () => widget.onOpenMedia(medias, i),
-                ),
-              ),
-          ],
+        // iPad 上单条动态很宽时限制在 640 宽以内，避免一张图占满整块横屏。
+        final width = constraints.maxWidth > 640 ? 640.0 : constraints.maxWidth;
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: _PostMediaCarousel(
+            medias: widget.post.medias,
+            onOpen: widget.onOpenMedia,
+            width: width,
+          ),
         );
       },
     );

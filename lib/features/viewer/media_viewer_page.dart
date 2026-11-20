@@ -292,6 +292,11 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
                         media: media,
                         active: active,
                         heroTag: heroTag,
+                        // 播放按钮跟着控制层一起显隐；底部有缩略图条时浮到它上面
+                        // （那条 52 高、贴底 12，见 viewer_thumbnail_strip.dart）。
+                        uiVisible: _uiVisible,
+                        bottomClearance:
+                            widget.items.length > 1 ? thumbnailStripHeight + 4 : 0,
                         onPlayingChanged: _onPlayingChanged,
                         onZoomChanged: (zoomed) {
                           if (mounted && zoomed != _zoomed) {
