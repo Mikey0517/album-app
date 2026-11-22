@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../api/post_api.dart';
@@ -8,7 +10,9 @@ import '../../core/design/colors.dart';
 import '../../core/design/radius.dart';
 import '../../core/design/spacing.dart';
 import '../../core/design/text_styles.dart';
+import '../../core/feed_view_settings.dart';
 import '../../core/formatters.dart';
+import '../../core/url_utils.dart';
 import '../../models/media.dart';
 import '../../models/post.dart';
 import '../../widgets/album_thumb.dart';
@@ -35,17 +39,12 @@ class PostCard extends StatefulWidget {
   State<PostCard> createState() => _PostCardState();
 }
 
-/// 朋友圈一条动态的媒体区有两种看法：
+/// 大屏模式单张照片的高度上限：屏幕高度的这个比例。
 ///
-/// - [large]：大图（Instagram 那样），一张占满屏宽、左右滑动、底部一排小圆点。
-///   这一种**不套卡片**：照片直接压在页面背景上，没有圆角、没有描边；
-/// - [grid]：九宫格（原来的样子），放在卡片里，信息更密。
-///
-/// 右上角那枚图标在两种看法之间切换。
-enum PostMediaLayout { large, grid }
-
-/// 大图那一枚「切回九宫格 / 切成大图」按钮的 key。
-const Key postMediaModeToggleKey = ValueKey<String>('post-media-mode-toggle');
+/// 大屏要「最清晰」，就得按照片自己的比例铺（不再为了塞进 4:5 去裁）；竖图
+/// 比例一大就会把整条动态撑满屏甚至溢出，所以在这里收一道上限：超过这个高度
+/// 的照片整体缩窄、居中，整张图完整露出来，不被裁掉。
+const double kFeedWideMaxHeightFactor = 0.72;
 
 /// 底部页码圆点（只在多张时出现）。
 class PostPageDots extends StatelessWidget {
@@ -84,67 +83,56 @@ class PostPageDots extends StatelessWidget {
   }
 }
 
-/// 右上角的模式切换：大图 ↔ 九宫格。
-class _MediaModeToggle extends StatelessWidget {
-  final PostMediaLayout layout;
-  final VoidCallback onTap;
-
-  const _MediaModeToggle({required this.layout, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final large = layout == PostMediaLayout.large;
-    return IconButton(
-      key: postMediaModeToggleKey,
-      onPressed: onTap,
-      tooltip: large ? '切换九宫格' : '切换大图',
-      iconSize: 17,
-      style: IconButton.styleFrom(
-        fixedSize: const Size(32, 32),
-        // 命中区就按 32 算：默认会被 IconButton 撑到 48，在九宫格里正好压住
-        // 右上角那一格，点照片就变成切模式了。
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        backgroundColor: Colors.black.withValues(alpha: 0.45),
-        foregroundColor: Colors.white,
-        side: BorderSide(
-          color: Colors.white.withValues(alpha: 0.32),
-          width: 1,
-        ),
-        shape: const CircleBorder(),
-      ),
-      icon: Icon(
-        large ? Icons.grid_view_rounded : Icons.fullscreen_rounded,
-      ),
-    );
-  }
-}
-
-/// 大图模式的页高：宽度铺满，高度按图片自身比例，但收在 4:5 ~ 1.91:1 之间
-/// （和 Instagram 同一档）。收窄下界是为了长截图不把一屏占满，收窄上界是为了
-/// 全景图不把卡片撑成一条线；比例拿不到时按 1:1 处理。
-double feedMediaAspectRatio(Media media) {
+/// 图片自身的宽高比；拿不到尺寸时按 1:1。
+double feedMediaNaturalRatio(Media media) {
   final width = media.width ?? 0;
   final height = media.height ?? 0;
   if (width <= 0 || height <= 0) return 1;
-  return (width / height).clamp(4 / 5, 1.91).toDouble();
+  return width / height;
+}
+
+/// 大屏模式下一张照片的落点尺寸：宽度铺满（[availableWidth] 以内），高度按
+/// 照片自己的比例算，但不超过 [maxHeight]。
+///
+/// 返回的宽高**正好等于照片的比例**，所以图既不会被裁、也不会被拉伸：超高
+/// 的竖图缩窄后居中，两边留出页面底色，而不是裁掉上下。
+({double width, double height}) feedWideMediaSize(
+  Media media,
+  double availableWidth,
+  double maxHeight,
+) {
+  final ratio = feedMediaNaturalRatio(media);
+  final width = math.min(availableWidth, maxHeight * ratio);
+  return (width: width, height: width / ratio);
+}
+
+/// 大屏模式下的图片地址：图片取服务端 `/files/display` 的 2560px 原图，不再
+/// 用 400px 缩略图放大；视频没有可解的原图，仍然用缩略图当封面。
+String? feedWideImagePath(Media media) {
+  if (media.isVideo) return media.previewPath;
+  final path = media.url;
+  if (path.isEmpty) return media.previewPath;
+  return displayUrl(path);
 }
 
 int _feedCacheWidth(BuildContext context, double width) =>
     (width * MediaQuery.of(context).devicePixelRatio).round();
 
-/// 大图轮播：一次一张、左右滑动，页码是底部那一排小圆点。
+/// 大屏轮播：一次一张、左右滑动，页码是底部那一排小圆点。
 ///
-/// 圆角/描边一律没有（[radius] 传 0）：大图是铺满屏幕的，任何一圈边都会把
-/// 它从页面背景上「切」下来。
+/// 圆角/描边一律没有（[radius] 传 0）：照片直接压在页面背景上，任何一圈边
+/// 都会把它从背景上「切」下来。
 class _PostMediaCarousel extends StatefulWidget {
   final List<Media> medias;
   final void Function(List<Media> medias, int index) onOpen;
   final double width;
+  final double maxHeight;
 
   const _PostMediaCarousel({
     required this.medias,
     required this.onOpen,
     required this.width,
+    required this.maxHeight,
   });
 
   @override
@@ -159,8 +147,13 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
     final medias = widget.medias;
     if (medias.isEmpty) return const SizedBox.shrink();
     final index = _index.clamp(0, medias.length - 1);
-    final height = widget.width / feedMediaAspectRatio(medias.first);
-    final cacheWidth = _feedCacheWidth(context, widget.width);
+    // 尺寸跟着当前这一张走：滑到下一张时，画幅跟着它自己的比例换。
+    final size = feedWideMediaSize(
+      medias[index],
+      widget.width,
+      widget.maxHeight,
+    );
+    final cacheWidth = _feedCacheWidth(context, size.width);
 
     Widget page(int i) {
       final media = medias[i];
@@ -168,49 +161,44 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
         media: media,
         radius: 0,
         cacheWidth: cacheWidth,
+        imagePath: feedWideImagePath(media),
         heroTag: 'feed_${media.id}',
         onTap: () => widget.onOpen(medias, i),
         onMotionLongPress: () => widget.onOpen(medias, i),
       );
     }
 
-    // 只有一张时不套 PageView：没有可滑的东西，多一层滚动容器只会多一堆手势。
-    if (medias.length == 1) {
-      return SizedBox(
-        width: widget.width,
-        height: height,
-        child: page(0),
-      );
-    }
-
-    return SizedBox(
-      width: widget.width,
-      height: height,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          PageView.builder(
-            itemCount: medias.length,
-            onPageChanged: (value) => setState(() => _index = value),
-            itemBuilder: (context, i) => page(i),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 10,
-            child: IgnorePointer(
-              child: Center(
-                child: PostPageDots(count: medias.length, index: index),
+    final content = medias.length == 1
+        ? page(0)
+        : Stack(
+            fit: StackFit.expand,
+            children: [
+              PageView.builder(
+                itemCount: medias.length,
+                onPageChanged: (value) => setState(() => _index = value),
+                itemBuilder: (context, i) => page(i),
               ),
-            ),
-          ),
-        ],
-      ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 10,
+                child: IgnorePointer(
+                  child: Center(
+                    child: PostPageDots(count: medias.length, index: index),
+                  ),
+                ),
+              ),
+            ],
+          );
+
+    return Align(
+      alignment: Alignment.center,
+      child: SizedBox(width: size.width, height: size.height, child: content),
     );
   }
 }
 
-/// 九宫格（原来的排法）：2/4 张两列，其余三列，格子都是正方形。
+/// 九宫格（默认）：2/4 张两列，其余三列，格子都是正方形。
 class _PostMediaGrid extends StatelessWidget {
   final List<Media> medias;
   final void Function(List<Media> medias, int index) onOpen;
@@ -256,10 +244,6 @@ class _PostMediaGrid extends StatelessWidget {
 class _PostCardState extends State<PostCard> {
   bool _collapsed = false;
   bool _deleting = false;
-
-  /// 这条动态当前怎么看：默认大图（Instagram 那套），点右上角图标切九宫格。
-  /// 只记在这一条动态上：换个帖子又想密着看是另一回事。
-  PostMediaLayout _layout = PostMediaLayout.large;
 
   bool get _isMine => widget.post.authorId == CurrentUser.notifier.value?.id;
 
@@ -324,17 +308,23 @@ class _PostCardState extends State<PostCard> {
 
   @override
   Widget build(BuildContext context) {
-    final large =
-        _layout == PostMediaLayout.large && widget.post.medias.isNotEmpty;
-    return AnimatedSize(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeInOutCubic,
-      alignment: Alignment.topCenter,
-      child: _collapsed
-          ? const SizedBox(width: double.infinity)
-          : large
-              ? _buildLargePost()
-              : _buildCardPost(),
+    // 九宫格 ↔ 大屏是全局设置（在「我的」里），这里只跟着听：切回来立刻生效，
+    // 不用重进页面。
+    return ValueListenableBuilder<bool>(
+      valueListenable: FeedViewSettings.widescreen,
+      builder: (context, widescreen, _) {
+        final wide = widescreen && widget.post.medias.isNotEmpty;
+        return AnimatedSize(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOutCubic,
+          alignment: Alignment.topCenter,
+          child: _collapsed
+              ? const SizedBox(width: double.infinity)
+              : wide
+                  ? _buildWidePost()
+                  : _buildCardPost(),
+        );
+      },
     );
   }
 
@@ -342,9 +332,9 @@ class _PostCardState extends State<PostCard> {
 
   Widget _buildCaption() => Text(widget.post.content!, style: AppText.body);
 
-  /// 大图：**不套卡片**。照片铺满屏宽、没有圆角和描边，头图上面是作者那一行，
+  /// 大屏：**不套卡片**。照片铺满屏宽、没有圆角和描边，头图上面是作者那一行，
   /// 说明文字压在照片下面——页面背景就是它的底。
-  Widget _buildLargePost() {
+  Widget _buildWidePost() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -353,9 +343,9 @@ class _PostCardState extends State<PostCard> {
           child: _buildHeader(),
         ),
         LayoutBuilder(
-          builder: (context, constraints) => Align(
-            alignment: Alignment.centerLeft,
-            child: _buildMediaBlock(constraints.maxWidth),
+          builder: (context, constraints) => _buildMediaBlock(
+            constraints.maxWidth,
+            widescreen: true,
           ),
         ),
         if (_hasCaption)
@@ -367,7 +357,7 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  /// 九宫格：原来的卡片。玻璃只铺在卡片本体上，列表/页面的背景保持不变。
+  /// 九宫格：默认的卡片。玻璃只铺在卡片本体上，列表/页面的背景保持不变。
   ///
   /// 档位固定用 [AppGlassSurface.kCardQuality]，现在是 standard：纯
   /// BackdropFilter，**不抓 capture**。这不是性能取舍，是黑卡的修法——premium
@@ -409,38 +399,24 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  /// 媒体区 + 右上角那枚模式切换按钮：大图时是满屏轮播，九宫格时是三列格子。
+  /// 媒体区：大屏时是满屏轮播（原图 + 高度上限），九宫格时是三列格子。
   ///
   /// iPad 上单条动态很宽时限制在 640 以内，避免一张图占满整块横屏。
-  Widget _buildMediaBlock(double available) {
+  Widget _buildMediaBlock(double available, {bool widescreen = false}) {
     final width = available > 640 ? 640.0 : available;
     final medias = widget.post.medias;
-    return Stack(
-      children: [
-        _layout == PostMediaLayout.large
-            ? _PostMediaCarousel(
-                medias: medias,
-                onOpen: widget.onOpenMedia,
-                width: width,
-              )
-            : _PostMediaGrid(
-                medias: medias,
-                onOpen: widget.onOpenMedia,
-                width: width,
-              ),
-        Positioned(
-          top: 8,
-          right: 8,
-          child: _MediaModeToggle(
-            layout: _layout,
-            onTap: () => setState(
-              () => _layout = _layout == PostMediaLayout.large
-                  ? PostMediaLayout.grid
-                  : PostMediaLayout.large,
-            ),
-          ),
-        ),
-      ],
+    if (!widescreen) {
+      return _PostMediaGrid(
+        medias: medias,
+        onOpen: widget.onOpenMedia,
+        width: width,
+      );
+    }
+    return _PostMediaCarousel(
+      medias: medias,
+      onOpen: widget.onOpenMedia,
+      width: width,
+      maxHeight: MediaQuery.sizeOf(context).height * kFeedWideMaxHeightFactor,
     );
   }
 
@@ -512,6 +488,4 @@ class _PostCardState extends State<PostCard> {
       ],
     );
   }
-
-
 }

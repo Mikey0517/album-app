@@ -16,6 +16,7 @@ import 'core/current_user.dart';
 import 'core/design/colors.dart';
 import 'core/design/text_styles.dart';
 import 'core/design/theme.dart';
+import 'core/feed_view_settings.dart';
 import 'core/network_monitor.dart';
 import 'core/page_backdrop_controller.dart';
 import 'core/patch/patch_service.dart';
@@ -58,6 +59,8 @@ Future<void> main() async {
   await AppAccentController.init();
   // 自定义页面背景：只读回文件路径，文件丢了内部会清 key 回退渐变。
   await PageBackdropController.init();
+  // 朋友圈九宫格 / 大屏：默认九宫格，读回用户上次的选择。
+  await FeedViewSettings.init();
   ApiClient.install();
   // 读回上次没传完的队列：登录态确认后自动续传。
   await UploadManager.instance.restore();

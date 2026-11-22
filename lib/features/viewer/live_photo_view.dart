@@ -22,9 +22,15 @@ bool shouldAutoPlayMotionPhoto(List<ConnectivityResult> results) {
 /// 始终命中同一个 Element（和 [viewerTopBarKey] 同一个理由）。
 const Key livePhotoPlayButtonKey = ValueKey<String>('live-photo-play');
 
-/// 动图播放按钮的直径与到右/下边缘的距离（微信那枚圆形按钮的尺寸）。
-const double livePhotoPlayButtonSize = 48;
+/// 动图播放按钮的直径与到右/下边缘的距离。
+///
+/// 直径是原来那枚 48 的 1/3：全屏看图时它只是「这里有动态」的小提示，不该
+/// 在照片右下角压住一大块画面；右/下边距保持不变，位置不动，只缩小个头。
+const double livePhotoPlayButtonSize = 16;
 const double livePhotoPlayButtonInset = 16;
+
+/// 按钮里的图标字号：跟随直径一起缩到 1/3（26 → 9）。
+const double livePhotoPlayIconSize = 9;
 
 /// 动态照片：静态图 + 内嵌 MP4。点击播放/停止，播完自动回静态图。
 class LivePhotoView extends StatefulWidget {
@@ -244,17 +250,25 @@ class _LivePhotoViewState extends State<LivePhotoView> {
             key: livePhotoPlayButtonKey,
             onPressed: _toggle,
             tooltip: _playing ? '暂停动图' : '播放动图',
-            iconSize: 26,
+            iconSize: livePhotoPlayIconSize,
+            // M3 的 IconButton 自带 40 的最小尺寸，光靠 style 里的尺寸压不到 16；
+            // 这里用紧约束把按钮本体定死在直径上。
+            constraints: const BoxConstraints.tightFor(
+              width: livePhotoPlayButtonSize,
+              height: livePhotoPlayButtonSize,
+            ),
             style: IconButton.styleFrom(
-              fixedSize: const Size(
-                livePhotoPlayButtonSize,
-                livePhotoPlayButtonSize,
-              ),
+              // 默认 8 的内边距会把 9 的图标挤出 16 的圆，这里清掉，图标自己居中。
+              padding: EdgeInsets.zero,
+              // 命中区也按 16 算（不再撑到 Material 默认的 48）：这么小的圆
+              // 配上 48 的隐形命中区，圆心会从右下角往里漂 16，位置和视觉就对
+              // 不上了。整张照片本身也能点着播，按钮只是个小提示。
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               backgroundColor: Colors.black.withValues(alpha: 0.42),
               foregroundColor: Colors.white,
               side: BorderSide(
                 color: Colors.white.withValues(alpha: 0.55),
-                width: 1.2,
+                width: 0.4,
               ),
               shape: const CircleBorder(),
             ),

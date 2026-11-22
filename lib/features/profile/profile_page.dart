@@ -16,6 +16,7 @@ import '../../core/current_user.dart';
 import '../../core/design/colors.dart';
 import '../../core/design/radius.dart';
 import '../../core/design/text_styles.dart';
+import '../../core/feed_view_settings.dart';
 import '../../core/formatters.dart';
 import '../../core/page_backdrop_controller.dart';
 import '../../core/server_config.dart';
@@ -711,6 +712,28 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
                       );
                     },
                   ),
+                ),
+                Divider(color: AppColors.divider, height: 1),
+                // 朋友圈动态的两种看法：关 = 九宫格，开 = 大屏。以前这个切换在
+                // 每条动态右上角、逐条记忆；现在只有这一处开关。
+                ValueListenableBuilder<bool>(
+                  valueListenable: FeedViewSettings.widescreen,
+                  builder: (context, widescreen, _) {
+                    return ListTile(
+                      key: const Key('profile-feed-widescreen'),
+                      onTap: () => FeedViewSettings.setWidescreen(!widescreen),
+                      leading: Icon(
+                        Icons.fullscreen_rounded,
+                        color: AppColors.textSecondary,
+                        size: 22,
+                      ),
+                      title: const Text('朋友圈大屏模式', style: AppText.body),
+                      trailing: Switch(
+                        value: widescreen,
+                        onChanged: FeedViewSettings.setWidescreen,
+                      ),
+                    );
+                  },
                 ),
                 Divider(color: AppColors.divider, height: 1),
                 ListTile(

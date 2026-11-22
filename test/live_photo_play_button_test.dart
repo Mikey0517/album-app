@@ -68,7 +68,18 @@ void main() {
     );
 
     final rect = tester.getRect(button);
-    expect(rect.size, const Size(48, 48));
+    // 直径缩到原来 48 的 1/3；位置（右/下边距）不动。
+    expect(rect.size, const Size(16, 16));
+    expect(rect.size, const Size(
+      livePhotoPlayButtonSize,
+      livePhotoPlayButtonSize,
+    ));
+    expect(rect.width, closeTo(48 / 3, 0.01), reason: '是原来那枚 48 的 1/3');
+    expect(
+      tester.widget<IconButton>(button).iconSize,
+      livePhotoPlayIconSize,
+      reason: '图标跟着缩到 1/3，不会从 16 的圆里溢出来',
+    );
     expect(rect.right, _phone.width - livePhotoPlayButtonInset);
     expect(
       rect.bottom,

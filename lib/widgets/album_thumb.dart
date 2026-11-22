@@ -24,6 +24,15 @@ class AlbumThumb extends StatelessWidget {
   final VoidCallback? onMotionLongPress;
   final BoxFit fit;
 
+  /// 指定要显示的图片地址，覆盖默认的 [Media.previewPath]。
+  ///
+  /// 朋友圈大屏模式用它直接指到 `/files/display/<文件名>` 的原图：默认走的是
+  /// 服务端 400px 缩略图，放大到屏宽就是糊的。为 null 时仍按缩略图那条老路。
+  final String? imagePath;
+
+  /// 指了 [imagePath] 时，即便服务端缩略图生成失败也照样显示这张图。
+  bool get _usesOwnPath => imagePath != null;
+
   const AlbumThumb({
     super.key,
     required this.media,
@@ -35,6 +44,7 @@ class AlbumThumb extends StatelessWidget {
     this.onLongPress,
     this.onMotionLongPress,
     this.fit = BoxFit.cover,
+    this.imagePath,
   });
 
   /// 动态角标只认服务端提取出来的动态视频，避免「列表显示动态、点进去却没有」。
@@ -68,8 +78,10 @@ class AlbumThumb extends StatelessWidget {
   }
 
   Widget _buildImage(BuildContext context) {
-    final path = media.previewPath;
-    if (media.thumbFailed || path == null || path.isEmpty) {
+    final path = imagePath ?? media.previewPath;
+    if ((!_usesOwnPath && media.thumbFailed) ||
+        path == null ||
+        path.isEmpty) {
       return _placeholder(showPlay: media.isVideo);
     }
     final url = fullUrl(path);

@@ -1,6 +1,7 @@
 import 'package:album_app/core/current_user.dart';
 import 'package:album_app/core/design/colors.dart';
 import 'package:album_app/core/design/theme.dart';
+import 'package:album_app/core/feed_view_settings.dart';
 import 'package:album_app/features/profile/profile_page.dart';
 import 'package:album_app/models/app_user.dart';
 import 'package:album_app/widgets/app_card.dart';
@@ -106,5 +107,29 @@ void main() {
       greaterThanOrEqualTo(2),
       reason: '头像卡 + 设置组卡都用 bgSurface',
     );
+  });
+
+  testWidgets('朋友圈大屏模式：默认关闭，开关切到打开', (tester) async {
+    FeedViewSettings.widescreen.value = false;
+    addTearDown(() => FeedViewSettings.widescreen.value = false);
+    await pumpProfile(tester);
+
+    final tile = find.byKey(const Key('profile-feed-widescreen'));
+    expect(tile, findsOneWidget);
+    expect(find.text('朋友圈大屏模式'), findsOneWidget);
+
+    final toggle = find.descendant(of: tile, matching: find.byType(Switch));
+    expect(tester.widget<Switch>(toggle).value, isFalse, reason: '默认关闭（九宫格）');
+
+    await tester.ensureVisible(toggle);
+    await tester.tap(toggle);
+    await tester.pump();
+    expect(FeedViewSettings.widescreen.value, isTrue);
+    expect(tester.widget<Switch>(toggle).value, isTrue);
+
+    // 整行也能点：点标题和点开关走同一个开关。
+    await tester.tap(find.text('朋友圈大屏模式'));
+    await tester.pump();
+    expect(FeedViewSettings.widescreen.value, isFalse);
   });
 }
