@@ -275,6 +275,20 @@ APK 更新：下载在 App 内展示百分比、大小、速度、ETA，完成�
 第一次打开展示 `assets/changelog.md`，点“知道了”后记录 `last_run_version_code`；
 首次安装也会展示一次更新日志（可作为欢迎页）。
 
+### 3.1 发补丁还是发 APK
+
+```bash
+export SECRET='你的 UPLOAD_SECRET'
+export SERVER='http://<服务器IP>:8000'
+./scripts/release-auto.sh "这次改了什么"   # 自动判断
+```
+
+`release-auto.sh` 看自上次发版（`pubspec.yaml` 那个提交）以来改了哪些文件：只动了
+`lib/` 就自动走 `release-patch.sh` 打热更新补丁（**不升 versionCode**，用户冷启动
+自动下载、再下次冷启动生效）；动了 `android/`、`ios/`、`assets/`、`pubspec.yaml`
+就提示必须发 APK。补丁强绑定 `versionCode`，一旦发了新 APK，针对旧版本的补丁
+自动失效。
+
 ### 4. 签名（非常重要）
 
 `album-app/android/key.jks` 是当前 release 签名 keystore，

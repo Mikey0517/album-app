@@ -60,10 +60,13 @@ else
 fi
 
 # ---------- 2. 构建与基线同 versionCode 的 release APK ----------
+# 只打发布用的两个 ABI：补丁里本来就只取一个（优先 arm64）的 libapp.so，
+# 多打 x64 只会多等一次编译，还要去 Google 拉 x64 的引擎产物（国内会卡死）。
 echo "==> 构建 release APK（versionCode 保持 $VERSION_CODE）"
 "$FLUTTER" --no-version-check build apk --release \
   --build-name="$VERSION_NAME" \
-  --build-number="$VERSION_CODE"
+  --build-number="$VERSION_CODE" \
+  --target-platform android-arm,android-arm64
 
 APK=build/app/outputs/flutter-apk/app-release.apk
 [ -f "$APK" ] || { echo "❌ 未找到 $APK" >&2; exit 1; }
