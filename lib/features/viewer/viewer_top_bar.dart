@@ -8,6 +8,12 @@ import '../../models/media.dart';
 /// 挂一个常量 key 让顶部栏始终命中同一个 Element，不被当成新子树重建。
 const Key viewerTopBarKey = ValueKey<String>('viewer-top-bar');
 
+/// 浏览页动作图标（保存 / 详情）的字号。
+///
+/// 关闭按钮是 24，动作图标 22 更安静；动态照片右下角的播放按钮也用这一档，
+/// 两处看起来是同一套控件。
+const double viewerActionIconSize = 22;
+
 class ViewerTopBar extends StatelessWidget {
   final Media media;
   final VoidCallback onClose;
@@ -57,7 +63,7 @@ class ViewerTopBar extends StatelessWidget {
               ),
               IconButton(
                 onPressed: onDownload,
-                iconSize: 22,
+                iconSize: viewerActionIconSize,
                 color: Colors.white,
                 tooltip: '保存到相册',
                 icon: const Icon(Icons.download_outlined),
@@ -65,7 +71,7 @@ class ViewerTopBar extends StatelessWidget {
               if (onDetails != null)
                 IconButton(
                   onPressed: onDetails,
-                  iconSize: 22,
+                  iconSize: viewerActionIconSize,
                   color: Colors.white,
                   tooltip: '详情',
                   icon: const Icon(Icons.info_outline),

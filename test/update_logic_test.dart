@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:album_app/core/design/theme.dart';
+import 'package:album_app/core/patch/patch_service.dart';
 import 'package:album_app/features/update/download_progress.dart';
 import 'package:album_app/features/update/force_update_dialog.dart';
 import 'package:album_app/features/update/update_action_button.dart';
+import 'package:album_app/features/update/update_center.dart';
 import 'package:album_app/models/app_release.dart';
 import 'package:album_app/widgets/app_glass.dart';
 import 'package:flutter/material.dart';
@@ -247,6 +249,104 @@ void main() {
       );
       expect(find.text('版本更新'), findsOneWidget);
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('更新检测：补丁优先', () {
+    const patch = PatchInfo(
+      patchVersion: 3,
+      downloadPath: '/api/patch/download/patch-3.zip',
+      fileSize: 1024,
+      sha256: 'abc',
+      notes: '大屏模式',
+    );
+
+    test('有补丁就不返回 APK：能热更新先热更新', () {
+      final result = UpdateCenter.resolve(patch: patch, release: _release);
+      expect(result.hasPatch, isTrue);
+      expect(result.patch, same(patch));
+      expect(result.release, isNull, reason: '有补丁时不该再弹 APK 强制更新');
+    });
+
+    test('没有补丁才返回 APK', () {
+      final result = UpdateCenter.resolve(patch: null, release: _release);
+      expect(result.hasPatch, isFalse);
+      expect(result.release, same(_release));
+    });
+
+    test('两样都没有就是最新', () {
+      final result = UpdateCenter.resolve(patch: null, release: null);
+      expect(result.hasPatch, isFalse);
+      expect(result.release, isNull);
+    });
+
+    test('check 同时查补丁和 APK，结论只留补丁', () async {
+      final result = await UpdateCenter.check(
+        probePatch: () async => patch,
+        probeRelease: () async => _release,
+      );
+      expect(result.patch, same(patch));
+      expect(result.release, isNull);
+      expect(result.patchApplied, isFalse, reason: '启动路径不下载补丁');
+    });
+
+    test('check 在没补丁时把 APK 交出去', () async {
+      final result = await UpdateCenter.check(
+        probePatch: () async => null,
+        probeRelease: () async => _release,
+      );
+      expect(result.patch, isNull);
+      expect(result.release, same(_release));
+    });
+
+    test('downloadPatch=true 时当场下载补丁并标记已落盘', () async {
+      PatchInfo? appliedInfo;
+      final result = await UpdateCenter.check(
+        downloadPatch: true,
+        probePatch: () async => patch,
+        probeRelease: () async => _release,
+        applyPatch: (info) async {
+          appliedInfo = info;
+          return true;
+        },
+      );
+      expect(appliedInfo, same(patch));
+      expect(result.patchApplied, isTrue);
+      expect(result.release, isNull);
+    });
+
+    test('补丁下载失败时如实返回 applied=false', () async {
+      final result = await UpdateCenter.check(
+        downloadPatch: true,
+        probePatch: () async => patch,
+        probeRelease: () async => null,
+        applyPatch: (_) async => false,
+      );
+      expect(result.patch, same(patch));
+      expect(result.patchApplied, isFalse);
+    });
+
+    test('PatchInfo 解析服务端字段并校验可用性', () {
+      final info = PatchInfo.fromJson({
+        'has_update': true,
+        'patch_version': 7,
+        'download_url': '/api/patch/download/patch-7.zip',
+        'file_size': 2048,
+        'sha256': 'ABCDEF',
+        'release_notes': '修复',
+      });
+      expect(info.patchVersion, 7);
+      expect(info.downloadPath, '/api/patch/download/patch-7.zip');
+      expect(info.fileSize, 2048);
+      expect(info.sha256, 'abcdef', reason: '统一小写再比对');
+      expect(info.notes, '修复');
+      expect(info.isValid, isTrue);
+
+      expect(
+        PatchInfo.fromJson({'has_update': true}).isValid,
+        isFalse,
+        reason: '没有版本号/下载地址的补丁不能用',
+      );
     });
   });
 }

@@ -46,39 +46,44 @@ class PostCard extends StatefulWidget {
 /// 的照片整体缩窄、居中，整张图完整露出来，不被裁掉。
 const double kFeedWideMaxHeightFactor = 0.72;
 
-/// 底部页码圆点（只在多张时出现）。
-class PostPageDots extends StatelessWidget {
-  final int count;
-  final int index;
+/// 大屏多图时右上角的页码：第几张 / 共几张（如 3/4）。
+const Key postMediaCounterKey = ValueKey<String>('post-media-counter');
 
-  const PostPageDots({super.key, required this.count, required this.index});
+class PostMediaCounter extends StatelessWidget {
+  final int index;
+  final int count;
+
+  const PostMediaCounter({
+    super.key,
+    required this.index,
+    required this.count,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (count <= 1) return const SizedBox.shrink();
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (var i = 0; i < count; i++)
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            margin: const EdgeInsets.symmetric(horizontal: 3),
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withValues(alpha: i == index ? 0.95 : 0.45),
-              // 白点在浅色照片上也要看得见。
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.32),
-                  blurRadius: 3,
-                ),
-              ],
-            ),
+    return IgnorePointer(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          // 浅色照片上也要看得见。
+          border: Border.all(
+            color: Colors.white.withValues(alpha: 0.22),
+            width: 0.5,
           ),
-      ],
+        ),
+        child: Text(
+          '${index + 1}/$count',
+          style: AppText.caption.copyWith(
+            color: Colors.white,
+            fontSize: 11,
+            height: 1.2,
+            // 页码跳动时别整块抖：数字等宽。
+            fontFeatures: const [FontFeature.tabularFigures()],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -91,19 +96,20 @@ double feedMediaNaturalRatio(Media media) {
   return width / height;
 }
 
-/// 大屏模式下一张照片的落点尺寸：宽度铺满（[availableWidth] 以内），高度按
-/// 照片自己的比例算，但不超过 [maxHeight]。
+/// 大屏「舞台」的高度：同一组媒体里**最高**的那张按屏宽铺满时的高度，再收在
+/// [maxHeight] 以内。
 ///
-/// 返回的宽高**正好等于照片的比例**，所以图既不会被裁、也不会被拉伸：超高
-/// 的竖图缩窄后居中，两边留出页面底色，而不是裁掉上下。
-({double width, double height}) feedWideMediaSize(
-  Media media,
-  double availableWidth,
-  double maxHeight,
-) {
-  final ratio = feedMediaNaturalRatio(media);
-  final width = math.min(availableWidth, maxHeight * ratio);
-  return (width: width, height: width / ratio);
+/// 同一组照片共用这一个高度，所以左右滑动时画幅不会跳、每条动态的高度也是
+/// 固定的：比它矮的照片上下留黑边，超高被 [maxHeight] 截住的那张左右留黑边，
+/// 媒体在舞台里水平和垂直都居中。
+double feedWideStageHeight(List<Media> medias, double width, double maxHeight) {
+  var tallest = 0.0;
+  for (final media in medias) {
+    final height = width / feedMediaNaturalRatio(media);
+    if (height > tallest) tallest = height;
+  }
+  if (tallest <= 0) return 0;
+  return math.min(tallest, maxHeight);
 }
 
 /// 大屏模式下的图片地址：图片取服务端 `/files/display` 的 2560px 原图，不再
@@ -118,10 +124,11 @@ String? feedWideImagePath(Media media) {
 int _feedCacheWidth(BuildContext context, double width) =>
     (width * MediaQuery.of(context).devicePixelRatio).round();
 
-/// 大屏轮播：一次一张、左右滑动，页码是底部那一排小圆点。
+/// 大屏轮播：一次一张、左右滑动，右上角是「第几张/共几张」。
 ///
-/// 圆角/描边一律没有（[radius] 传 0）：照片直接压在页面背景上，任何一圈边
-/// 都会把它从背景上「切」下来。
+/// 舞台高度只由「最高的一张」决定（见 [feedWideStageHeight]），所以同一组
+/// 照片滑来滑去画幅不跳、每条动态的高度也是固定的。照片按自己的比例整张
+/// 居中放进舞台，空出来的地方就是黑边（[AlbumThumb.backgroundColor]）。
 class _PostMediaCarousel extends StatefulWidget {
   final List<Media> medias;
   final void Function(List<Media> medias, int index) onOpen;
@@ -147,13 +154,13 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
     final medias = widget.medias;
     if (medias.isEmpty) return const SizedBox.shrink();
     final index = _index.clamp(0, medias.length - 1);
-    // 尺寸跟着当前这一张走：滑到下一张时，画幅跟着它自己的比例换。
-    final size = feedWideMediaSize(
-      medias[index],
+    // 高度只看「最高的一张」，不跟着当前页变：滑到下一张画幅不跳。
+    final stageHeight = feedWideStageHeight(
+      medias,
       widget.width,
       widget.maxHeight,
     );
-    final cacheWidth = _feedCacheWidth(context, size.width);
+    final cacheWidth = _feedCacheWidth(context, widget.width);
 
     Widget page(int i) {
       final media = medias[i];
@@ -162,38 +169,44 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
         radius: 0,
         cacheWidth: cacheWidth,
         imagePath: feedWideImagePath(media),
+        // 原图按自己的比例整张放进来，空出来的地方就是黑边。
+        fit: BoxFit.contain,
+        backgroundColor: Colors.black,
         heroTag: 'feed_${media.id}',
         onTap: () => widget.onOpen(medias, i),
         onMotionLongPress: () => widget.onOpen(medias, i),
       );
     }
 
-    final content = medias.length == 1
-        ? page(0)
-        : Stack(
-            fit: StackFit.expand,
-            children: [
+    return Align(
+      alignment: Alignment.center,
+      child: SizedBox(
+        width: widget.width,
+        height: stageHeight,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (medias.length == 1)
+              page(0)
+            else
               PageView.builder(
                 itemCount: medias.length,
                 onPageChanged: (value) => setState(() => _index = value),
                 itemBuilder: (context, i) => page(i),
               ),
+            if (medias.length > 1)
               Positioned(
-                left: 0,
-                right: 0,
-                bottom: 10,
-                child: IgnorePointer(
-                  child: Center(
-                    child: PostPageDots(count: medias.length, index: index),
-                  ),
+                top: 8,
+                right: 8,
+                child: PostMediaCounter(
+                  key: postMediaCounterKey,
+                  index: index,
+                  count: medias.length,
                 ),
               ),
-            ],
-          );
-
-    return Align(
-      alignment: Alignment.center,
-      child: SizedBox(width: size.width, height: size.height, child: content),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:album_app/features/viewer/live_photo_view.dart';
+import 'package:album_app/features/viewer/viewer_top_bar.dart';
 import 'package:album_app/models/media.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -68,17 +69,16 @@ void main() {
     );
 
     final rect = tester.getRect(button);
-    // 直径缩到原来 48 的 1/3；位置（右/下边距）不动。
-    expect(rect.size, const Size(16, 16));
+    // 和浏览页顶栏那排按钮同一档：40 的圆 + 22 的图标。
     expect(rect.size, const Size(
       livePhotoPlayButtonSize,
       livePhotoPlayButtonSize,
     ));
-    expect(rect.width, closeTo(48 / 3, 0.01), reason: '是原来那枚 48 的 1/3');
+    expect(rect.width, closeTo(livePhotoPlayButtonSize, 0.01));
     expect(
       tester.widget<IconButton>(button).iconSize,
-      livePhotoPlayIconSize,
-      reason: '图标跟着缩到 1/3，不会从 16 的圆里溢出来',
+      viewerActionIconSize,
+      reason: '和顶栏「详情」按钮一样大的图标',
     );
     expect(rect.right, _phone.width - livePhotoPlayButtonInset);
     expect(

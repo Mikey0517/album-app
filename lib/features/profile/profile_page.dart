@@ -30,7 +30,8 @@ import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
 import '../update/force_update_dialog.dart';
 import '../update/ios_update_service.dart';
-import '../update/update_service.dart';
+import '../update/patch_ready_dialog.dart';
+import '../update/update_center.dart';
 import 'page_backdrop_sheet.dart';
 import 'storage_page.dart';
 import 'theme_accent_sheet.dart';
@@ -313,27 +314,40 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
         }
         return;
       }
-      final release = await UpdateService.check();
+      // 补丁优先：手动检查当场下载补丁（用户已经在等了），有补丁就只提示
+      // 「重启生效」，不再拿 APK 更新去催装。
+      final result = await UpdateCenter.check(downloadPatch: true);
       if (!mounted) return;
+      final patch = result.patch;
+      if (patch != null) {
+        if (result.patchApplied) {
+          await showPatchReadyDialog(context);
+        } else {
+          _snack('补丁下载失败，请检查网络后重试');
+        }
+        return;
+      }
+      final release = result.release;
       if (release != null) {
         await showForceUpdateDialog(context, release);
+        return;
+      }
+      // 两样都没有：UpdateService/PatchService 都会吞掉网络错误，再用 ping
+      // 区分「已是最新」与「网络异常」。
+      final baseUrl = ServerConfig.current;
+      final pingError = await ApiClient.ping(baseUrl);
+      if (!mounted) return;
+      if (pingError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('网络异常：$pingError')),
+        );
       } else {
-        // UpdateService.check 会吞掉网络错误；再用 ping 区分"最新"与"网络异常"。
-        final baseUrl = ServerConfig.current;
-        final pingError = await ApiClient.ping(baseUrl);
-        if (!mounted) return;
-        if (pingError != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('网络异常：$pingError')),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('已是最新版本'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('已是最新版本'),
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
     } catch (e) {
       if (!mounted) return;

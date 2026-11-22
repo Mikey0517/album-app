@@ -75,7 +75,7 @@ void main() {
 
       expect(find.byType(AppGlassSurface), findsOneWidget, reason: '九宫格在卡片里');
       expect(find.byType(PageView), findsNothing);
-      expect(find.byType(PostPageDots), findsNothing);
+      expect(find.byType(PostMediaCounter), findsNothing);
 
       final tiles = tester.widgetList<AlbumThumb>(find.byType(AlbumThumb));
       expect(tiles, hasLength(3));
@@ -116,6 +116,8 @@ void main() {
       final thumb = tester.widget<AlbumThumb>(find.byType(AlbumThumb));
       expect(thumb.imagePath, '/files/display/1.jpg',
           reason: '大屏要最清晰的：走 2560px 原图，不再是 400px 缩略图');
+      expect(thumb.fit, BoxFit.contain, reason: '整张图放进来，剩下的是黑边');
+      expect(thumb.backgroundColor, Colors.black);
 
       final rect = tester.getRect(find.byType(AlbumThumb));
       expect(rect.width, 390, reason: '铺满屏宽');
@@ -123,16 +125,19 @@ void main() {
       expect(rect.height, closeTo(390 * 9 / 16, 0.5), reason: '16:9 按自己的比例出高度');
     });
 
-    testWidgets('超高竖图按屏高收口，整张图完整露出（不裁边）', (tester) async {
+    testWidgets('超高竖图按屏高收口：舞台固定高度，整张图居中不裁边', (tester) async {
       await pump(tester, _post([_photo(1, width: 1080, height: 2400)]),
           widescreen: true);
 
       const maxHeight = 844 * kFeedWideMaxHeightFactor;
       final rect = tester.getRect(find.byType(AlbumThumb));
+      expect(rect.width, 390, reason: '舞台铺满屏宽');
       expect(rect.height, closeTo(maxHeight, 0.5), reason: '高度不超过屏高的 72%');
-      expect(rect.width, closeTo(maxHeight * 1080 / 2400, 0.5),
-          reason: '宽度按原比例收窄，整张图都在，没有被裁');
-      expect(rect.center.dx, closeTo(195, 0.5), reason: '收窄后居中');
+      expect(
+        tester.widget<AlbumThumb>(find.byType(AlbumThumb)).fit,
+        BoxFit.contain,
+        reason: '超出部分不裁，缩窄居中、左右留黑边',
+      );
     });
 
     testWidgets('宽图仍然铺满屏宽、不无谓放大', (tester) async {
@@ -143,38 +148,51 @@ void main() {
       expect(rect.height, closeTo(390 / 5, 0.5), reason: '4000:800 = 5:1');
     });
 
-    testWidgets('多图：一次一张，页码是底部居中的小圆点', (tester) async {
+    testWidgets('多图高度取最高的那张：滑到别的照片画幅也不跳', (tester) async {
+      // 3:4 = 520 高，16:9 = 219.4 高：舞台按 520 算。
+      await pump(
+        tester,
+        _post([
+          _photo(1),
+          _photo(2, width: 1080, height: 1440),
+        ]),
+        widescreen: true,
+      );
+
+      final first = tester.getRect(find.byType(PageView));
+      expect(first.height, closeTo(520, 0.5), reason: '取最高那张的高度');
+      expect(first.width, 390);
+
+      await tester.drag(find.byType(PageView), const Offset(-300, 0));
+      await tester.pumpAndSettle();
+      expect(tester.getRect(find.byType(PageView)).height, closeTo(520, 0.5),
+          reason: '换到 16:9 那页，舞台高度不变');
+    });
+
+    testWidgets('多图右上角是「第几张/共几张」，贴着舞台右上角', (tester) async {
       await pump(
         tester,
         _post([_photo(1), _photo(2), _photo(3)]),
         widescreen: true,
       );
 
-      final carousel = tester.getRect(find.byType(PageView));
-      expect(carousel.width, 390);
-      expect(
-        find.descendant(
-          of: find.byType(PageView),
-          matching: find.byType(AlbumThumb),
-        ),
-        findsOneWidget,
-        reason: '一次只建一页，不会同时露出两张',
-      );
+      final counter = find.byKey(postMediaCounterKey);
+      expect(counter, findsOneWidget);
+      expect(find.text('1/3'), findsOneWidget);
 
-      final dots = find.byType(PostPageDots);
-      expect(dots, findsOneWidget);
-      expect(tester.widget<PostPageDots>(dots).count, 3);
-      expect(tester.widget<PostPageDots>(dots).index, 0);
-      final dotsRect = tester.getRect(dots);
-      expect(dotsRect.center.dx, closeTo(carousel.center.dx, 1),
-          reason: '圆点在底部居中');
-      expect(dotsRect.bottom, closeTo(carousel.bottom - 10, 0.5),
-          reason: '贴着图片底边 10');
+      final stage = tester.getRect(find.byType(PageView));
+      final rect = tester.getRect(counter);
+      expect(rect.right, closeTo(stage.right - 8, 0.5), reason: '贴右上角');
+      expect(rect.top, closeTo(stage.top + 8, 0.5));
 
       await tester.drag(find.byType(PageView), const Offset(-300, 0));
       await tester.pumpAndSettle();
-      expect(tester.widget<PostPageDots>(find.byType(PostPageDots)).index, 1,
-          reason: '滑一张圆点跟着走');
+      expect(find.text('2/3'), findsOneWidget, reason: '滑一张页码跟着走');
+    });
+
+    testWidgets('单张不显示页码', (tester) async {
+      await pump(tester, _post([_photo(1)]), widescreen: true);
+      expect(find.byKey(postMediaCounterKey), findsNothing);
     });
 
     testWidgets('点当前这一张打开查看器，索引跟着滑动走', (tester) async {
@@ -223,15 +241,31 @@ void main() {
     });
   });
 
-  group('尺寸计算', () {
-    test('大屏尺寸保持原比例，超过高度上限就缩窄', () {
-      final tall = feedWideMediaSize(_photo(1, width: 1080, height: 2400), 390, 600);
-      expect(tall.height, 600);
-      expect(tall.width, closeTo(270, 0.01));
-
-      final wide = feedWideMediaSize(_photo(1, width: 1920, height: 1080), 390, 600);
-      expect(wide.width, 390);
-      expect(wide.height, closeTo(219.375, 0.01));
+  group('舞台尺寸', () {
+    test('高度取最高的一张，但不超过上限', () {
+      expect(
+        feedWideStageHeight([_photo(1)], 390, 600),
+        closeTo(219.375, 0.01),
+        reason: '单张就是它自己的高度',
+      );
+      expect(
+        feedWideStageHeight([_photo(1, width: 1080, height: 2400)], 390, 600),
+        600,
+        reason: '超过上限就截到上限',
+      );
+      expect(
+        feedWideStageHeight(
+          [
+            _photo(1),
+            _photo(2, width: 1080, height: 1440),
+          ],
+          390,
+          600,
+        ),
+        closeTo(520, 0.01),
+        reason: '多张取最高的那张',
+      );
+      expect(feedWideStageHeight([], 390, 600), 0, reason: '没有媒体就没有舞台');
     });
   });
 }

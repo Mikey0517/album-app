@@ -33,6 +33,10 @@ class AlbumThumb extends StatelessWidget {
   /// 指了 [imagePath] 时，即便服务端缩略图生成失败也照样显示这张图。
   bool get _usesOwnPath => imagePath != null;
 
+  /// 图片没铺满时露出来的底色。默认是统一的占位灰；朋友圈大屏要黑边，
+  /// 就传黑色。
+  final Color? backgroundColor;
+
   const AlbumThumb({
     super.key,
     required this.media,
@@ -45,6 +49,7 @@ class AlbumThumb extends StatelessWidget {
     this.onMotionLongPress,
     this.fit = BoxFit.cover,
     this.imagePath,
+    this.backgroundColor,
   });
 
   /// 动态角标只认服务端提取出来的动态视频，避免「列表显示动态、点进去却没有」。
@@ -85,20 +90,20 @@ class AlbumThumb extends StatelessWidget {
       return _placeholder(showPlay: media.isVideo);
     }
     final url = fullUrl(path);
+    final background = backgroundColor ?? AppColors.mediaPlaceholder;
     return Stack(
       fit: StackFit.expand,
       children: [
-        Container(color: AppColors.mediaPlaceholder),
+        Container(color: background),
         CachedNetworkImage(
           cacheManager: MediaCache.manager,
           imageUrl: url,
           fit: fit,
           memCacheWidth: cacheWidth,
           fadeInDuration: const Duration(milliseconds: 200),
-          placeholder: (context, url) => Container(
-            color: AppColors.mediaPlaceholder,
-          ),
-          errorWidget: (context, url, error) => _placeholder(showPlay: false),
+          placeholder: (context, url) => Container(color: background),
+          errorWidget: (context, url, error) =>
+              _placeholder(showPlay: false),
         ),
         if (media.isVideo && showVideoBadge)
           Positioned(
@@ -124,7 +129,7 @@ class AlbumThumb extends StatelessWidget {
 
   Widget _placeholder({required bool showPlay}) {
     return Container(
-      color: AppColors.mediaPlaceholder,
+      color: backgroundColor ?? AppColors.mediaPlaceholder,
       alignment: Alignment.center,
       child: Icon(
         showPlay ? Icons.play_circle_outline : Icons.photo_outlined,

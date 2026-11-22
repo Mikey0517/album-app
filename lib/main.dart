@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -31,7 +30,7 @@ import 'features/home/home_page.dart';
 import 'features/update/changelog_dialog.dart';
 import 'features/update/force_update_dialog.dart';
 import 'features/update/patch_ready_dialog.dart';
-import 'features/update/update_service.dart';
+import 'features/update/update_center.dart';
 import 'features/update/version_tracker.dart';
 
 Future<void> main() async {
@@ -177,8 +176,17 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
 
   Future<bool> _doUpdateCheck() async {
     try {
-      final release = await UpdateService.check();
-      if (release == null || !mounted) return false;
+      // 补丁和 APK 并行查；结论只有一个：能热更新就不拿安装包挡启动。
+      final result = await UpdateCenter.check();
+      if (!mounted) return false;
+      final patch = result.patch;
+      if (patch != null) {
+        // 补丁下载放后台（局域网一两秒，慢网也不该卡住首屏）。
+        unawaited(_applyPatch(patch));
+        return false;
+      }
+      final release = result.release;
+      if (release == null) return false;
       final context = _navigatorKey.currentContext;
       if (context == null || !context.mounted) return false;
       // 对话框不可关闭，正常情况下会一直停留到用户安装新版本。
@@ -186,6 +194,20 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
       return true;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// 下载并安装补丁，成功才弹「重启生效」；失败静默，下次检查再试。
+  Future<void> _applyPatch(PatchInfo patch) async {
+    try {
+      final applied = await PatchService.apply(patch);
+      if (!applied || !mounted) return;
+      // context 在 await 之后现取现用，避免跨异步间隙持有。
+      final ctx = _navigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      await showPatchReadyDialog(ctx);
+    } catch (_) {
+      // 热更新失败不应该打扰用户。
     }
   }
 
@@ -209,15 +231,10 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
       return;
     }
 
-    // 1. 强制更新。检测失败（断网/404/超时）UpdateService 内部已静默返回 null。
-    //    APK 必须先升级：补丁强绑定 versionCode，升级后旧补丁自动失效。
+    // 1. 更新检测（补丁优先）：有补丁就后台下载、弹「重启生效」；补丁覆盖
+    //    不到时才弹 APK 强制更新。检测失败一律静默，不阻塞启动。
     if (await _runUpdateCheck()) {
       return;
-    }
-
-    // 1.5 Dart 补丁：只在 Android 上跑，且不阻塞启动（后台下载，下完提示）。
-    if (Platform.isAndroid) {
-      unawaited(_checkPatch());
     }
 
     // 2. 新版本首次运行的更新日志。必须在对话框关闭后才 mark。
@@ -236,20 +253,6 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
     // 3. 登录态恢复。
     await _checkLogin();
     _readyForResumeCheck = true;
-  }
-
-  /// 补丁检查完全异步：下载期间用户照常进入 App，下载完成后才弹提示。
-  Future<void> _checkPatch() async {
-    try {
-      final applied = await PatchService.checkAndApply();
-      if (!applied || !mounted) return;
-      // context 在 await 之后现取现用，避免跨异步间隙持有。
-      final ctx = _navigatorKey.currentContext;
-      if (ctx == null || !ctx.mounted) return;
-      await showPatchReadyDialog(ctx);
-    } catch (_) {
-      // 热更新失败不应该打扰用户。
-    }
   }
 
   Future<void> _checkLogin() async {

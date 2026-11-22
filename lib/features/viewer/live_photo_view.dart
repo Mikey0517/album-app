@@ -9,6 +9,7 @@ import '../../core/url_utils.dart';
 import '../../models/media.dart';
 import '../../core/media_cache.dart';
 import 'corrected_video_layer.dart';
+import 'viewer_top_bar.dart';
 import 'zoomable_photo.dart';
 
 /// 只有 WiFi/有线才自动播放动态照片；移动流量下保持静态图，点一下才播。
@@ -24,13 +25,13 @@ const Key livePhotoPlayButtonKey = ValueKey<String>('live-photo-play');
 
 /// 动图播放按钮的直径与到右/下边缘的距离。
 ///
-/// 直径是原来那枚 48 的 1/3：全屏看图时它只是「这里有动态」的小提示，不该
-/// 在照片右下角压住一大块画面；右/下边距保持不变，位置不动，只缩小个头。
-const double livePhotoPlayButtonSize = 16;
+/// 和浏览页顶栏那排按钮（关闭 / 保存 / 详情）对齐：图标都是 22，按钮做成
+/// 40 的圆（那排只有图标没有圆底，这里保留圆底是为了浅色照片上也看得清）。
+const double livePhotoPlayButtonSize = 40;
 const double livePhotoPlayButtonInset = 16;
 
-/// 按钮里的图标字号：跟随直径一起缩到 1/3（26 → 9）。
-const double livePhotoPlayIconSize = 9;
+/// 按钮里的图标字号：和顶栏「详情」按钮同一档。
+const double livePhotoPlayIconSize = viewerActionIconSize;
 
 /// 动态照片：静态图 + 内嵌 MP4。点击播放/停止，播完自动回静态图。
 class LivePhotoView extends StatefulWidget {
@@ -251,24 +252,22 @@ class _LivePhotoViewState extends State<LivePhotoView> {
             onPressed: _toggle,
             tooltip: _playing ? '暂停动图' : '播放动图',
             iconSize: livePhotoPlayIconSize,
-            // M3 的 IconButton 自带 40 的最小尺寸，光靠 style 里的尺寸压不到 16；
-            // 这里用紧约束把按钮本体定死在直径上。
+            // 用紧约束把按钮本体定死在直径上，不受 M3 最小尺寸影响。
             constraints: const BoxConstraints.tightFor(
               width: livePhotoPlayButtonSize,
               height: livePhotoPlayButtonSize,
             ),
             style: IconButton.styleFrom(
-              // 默认 8 的内边距会把 9 的图标挤出 16 的圆，这里清掉，图标自己居中。
+              // 默认 8 的内边距会把 22 的图标挤出 40 的圆，这里清掉，图标自己居中。
               padding: EdgeInsets.zero,
-              // 命中区也按 16 算（不再撑到 Material 默认的 48）：这么小的圆
-              // 配上 48 的隐形命中区，圆心会从右下角往里漂 16，位置和视觉就对
-              // 不上了。整张照片本身也能点着播，按钮只是个小提示。
+              // 命中区和圆一样大：配 48 的隐形命中区，圆心会从右下角往里漂，
+              // 位置和视觉就对不上了。整张照片本身也能点着播。
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               backgroundColor: Colors.black.withValues(alpha: 0.42),
               foregroundColor: Colors.white,
               side: BorderSide(
                 color: Colors.white.withValues(alpha: 0.55),
-                width: 0.4,
+                width: 1,
               ),
               shape: const CircleBorder(),
             ),
