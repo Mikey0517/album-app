@@ -1,5 +1,4 @@
 import 'package:album_app/features/viewer/live_photo_view.dart';
-import 'package:album_app/features/viewer/viewer_top_bar.dart';
 import 'package:album_app/models/media.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -77,8 +76,8 @@ void main() {
     expect(rect.width, closeTo(livePhotoPlayButtonSize, 0.01));
     expect(
       tester.widget<IconButton>(button).iconSize,
-      viewerActionIconSize,
-      reason: '和顶栏「详情」按钮一样大的图标',
+      livePhotoPlayIconSize,
+      reason: '和顶栏动作图标同一档、再小一丢丢',
     );
     expect(rect.right, _phone.width - livePhotoPlayButtonInset);
     expect(

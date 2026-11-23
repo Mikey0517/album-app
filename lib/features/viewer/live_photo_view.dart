@@ -25,13 +25,14 @@ const Key livePhotoPlayButtonKey = ValueKey<String>('live-photo-play');
 
 /// 动图播放按钮的直径与到右/下边缘的距离。
 ///
-/// 和浏览页顶栏那排按钮（关闭 / 保存 / 详情）对齐：图标都是 22，按钮做成
-/// 40 的圆（那排只有图标没有圆底，这里保留圆底是为了浅色照片上也看得清）。
-const double livePhotoPlayButtonSize = 40;
+/// 和浏览页顶栏那排按钮（关闭 / 保存 / 详情）同一套语言，但再收一丢丢：
+/// 图标 20（顶栏动作图标是 22），圆做成 36 的（那排只有图标没有圆底，这里
+/// 保留圆底是为了浅色照片上也看得清）。
+const double livePhotoPlayButtonSize = 36;
 const double livePhotoPlayButtonInset = 16;
 
-/// 按钮里的图标字号：和顶栏「详情」按钮同一档。
-const double livePhotoPlayIconSize = viewerActionIconSize;
+/// 按钮里的图标字号：比顶栏动作图标（[viewerActionIconSize]）小一档。
+const double livePhotoPlayIconSize = viewerActionIconSize - 2;
 
 /// 动态照片：静态图 + 内嵌 MP4。点击播放/停止，播完自动回静态图。
 class LivePhotoView extends StatefulWidget {

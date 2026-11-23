@@ -393,6 +393,13 @@ class _PostCardState extends State<PostCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildHeader(),
+            // 九宫格：先文字、后图片。格子一多，说明文字压在下面容易被当成
+            // 「最后一张的配图说明」；放在格子上方，整条动态读起来是
+            // 「谁 → 说了什么 → 配了什么图」。
+            if (_hasCaption) ...[
+              const SizedBox(height: AppSpacing.md),
+              _buildCaption(),
+            ],
             if (widget.post.medias.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.md),
               LayoutBuilder(
@@ -401,10 +408,6 @@ class _PostCardState extends State<PostCard> {
                   child: _buildMediaBlock(constraints.maxWidth),
                 ),
               ),
-            ],
-            if (_hasCaption) ...[
-              const SizedBox(height: AppSpacing.md),
-              _buildCaption(),
             ],
           ],
         ),

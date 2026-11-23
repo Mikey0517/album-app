@@ -95,6 +95,13 @@ void main() {
       expect(find.byIcon(Icons.fullscreen_rounded), findsNothing);
     });
 
+    testWidgets('文字在九宫格上面（先文字、后图片）', (tester) async {
+      await pump(tester, _post([_photo(1), _photo(2)], content: '今天的晚饭'));
+      final text = tester.getRect(find.text('今天的晚饭'));
+      final grid = tester.getRect(find.byType(AlbumThumb).at(0));
+      expect(text.bottom, lessThanOrEqualTo(grid.top), reason: '说明文字压在格子上方');
+    });
+
     testWidgets('点格子打开查看器，索引是格子自己的', (tester) async {
       final opened = <int>[];
       await pump(
