@@ -6,13 +6,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 const _appChannel = MethodChannel('album/app');
 
-Widget _app() => MaterialApp(
+Widget _app({String notes = ''}) => MaterialApp(
       theme: buildAppTheme(),
       home: Builder(
         builder: (context) => Scaffold(
           body: Center(
             child: TextButton(
-              onPressed: () => showPatchReadyDialog(context),
+              onPressed: () => showPatchReadyDialog(context, notes: notes),
               child: const Text('打开'),
             ),
           ),
@@ -112,5 +112,16 @@ void main() {
     expect(appCalls, isEmpty);
     expect(platformCalls.map((call) => call.method), isNot(contains('SystemNavigator.pop')));
     expect(find.text('更新已准备好'), findsNothing);
+  });
+
+  testWidgets('补丁更新日志显示在弹窗里', (tester) async {
+    await tester.pumpWidget(_app(notes: '• 九宫格文字上移\n• 播放按钮再小一档'));
+    await tester.tap(find.text('打开'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('更新已准备好'), findsOneWidget);
+    expect(find.textContaining('九宫格文字上移'), findsOneWidget);
+    expect(find.textContaining('播放按钮再小一档'), findsOneWidget);
+    expect(find.text('重启后生效'), findsOneWidget);
   });
 }

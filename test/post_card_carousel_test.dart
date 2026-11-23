@@ -192,14 +192,26 @@ void main() {
       expect(rect.right, closeTo(stage.right - 8, 0.5), reason: '贴右上角');
       expect(rect.top, closeTo(stage.top + 8, 0.5));
 
+      // 底部圆点也在：右上角说「一共几张」，底下这排是滑到第几张。
+      final dots = find.byType(PostPageDots);
+      expect(dots, findsOneWidget);
+      expect(tester.widget<PostPageDots>(dots).count, 3);
+      expect(tester.widget<PostPageDots>(dots).index, 0);
+      final dotsRect = tester.getRect(dots);
+      expect(dotsRect.center.dx, closeTo(stage.center.dx, 1), reason: '底部居中');
+      expect(dotsRect.bottom, closeTo(stage.bottom - 10, 0.5), reason: '贴着图片底边 10');
+
       await tester.drag(find.byType(PageView), const Offset(-300, 0));
       await tester.pumpAndSettle();
       expect(find.text('2/3'), findsOneWidget, reason: '滑一张页码跟着走');
+      expect(tester.widget<PostPageDots>(find.byType(PostPageDots)).index, 1,
+          reason: '圆点也跟着滑');
     });
 
-    testWidgets('单张不显示页码', (tester) async {
+    testWidgets('单张不显示页码，也不显示圆点', (tester) async {
       await pump(tester, _post([_photo(1)]), widescreen: true);
       expect(find.byKey(postMediaCounterKey), findsNothing);
+      expect(find.byType(PostPageDots), findsNothing);
     });
 
     testWidgets('点当前这一张打开查看器，索引跟着滑动走', (tester) async {

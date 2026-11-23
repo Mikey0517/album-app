@@ -321,7 +321,7 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
       final patch = result.patch;
       if (patch != null) {
         if (result.patchApplied) {
-          await showPatchReadyDialog(context);
+          await showPatchReadyDialog(context, notes: patch.notes);
         } else {
           _snack('补丁下载失败，请检查网络后重试');
         }

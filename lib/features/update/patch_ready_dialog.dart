@@ -6,18 +6,22 @@ import '../../core/design/colors.dart';
 import '../../core/design/radius.dart';
 import '../../core/design/text_styles.dart';
 
-/// 补丁下载完成后的提示：主按钮立刻重启进程让补丁生效，次按钮继续用，
-/// 等下次冷启动自然生效。
-Future<void> showPatchReadyDialog(BuildContext context) {
+/// 补丁下载完成后的提示：先给这次补丁的更新日志，主按钮立刻重启进程让补丁
+/// 生效，次按钮继续用、等下次冷启动自然生效。
+///
+/// [notes] 是服务端随补丁一起回来的 release_notes；为空时只显示「重启后生效」。
+Future<void> showPatchReadyDialog(BuildContext context, {String notes = ''}) {
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => const _PatchReadyDialog(),
+    builder: (_) => _PatchReadyDialog(notes: notes),
   );
 }
 
 class _PatchReadyDialog extends StatefulWidget {
-  const _PatchReadyDialog();
+  final String notes;
+
+  const _PatchReadyDialog({this.notes = ''});
 
   @override
   State<_PatchReadyDialog> createState() => _PatchReadyDialogState();
@@ -73,6 +77,20 @@ class _PatchReadyDialogState extends State<_PatchReadyDialog> {
                 style: AppText.titleMedium,
                 textAlign: TextAlign.center,
               ),
+              if (widget.notes.trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+                // 更新日志可能很长：限高滚动，按钮始终在屏幕里。
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      widget.notes.trim(),
+                      style: AppText.bodySmall,
+                      textAlign: TextAlign.start,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               const Text(
                 '重启后生效',

@@ -104,34 +104,45 @@ class MainActivity : FlutterFragmentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { _ -> launchPicker() }
 
-    // 删除原图需要用户在系统弹窗里确认（Android 11+）。
-    private var pendingDeleteResult: MethodChannel.Result? = null
-    // 这一次交给系统的张数，以及这批图片视频总共要删的张数。
-    private var pendingDeleteRequested = 0
-    private var pendingDeleteTotal = 0
+    // 删除原图的批处理会话：整批被系统拒绝时退回单条，并且删完一条继续下一条，
+    // 不能只删第一张就收工（小米等厂商会拒绝「一次删多张」的请求）。
+    private var pendingDeleteSession: DeleteSession? = null
     // 留着给 Dart 侧显示，方便没有 adb 时也能知道系统为什么拒绝。
     private var lastDeleteError: String? = null
     // 这一批失败的原因码（见 REASON_*）；原始异常文本只给 logcat 看。
     private var lastDeleteReason: String? = null
+
+    /** 一次删除请求的进度：remaining 是还没处理完的，requested 是正在等系统确认的。 */
+    private class DeleteSession(
+        val result: MethodChannel.Result,
+        val total: Int,
+        val firstRejection: String?,
+        val remaining: MutableList<DeleteCandidate>
+    ) {
+        var requested: List<DeleteCandidate> = emptyList()
+        var deleted: Int = 0
+        var lastReason: String? = null
+    }
+
     private val deleteLauncher = registerForActivityResult(
         ActivityResultContracts.StartIntentSenderForResult()
     ) { result ->
-        val callback = pendingDeleteResult
-        val requested = pendingDeleteRequested
-        val total = pendingDeleteTotal
-        pendingDeleteResult = null
-        pendingDeleteRequested = 0
-        pendingDeleteTotal = 0
-        if (callback == null) return@registerForActivityResult
+        val session = pendingDeleteSession ?: return@registerForActivityResult
         val approved = result.resultCode == Activity.RESULT_OK
-        val deleted = if (approved) requested else 0
-        callback.success(
-            mapOf(
-                "deleted" to deleted,
-                "failed" to total - deleted,
-                "reason" to if (approved) null else REASON_USER_CANCELLED
-            )
-        )
+        val requested = session.requested
+        session.requested = emptyList()
+        if (!approved) {
+            session.lastReason = REASON_USER_CANCELLED
+            session.remaining.clear()
+            finishDeleteSession()
+            return@registerForActivityResult
+        }
+        session.deleted += requested.size
+        session.remaining.removeAll { candidate ->
+            requested.any { it.uri == candidate.uri }
+        }
+        // 整批被拒时我们只弹了其中一条：继续删剩下的，别停在这一张。
+        requestNextDelete()
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -312,6 +323,10 @@ class MainActivity : FlutterFragmentActivity() {
             result.success(mapOf("deleted" to 0, "failed" to 0))
             return
         }
+        if (pendingDeleteSession != null) {
+            result.error("busy", "上一次删除还没结束", null)
+            return
+        }
         lastDeleteError = null
         lastDeleteReason = null
         val candidates = items.map { validateDeleteCandidate(it) }
@@ -328,34 +343,16 @@ class MainActivity : FlutterFragmentActivity() {
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // 不同厂商对批量删除的限制差别很大（小米尤其严格）：
-            // 先整批交给系统，被拒再退回逐条，哪一档能被接住就用哪一档。
-            val tried = HashSet<String>()
-            for (batch in deleteBatches(deletable)) {
-                val batchUris = batch.mapNotNull { it.uri }
-                if (batchUris.isEmpty()) continue
-                if (!tried.add(batchUris.joinToString("|"))) continue
-                val sender = try {
-                    MediaStore.createDeleteRequest(contentResolver, batchUris).intentSender
-                } catch (e: Exception) {
-                    recordDeleteError(e)
-                    Log.w("AlbumMediaStore", "createDeleteRequest 被拒（${batchUris.size} 项）", e)
-                    continue
-                }
-                pendingDeleteResult = result
-                pendingDeleteRequested = batchUris.size
-                pendingDeleteTotal = items.size
-                try {
-                    deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
-                    return
-                } catch (e: Exception) {
-                    pendingDeleteResult = null
-                    pendingDeleteRequested = 0
-                    pendingDeleteTotal = 0
-                    recordDeleteError(e)
-                    Log.w("AlbumMediaStore", "无法弹出系统删除确认框", e)
-                }
-            }
+            // 不同厂商对批量删除的限制差别很大（小米尤其严格）：先整批交给系统，
+            // 被拒再退回逐条，且逐条要一直处理到没有剩余，而不是只弹第一张。
+            pendingDeleteSession = DeleteSession(
+                result = result,
+                total = items.size,
+                firstRejection = firstRejection,
+                remaining = deletable.toMutableList()
+            )
+            requestNextDelete()
+            return
         }
         // API < 30，或系统连逐条确认都不给：自己删（有写权限才删得掉）。
         var deleted = 0
@@ -377,12 +374,78 @@ class MainActivity : FlutterFragmentActivity() {
         )
     }
 
-    /** 先整批、再逐条：整批被拒时逐条重试，一条坏数据最多只能拖垮它自己。 */
-    private fun deleteBatches(items: List<DeleteCandidate>): List<List<DeleteCandidate>> {
-        val batches = ArrayList<List<DeleteCandidate>>()
-        batches.add(items)
-        for (item in items) batches.add(listOf(item))
-        return batches
+    /**
+     * 按「整批 → 对半 → 单条」的顺序试到能被系统接住为止；删完一批继续下一批，
+     * 直到没有剩余。
+     *
+     * 小米等厂商会拒绝一次删多张的请求（createDeleteRequest 直接抛异常），以前
+     * 这里退到单条后就直接收工，于是「删原图」只删掉了第一张。现在被拒就换更小
+     * 的批次继续，单条也弹不出来才算失败。
+     */
+    private fun requestNextDelete() {
+        val session = pendingDeleteSession ?: return
+        if (session.remaining.isEmpty()) {
+            finishDeleteSession()
+            return
+        }
+        val sizes = intArrayOf(session.remaining.size, session.remaining.size / 2, 1)
+        for (size in sizes) {
+            if (size <= 0) continue
+            val batch = session.remaining.take(size)
+            if (launchDeleteRequest(batch)) {
+                session.requested = batch
+                return
+            }
+        }
+        // 连单条都弹不出来：剩下的都算失败。
+        session.lastReason = lastDeleteReason ?: REASON_SYSTEM_REJECTED
+        session.remaining.clear()
+        finishDeleteSession()
+    }
+
+    /**
+     * 把一批交给系统确认框；返回 false 表示连请求都没建起来（厂商拒绝 / 弹不出来）。
+     * 这里只负责「弹」，「删了几条、还剩几条」由 ActivityResult 回调接着算。
+     */
+    private fun launchDeleteRequest(batch: List<DeleteCandidate>): Boolean {
+        val uris = batch.mapNotNull { it.uri }
+        if (uris.isEmpty()) return false
+        val sender = try {
+            MediaStore.createDeleteRequest(contentResolver, uris).intentSender
+        } catch (e: Exception) {
+            recordDeleteError(e)
+            Log.w("AlbumMediaStore", "createDeleteRequest 被拒（${uris.size} 项）", e)
+            return false
+        }
+        return try {
+            deleteLauncher.launch(IntentSenderRequest.Builder(sender).build())
+            true
+        } catch (e: Exception) {
+            recordDeleteError(e)
+            Log.w("AlbumMediaStore", "无法弹出系统删除确认框", e)
+            false
+        }
+    }
+
+    /** 整批删完（或用户取消/弹不出来）后收尾，Dart 侧只收到一次结果。 */
+    private fun finishDeleteSession() {
+        val session = pendingDeleteSession ?: return
+        pendingDeleteSession = null
+        val failed = (session.total - session.deleted).coerceAtLeast(0)
+        val reason = when {
+            failed <= 0 -> null
+            session.lastReason != null -> session.lastReason
+            session.firstRejection != null -> session.firstRejection
+            lastDeleteReason != null -> lastDeleteReason
+            else -> REASON_SYSTEM_REJECTED
+        }
+        session.result.success(
+            mapOf(
+                "deleted" to session.deleted,
+                "failed" to failed,
+                "reason" to reason
+            )
+        )
     }
 
     private fun recordDeleteError(e: Exception) {

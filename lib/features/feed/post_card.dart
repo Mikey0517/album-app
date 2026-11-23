@@ -88,6 +88,46 @@ class PostMediaCounter extends StatelessWidget {
   }
 }
 
+/// 大屏底部的页码圆点：和右上角的「3/4」同时显示。
+///
+/// 右上角那个告诉用户「一共几张」，底部这排是滑动手感的落点——手指滑到
+/// 哪一张，圆点也停在哪一张。
+class PostPageDots extends StatelessWidget {
+  final int count;
+  final int index;
+
+  const PostPageDots({super.key, required this.count, required this.index});
+
+  @override
+  Widget build(BuildContext context) {
+    if (count <= 1) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (var i = 0; i < count; i++)
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            margin: const EdgeInsets.symmetric(horizontal: 3),
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: i == index ? 0.95 : 0.45),
+              // 白点在浅色照片上也要看得见。
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.32),
+                  blurRadius: 3,
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// 图片自身的宽高比；拿不到尺寸时按 1:1。
 double feedMediaNaturalRatio(Media media) {
   final width = media.width ?? 0;
@@ -194,7 +234,7 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
                 onPageChanged: (value) => setState(() => _index = value),
                 itemBuilder: (context, i) => page(i),
               ),
-            if (medias.length > 1)
+            if (medias.length > 1) ...[
               Positioned(
                 top: 8,
                 right: 8,
@@ -204,6 +244,18 @@ class _PostMediaCarouselState extends State<_PostMediaCarousel> {
                   count: medias.length,
                 ),
               ),
+              // 底部圆点也留着：右上角是「一共几张」，底下一排是滑到第几张。
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 10,
+                child: IgnorePointer(
+                  child: Center(
+                    child: PostPageDots(count: medias.length, index: index),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),

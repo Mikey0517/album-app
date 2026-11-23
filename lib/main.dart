@@ -205,7 +205,7 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
       // context 在 await 之后现取现用，避免跨异步间隙持有。
       final ctx = _navigatorKey.currentContext;
       if (ctx == null || !ctx.mounted) return;
-      await showPatchReadyDialog(ctx);
+      await showPatchReadyDialog(ctx, notes: patch.notes);
     } catch (_) {
       // 热更新失败不应该打扰用户。
     }
