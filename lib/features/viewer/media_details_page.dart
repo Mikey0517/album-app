@@ -1,15 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/city_lookup.dart';
 import '../../core/design/radius.dart';
 import '../../core/formatters.dart';
 import '../../models/media.dart';
 
 /// 媒体详情页：拍摄时间、文件信息、拍摄地点，一路 label 平铺。
-class MediaDetailsPage extends StatelessWidget {
+///
+/// 地点优先显示**市级名称**（「成都市」），查不到（境外、离地级市太远、没有
+/// GPS）才回退到经纬度。
+class MediaDetailsPage extends StatefulWidget {
   const MediaDetailsPage({super.key, required this.media});
 
   final Media media;
+
+  @override
+  State<MediaDetailsPage> createState() => _MediaDetailsPageState();
+}
+
+class _MediaDetailsPageState extends State<MediaDetailsPage> {
+  /// 反查到的城市名；null = 还没查到 / 查不到（继续显示经纬度）。
+  String? _cityName;
+
+  Media get media => widget.media;
+
+  @override
+  void initState() {
+    super.initState();
+    if (media.latitude == null || media.longitude == null) return;
+    CityLookup.nearestCity(media.latitude, media.longitude).then((city) {
+      if (mounted && city != null) setState(() => _cityName = city);
+    });
+  }
 
   bool get _isVideo => media.isVideo;
 
@@ -42,6 +65,8 @@ class MediaDetailsPage extends StatelessWidget {
 
   String get _locationText {
     if (!_hasLocation) return '无位置信息';
+    final city = _cityName;
+    if (city != null) return city;
     final lat = media.latitude!;
     final lng = media.longitude!;
     return '${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}';

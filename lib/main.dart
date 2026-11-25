@@ -26,6 +26,8 @@ import 'widgets/app_glass.dart';
 import 'widgets/brand_mark.dart';
 import 'widgets/stable_view_insets.dart';
 import 'features/auth/login_page.dart';
+import 'features/hidden/four_finger_pull.dart';
+import 'features/hidden/hidden_space_page.dart';
 import 'features/home/home_page.dart';
 import 'features/update/changelog_dialog.dart';
 import 'features/update/force_update_dialog.dart';
@@ -100,7 +102,23 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
   /// [MaterialApp.builder] 那一层（稳定安全区 + 上传状态浮层）。建一次就存下：
   /// 每帧给 MaterialApp 一个新的 builder 会让 Builder 白重建一遍。
   late final Widget Function(BuildContext, Widget?) _chromeBuilder =
-      appChromeBuilder(_navigatorKey);
+      _buildChrome;
+
+  /// 全域外壳：稳定安全区 + 上传浮层，外面再套一层「四指下拉」手势。
+  Widget _buildChrome(BuildContext context, Widget? child) {
+    return FourFingerPullDetector(
+      onTrigger: _openHiddenSpace,
+      child: appChromeBuilder(_navigatorKey)(context, child),
+    );
+  }
+
+  /// 四指下拉进入隐藏空间；同一时间只开一个。
+  void _openHiddenSpace() {
+    if (HiddenSpacePage.isOpen) return;
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
+    navigator.push(HiddenSpacePage.route());
+  }
 
   @override
   void initState() {

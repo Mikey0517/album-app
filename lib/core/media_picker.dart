@@ -31,6 +31,46 @@ class PickedMediaResult {
   static const PickedMediaResult empty = PickedMediaResult(items: []);
 }
 
+/// 系统文件选择器选中的一个任意类型文件（已复制进 App 私有目录）。
+class PickedAnyFile {
+  final String path;
+  final String name;
+  final String mime;
+  final int size;
+
+  const PickedAnyFile({
+    required this.path,
+    required this.name,
+    required this.mime,
+    required this.size,
+  });
+}
+
+/// 任意类型文件（不限于图片/视频）：隐藏空间导入用。
+///
+/// 原生走 `ACTION_OPEN_DOCUMENT`（`*/*`、可多选），选完把内容复制到 [targetDir]
+/// 再返回路径——content URI 的临时授权只在当次可用，复制之后才是自己的文件。
+/// iOS 上还没有对应实现，直接抛一个可读的错误。
+Future<List<PickedAnyFile>> pickAnyFiles({required String targetDir}) async {
+  if (!Platform.isAndroid) {
+    throw UnsupportedError('当前系统暂不支持导入文件');
+  }
+  final raw = await _pickerChannel.invokeMapMethod<String, dynamic>(
+    'pickHiddenFiles',
+    {'targetDir': targetDir},
+  );
+  final items = (raw?['items'] as List<dynamic>?) ?? const [];
+  return [
+    for (final item in items.whereType<Map>())
+      PickedAnyFile(
+        path: item['path'] as String? ?? '',
+        name: item['name'] as String? ?? '',
+        mime: item['mime'] as String? ?? '',
+        size: (item['size'] as num?)?.toInt() ?? 0,
+      ),
+  ].where((file) => file.path.isNotEmpty).toList(growable: false);
+}
+
 /// 使用 Android 系统 Photo Picker，但不能走 image_picker 的脱敏副本：
 /// 原生端申请 ACCESS_MEDIA_LOCATION 并尽量通过 setRequireOriginal 读取原图，
 /// 保留小米 Motion Photo 的内嵌视频和位置信息。

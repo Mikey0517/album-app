@@ -110,6 +110,13 @@ class MainActivity : FlutterFragmentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { _ -> launchPicker() }
 
+    // 隐藏空间：任意类型的文件都用系统的“打开文档”选择器，选完复制进 App 私有目录。
+    private var pendingHiddenFileResult: MethodChannel.Result? = null
+    private var pendingHiddenFileDir: String? = null
+    private val pickHiddenDocuments = registerForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris -> handleHiddenFilesPicked(uris) }
+
     // 删除原图的批处理会话：整批被系统拒绝时退回单条，并且删完一条继续下一条，
     // 不能只删第一张就收工（小米等厂商会拒绝「一次删多张」的请求）。
     private var pendingDeleteSession: DeleteSession? = null
@@ -159,25 +166,47 @@ class MainActivity : FlutterFragmentActivity() {
         registerAppControl(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
-                if (call.method != "pickMultiple") {
-                    result.notImplemented()
-                    return@setMethodCallHandler
-                }
-                if (pendingResult != null) {
-                    result.error("busy", "已有选择器正在打开", null)
-                    return@setMethodCallHandler
-                }
-                pendingResult = result
-                pendingLimit = (call.argument<Int>("limit") ?: 100).coerceAtLeast(1)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                    ContextCompat.checkSelfPermission(
-                        this,
-                        Manifest.permission.ACCESS_MEDIA_LOCATION
-                    ) != PackageManager.PERMISSION_GRANTED
-                ) {
-                    requestMediaLocation.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
-                } else {
-                    launchPicker()
+                when (call.method) {
+                    "pickMultiple" -> {
+                        if (pendingResult != null) {
+                            result.error("busy", "已有选择器正在打开", null)
+                            return@setMethodCallHandler
+                        }
+                        pendingResult = result
+                        pendingLimit = (call.argument<Int>("limit") ?: 100).coerceAtLeast(1)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                            ContextCompat.checkSelfPermission(
+                                this,
+                                Manifest.permission.ACCESS_MEDIA_LOCATION
+                            ) != PackageManager.PERMISSION_GRANTED
+                        ) {
+                            requestMediaLocation.launch(Manifest.permission.ACCESS_MEDIA_LOCATION)
+                        } else {
+                            launchPicker()
+                        }
+                    }
+                    "pickHiddenFiles" -> {
+                        if (pendingHiddenFileResult != null) {
+                            result.error("busy", "已有文件选择器正在打开", null)
+                            return@setMethodCallHandler
+                        }
+                        val targetDir = call.argument<String>("targetDir")
+                        if (targetDir.isNullOrBlank()) {
+                            result.error("bad_args", "缺少目标目录", null)
+                            return@setMethodCallHandler
+                        }
+                        pendingHiddenFileResult = result
+                        pendingHiddenFileDir = targetDir
+                        try {
+                            // 任意类型：*/*
+                            pickHiddenDocuments.launch(arrayOf("*/*"))
+                        } catch (e: Exception) {
+                            pendingHiddenFileResult = null
+                            pendingHiddenFileDir = null
+                            result.error("picker_unavailable", "无法打开文件选择器", null)
+                        }
+                    }
+                    else -> result.notImplemented()
                 }
             }
     }
@@ -197,6 +226,68 @@ class MainActivity : FlutterFragmentActivity() {
         items: List<Map<String, String>>,
         failed: Int
     ): Map<String, Any> = mapOf("items" to items, "failed" to failed)
+
+    /** 隐藏空间的导入：把选中的任意类型文件复制进 [pendingHiddenFileDir]。 */
+    private fun handleHiddenFilesPicked(uris: List<Uri>?) {
+        val result = pendingHiddenFileResult ?: return
+        val targetDir = pendingHiddenFileDir
+        pendingHiddenFileResult = null
+        pendingHiddenFileDir = null
+        if (uris.isNullOrEmpty() || targetDir.isNullOrBlank()) {
+            result.success(mapOf("items" to emptyList<Map<String, Any>>(), "failed" to 0))
+            return
+        }
+        Thread {
+            val dir = File(targetDir).apply { mkdirs() }
+            val picked = ArrayList<Map<String, Any>>()
+            var failed = 0
+            for (uri in uris) {
+                try {
+                    picked.add(copyHiddenFile(uri, dir))
+                } catch (e: Exception) {
+                    failed++
+                    Log.w("AlbumHidden", "复制文件失败: $uri", e)
+                }
+            }
+            runOnUiThread {
+                result.success(mapOf("items" to picked, "failed" to failed))
+            }
+        }.start()
+    }
+
+    private fun copyHiddenFile(uri: Uri, dir: File): Map<String, Any> {
+        val name = queryDisplayName(uri) ?: "file_${System.currentTimeMillis()}"
+        val mime = contentResolver.getType(uri) ?: ""
+        val safeName = name.replace(Regex("[^A-Za-z0-9._\\-\\u4e00-\\u9fa5]"), "_")
+        val target = File(dir, "${UUID.randomUUID()}_$safeName")
+        contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "无法读取文件流" }
+            target.outputStream().use { output -> input.copyTo(output) }
+        }
+        return mapOf(
+            "path" to target.absolutePath,
+            "name" to name,
+            "mime" to mime,
+            "size" to target.length()
+        )
+    }
+
+    /** 文件选择器给的 Uri 只保证当次可读；展示名从 OpenableColumns 拿。 */
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (index >= 0) cursor.getString(index) else null
+                    } else {
+                        null
+                    }
+                }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     private fun handlePicked(uris: List<Uri>?) {
         val result = pendingResult ?: return

@@ -1,7 +1,7 @@
 name: album_app
 description: A warm, calm LAN family album.
 publish_to: "none"
-version: 1.2.95+99
+version: 1.2.96+100
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -52,3 +52,4 @@ flutter:
   assets:
     - assets/changelog.md
     - assets/brand_mark.png
+    - assets/cities.json
