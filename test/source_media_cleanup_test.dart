@@ -200,6 +200,17 @@ void main() {
       '1 项无法删除：系统不允许这个相册条目被第三方删除，请到系统相册里手动删除',
     );
     expect(
+      // 厂商相册的 URI：带上来源，出问题时能知道是哪一家。
+      sourceDeleteMessage(const SourceDeleteResult(
+        deleted: 0,
+        failed: 2,
+        reason: SourceDeleteFailure.unsupported,
+        provider: 'com.miui.gallery.open',
+      )),
+      '2 项无法删除：这些条目不在手机相册里（来源：com.miui.gallery.open），'
+          '请到系统相册里手动删除',
+    );
+    expect(
       sourceDeleteMessage(const SourceDeleteResult(deleted: 0, failed: 0)),
       '没能删除，请稍后在系统相册里手动删除',
     );

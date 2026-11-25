@@ -14,6 +14,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.security.keystore.KeyGenParameterSpec
@@ -204,6 +205,8 @@ class MainActivity : FlutterFragmentActivity() {
             val picked = ArrayList<Map<String, String>>()
             var failed = 0
             for ((index, uri) in uris.take(limit).withIndex()) {
+                // 不同厂商的选择器给的 URI 形态各不相同；删原图出问题时这行是唯一线索。
+                Log.i("AlbumPicker", "picked uri: $uri")
                 try {
                     picked.add(copyOriginal(uri, index))
                 } catch (e: Exception) {
@@ -483,41 +486,102 @@ class MainActivity : FlutterFragmentActivity() {
     /**
      * 一条待删项到底能不能交给系统删。
      *
-     * Photo Picker 给的是 content://media/picker/...，删除接口只认 MediaStore 的单项
-     * URI，所以先换成 content://media/<volume>/<images|video>/<id>：
-     * 1) Android 13+ 先试 MediaStore.getMediaUri（它知道条目真实的 volume 和集合）；
-     * 2) 换不出来时用 picker URI 末尾的媒体 id 按声明类型拼一个；
-     * 3) 拼出来的（或本来就是的）URI 再按 id 查一次库，确认条目还在。
-     * 明确查不到就剔除；查不了（没有读权限）交给系统确认框判定。
+     * 删除接口只认 MediaStore 的单项 URI，所以先把各种来路的地址换成
+     * content://media/<volume>/<images|video>/<id>：
+     * 1) Photo Picker：content://media/picker/...，先试 MediaStore.getMediaUri，
+     *    换不出来就用末尾的媒体 id 按声明类型拼一个；
+     * 2) DocumentsUI 回退（没有系统相册选择器的机型）：
+     *    content://...media.documents/document/image%3A<id>，id 就是媒体 id；
+     * 3) 本来就是 MediaStore 单项 URI 的，直接按 id + 集合核对。
+     * 拼出来的 URI 再按 id 查一次库：明确查不到就剔除；查不了（没有读权限）交给
+     * 系统确认框判定。
      */
     private fun validateDeleteCandidate(raw: String?, declaredVideo: Boolean): DeleteCandidate {
         val parsed = raw?.takeIf { it.isNotBlank() }
             ?.let { runCatching { Uri.parse(it) }.getOrNull() }
             ?: return DeleteCandidate.rejected(declaredVideo, REASON_UNSUPPORTED_URI)
         val picker = isPickerUri(parsed)
-        val specific = if (picker) resolvePickerUri(parsed, declaredVideo) else parsed
-        val parts = specific?.let { mediaItemParts(it) }
-            ?: return DeleteCandidate.rejected(
+        val parts = when {
+            picker -> resolvePickerUri(parsed, declaredVideo)?.let { mediaItemParts(it) }
+            else -> mediaItemParts(parsed) ?: documentParts(parsed)
+        } ?: run {
+            Log.i(
+                "AlbumMediaStore",
+                "换不成相册条目，剔除：${parsed.authority} ${parsed.path}"
+            )
+            return DeleteCandidate.rejected(
                 declaredVideo,
                 if (picker) REASON_UNRESOLVED_PICKER else REASON_UNSUPPORTED_URI
             )
-        val uri = ContentUris.withAppendedId(collectionUri(parts.volume, parts.collection), parts.id)
+        }
+        return resolveDeletableUri(parts)
+    }
+
+    /**
+     * 按 id 找一条真能交给系统的 MediaStore URI。
+     *
+     * 先按解析出的 volume/集合查；查不到再换另一个 external volume，最后再换另一个
+     * 集合（声明类型可能和真实集合相反）。没有读权限时 query 会返回空表，按 UNKNOWN
+     * 处理：交给系统确认框判定，不在这里剔除。
+     */
+    private fun resolveDeletableUri(parts: MediaItemParts): DeleteCandidate {
         val isVideo = parts.collection == COLLECTION_VIDEO
-        return when (probeExistence(uri, isVideo)) {
-            Existence.PRESENT, Existence.UNKNOWN -> DeleteCandidate(uri, isVideo, null)
-            Existence.MISSING -> {
-                // 声明的类型可能和真实集合相反（视频被拼进了 images）：换另一边再确认一次。
-                val other = if (isVideo) COLLECTION_IMAGES else COLLECTION_VIDEO
-                val otherUri =
-                    ContentUris.withAppendedId(collectionUri(parts.volume, other), parts.id)
-                when (probeExistence(otherUri, other == COLLECTION_VIDEO)) {
-                    Existence.PRESENT ->
-                        DeleteCandidate(otherUri, other == COLLECTION_VIDEO, null)
-                    Existence.UNKNOWN -> DeleteCandidate(uri, isVideo, null)
-                    Existence.MISSING -> DeleteCandidate.rejected(isVideo, REASON_NOT_FOUND)
-                }
+        val primary = ContentUris.withAppendedId(collectionUri(parts.volume, parts.collection), parts.id)
+        when (probeExistence(primary, isVideo)) {
+            Existence.PRESENT, Existence.UNKNOWN -> return DeleteCandidate(primary, isVideo, null)
+            Existence.MISSING -> {}
+        }
+        val otherVolume = when (parts.volume) {
+            MediaStore.VOLUME_EXTERNAL -> MediaStore.VOLUME_EXTERNAL_PRIMARY
+            MediaStore.VOLUME_EXTERNAL_PRIMARY -> MediaStore.VOLUME_EXTERNAL
+            else -> null
+        }
+        if (otherVolume != null) {
+            val alt = ContentUris.withAppendedId(
+                collectionUri(otherVolume, parts.collection), parts.id
+            )
+            when (probeExistence(alt, isVideo)) {
+                Existence.PRESENT, Existence.UNKNOWN -> return DeleteCandidate(alt, isVideo, null)
+                Existence.MISSING -> {}
             }
         }
+        // 声明的类型可能和真实集合相反（视频被拼进了 images）：换另一边再确认一次。
+        val otherCollection = if (isVideo) COLLECTION_IMAGES else COLLECTION_VIDEO
+        val otherIsVideo = otherCollection == COLLECTION_VIDEO
+        val swapped = ContentUris.withAppendedId(
+            collectionUri(parts.volume, otherCollection), parts.id
+        )
+        return when (probeExistence(swapped, otherIsVideo)) {
+            Existence.PRESENT, Existence.UNKNOWN -> DeleteCandidate(swapped, otherIsVideo, null)
+            Existence.MISSING -> DeleteCandidate.rejected(isVideo, REASON_NOT_FOUND)
+        }
+    }
+
+    /**
+     * DocumentsUI 回退时拿到的是 document URI：
+     * content://com.android.providers.media.documents/document/image%3A123。
+     *
+     * getDocumentId 解出来的 document id 形如 `image:123` / `video:123`，冒号后面
+     * 就是 MediaStore 的媒体 id；换成标准单项 URI 后校验/删除都走同一条路。
+     */
+    private fun documentParts(uri: Uri): MediaItemParts? {
+        if (uri.scheme != "content") return null
+        val documentId = try {
+            DocumentsContract.getDocumentId(uri)
+        } catch (_: Exception) {
+            // 不是标准的 documents URI：有的实现把 document id 放在最后一段。
+            uri.lastPathSegment ?: return null
+        }
+        val colon = documentId.indexOf(':')
+        if (colon <= 0) return null
+        val kind = documentId.substring(0, colon)
+        val id = documentId.substring(colon + 1).toLongOrNull()?.takeIf { it > 0 } ?: return null
+        val collection = when (kind) {
+            "image", "images" -> COLLECTION_IMAGES
+            "video", "videos" -> COLLECTION_VIDEO
+            else -> return null
+        }
+        return MediaItemParts(MediaStore.VOLUME_EXTERNAL, collection, id)
     }
 
     /**

@@ -90,7 +90,10 @@ String sourceDeleteMessage(SourceDeleteResult result) {
   }
   if (result.failed <= 0) return '没能删除，请稍后在系统相册里手动删除';
   final reasonText = sourceDeleteFailureText(result.reason);
-  return '${result.failed} 项无法删除：$reasonText，请到系统相册里手动删除';
+  // 厂商相册/文件选择器的 URI 不是标准相册条目时，带上来源，方便定位是哪一家。
+  final provider = result.provider;
+  final providerText = provider == null ? '' : '（来源：$provider）';
+  return '${result.failed} 项无法删除：$reasonText$providerText，请到系统相册里手动删除';
 }
 
 /// 失败原因 → 用户能看懂的一句话。

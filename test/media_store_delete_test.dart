@@ -253,6 +253,54 @@ void main() {
       );
     });
 
+    test('DocumentsUI 回退的 document URI 也放行（没有相册选择器的机型）', () {
+      expect(
+        sourceTargetRejection((
+          uri: 'content://com.android.providers.media.documents'
+              '/document/image%3A7',
+          isVideo: false,
+        )),
+        isNull,
+      );
+      expect(
+        sourceTargetRejection((
+          uri: 'content://com.android.providers.media.documents'
+              '/document/video%3A7',
+          isVideo: true,
+        )),
+        isNull,
+      );
+      // document id 说图片、调用方说是视频：对不上，交给剔除。
+      expect(
+        sourceTargetRejection((
+          uri: 'content://com.android.providers.media.documents'
+              '/document/image%3A7',
+          isVideo: true,
+        )),
+        SourceDeleteFailure.typeMismatch,
+      );
+      // document id 不是 image/video 集合：系统删不了。
+      expect(
+        sourceTargetRejection((
+          uri: 'content://com.android.providers.media.documents'
+              '/document/audio%3A7',
+          isVideo: false,
+        )),
+        SourceDeleteFailure.unsupported,
+      );
+    });
+
+    test('picker_get 变体也认（个别 ROM 的 Photo Picker）', () {
+      expect(
+        sourceTargetRejection((
+          uri: 'content://media/picker_get/0/com.android.providers.media'
+              '.photopicker/media/7',
+          isVideo: false,
+        )),
+        isNull,
+      );
+    });
+
     test('别的形态一律剔除', () {
       // 没有媒体 id 的 picker URI
       expect(
