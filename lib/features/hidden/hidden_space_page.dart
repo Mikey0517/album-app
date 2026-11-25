@@ -5,12 +5,14 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
-import '../../core/design/radius.dart';
 import '../../core/design/colors.dart';
+import '../../core/design/radius.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/formatters.dart';
+import '../../core/responsive.dart';
 import '../../core/hidden_space/hidden_lock.dart';
 import '../../core/hidden_space/hidden_space_store.dart';
+import '../album/album_detail_page.dart' show AlbumUploadFab;
 import '../feed/preview/image_preview_page.dart';
 import '../feed/preview/video_preview_page.dart';
 
@@ -318,30 +320,28 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text('${_files.length} 个文件', style: AppText.body),
-        actions: [
-          IconButton(
-            tooltip: '导入文件',
-            onPressed: _busy ? null : _importFiles,
-            icon: _busy
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white70,
-                    ),
-                  )
-                : const Icon(Icons.add),
-          ),
-        ],
       ),
       body: _files.isEmpty ? _buildEmpty() : _buildGrid(),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _busy ? null : _importFiles,
-        tooltip: '导入文件',
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        child: const Icon(Icons.add),
+      // 和相册页同一个上传按钮（玻璃圆钮），导入文件就是它。
+      floatingActionButton: Stack(
+        alignment: Alignment.center,
+        children: [
+          AlbumUploadFab(
+            label: '导入文件',
+            onPressed: _busy ? () {} : _importFiles,
+          ),
+          if (_busy)
+            const IgnorePointer(
+              child: SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white70,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -366,12 +366,13 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
   }
 
   Widget _buildGrid() {
+    // 几何照搬相册页的媒体网格：外边距 12、格间距 2、圆角 4、手机 4 列。
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 4,
-        mainAxisSpacing: 4,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: responsiveColumns(context, 4),
+        crossAxisSpacing: 2,
+        mainAxisSpacing: 2,
       ),
       itemCount: _files.length,
       itemBuilder: (context, index) {
@@ -422,7 +423,7 @@ class _HiddenTile extends StatelessWidget {
       onTap: onTap,
       onLongPress: onLongPress,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppRadius.sm),
+        borderRadius: BorderRadius.circular(AppRadius.xs),
         child: Container(
           color: Colors.white.withValues(alpha: 0.06),
           child: Stack(

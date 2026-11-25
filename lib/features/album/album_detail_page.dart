@@ -1449,7 +1449,14 @@ class AlbumUploadFab extends StatefulWidget {
 
   final VoidCallback onPressed;
 
-  const AlbumUploadFab({super.key, required this.onPressed});
+  /// 无障碍标签；隐藏空间复用它时文案是「导入文件」。
+  final String label;
+
+  const AlbumUploadFab({
+    super.key,
+    required this.onPressed,
+    this.label = '上传照片',
+  });
 
   @override
   State<AlbumUploadFab> createState() => _AlbumUploadFabState();
@@ -1462,7 +1469,7 @@ class _AlbumUploadFabState extends State<AlbumUploadFab> {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: '上传照片',
+      label: widget.label,
       child: Listener(
         onPointerDown: (_) => setState(() => _pressed = true),
         onPointerUp: (_) => setState(() => _pressed = false),
