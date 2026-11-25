@@ -80,7 +80,11 @@ SourceDeleteFailure? sourceTargetRejection(SourceTarget target) {
     return _documentTargetRejection(uri, target.isVideo);
   }
   if (uri.authority != 'media') {
-    return SourceDeleteFailure.unsupported;
+    // 厂商选择器可能不交原图 URI，而是给一份自己 provider 里的**副本**（小米
+    // HyperOS 的隐私保护就是：content://com.hyper.photopicker.fileProvider/
+    // cache/<时间戳>.jpg）。形状上认不出来，但原生能按 EXIF 拍摄时间 + 宽高
+    // 回查 MediaStore 找到原图，所以这里放行，交给原生判定。
+    return null;
   }
   final segments = uri.pathSegments;
   if (segments.isEmpty) return SourceDeleteFailure.unsupported;

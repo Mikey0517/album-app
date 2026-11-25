@@ -8,6 +8,7 @@ import android.content.ContentUris
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.ExifInterface
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -32,11 +33,15 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
 import java.security.KeyStore
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.system.exitProcess
@@ -300,8 +305,10 @@ class MainActivity : FlutterFragmentActivity() {
      */
     private fun resolveDeleteUris(items: List<Map<String, Any>>, result: MethodChannel.Result) {
         Thread {
+            val claimed = HashSet<Long>()
             val resolved = items.map { item ->
-                val candidate = validateDeleteCandidate(item)
+                // 这一步在后台线程：允许为「选择器只给了副本」的条目回查原图。
+                val candidate = validateDeleteCandidate(item, allowMatch = true, claimed = claimed)
                 mapOf<String, Any?>(
                     "uri" to candidate.uri?.toString(),
                     "video" to candidate.isVideo,
@@ -459,6 +466,9 @@ class MainActivity : FlutterFragmentActivity() {
         else "${e.javaClass.simpleName}: $message"
     }
 
+    /** 按拍摄时间回查到的候选原图：id + 文件大小（用来在连拍里挑最像的那张）。 */
+    private data class MatchCandidate(val id: Long, val size: Long)
+
     /**
      * 一条待删项的校验结论：uri 非空就是可以交给 createDeleteRequest 的
      * content://media/<volume>/<images|video>/<id>；为空时 reason 说明为什么剔除。
@@ -480,8 +490,12 @@ class MainActivity : FlutterFragmentActivity() {
     /** 条目还在不在：查得到 / 明确查不到 / 查不了（没有读权限，空表不能当结论）。 */
     private enum class Existence { PRESENT, MISSING, UNKNOWN }
 
-    private fun validateDeleteCandidate(item: Map<String, Any>): DeleteCandidate =
-        validateDeleteCandidate(item["uri"] as? String, item["video"] == true)
+    private fun validateDeleteCandidate(
+        item: Map<String, Any>,
+        allowMatch: Boolean = false,
+        claimed: MutableSet<Long>? = null
+    ): DeleteCandidate =
+        validateDeleteCandidate(item["uri"] as? String, item["video"] == true, allowMatch, claimed)
 
     /**
      * 一条待删项到底能不能交给系统删。
@@ -496,7 +510,12 @@ class MainActivity : FlutterFragmentActivity() {
      * 拼出来的 URI 再按 id 查一次库：明确查不到就剔除；查不了（没有读权限）交给
      * 系统确认框判定。
      */
-    private fun validateDeleteCandidate(raw: String?, declaredVideo: Boolean): DeleteCandidate {
+    private fun validateDeleteCandidate(
+        raw: String?,
+        declaredVideo: Boolean,
+        allowMatch: Boolean = false,
+        claimed: MutableSet<Long>? = null
+    ): DeleteCandidate {
         val parsed = raw?.takeIf { it.isNotBlank() }
             ?.let { runCatching { Uri.parse(it) }.getOrNull() }
             ?: return DeleteCandidate.rejected(declaredVideo, REASON_UNSUPPORTED_URI)
@@ -504,7 +523,7 @@ class MainActivity : FlutterFragmentActivity() {
         val parts = when {
             picker -> resolvePickerUri(parsed, declaredVideo)?.let { mediaItemParts(it) }
             else -> mediaItemParts(parsed) ?: documentParts(parsed)
-        } ?: run {
+        } ?: (if (allowMatch) matchPickedMedia(parsed, claimed) else null) ?: run {
             Log.i(
                 "AlbumMediaStore",
                 "换不成相册条目，剔除：${parsed.authority} ${parsed.path}"
@@ -640,6 +659,134 @@ class MainActivity : FlutterFragmentActivity() {
     private fun isPickerUri(uri: Uri): Boolean {
         val segments = uri.pathSegments
         return segments.isNotEmpty() && segments[0] == "picker"
+    }
+
+    /**
+     * 有些系统选择器不把原图 URI 交出来，而是给一份**去掉定位信息的副本**：
+     * 小米 HyperOS 的相册选择器就是这样（隐私保护），返回的是它自己 FileProvider
+     * 缓存里的 `cache/<时间戳>.jpg`。副本上没有媒体 id，但拍摄时间和像素尺寸还在，
+     * 于是按「EXIF 拍摄时间 + 宽高」回查 MediaStore：同一台手机拍的同一张照片这两项
+     * 对得上，命中唯一一条就换回标准单项 URI。
+     *
+     * 只在 [resolveDeleteUris]（后台线程）里启用；没读权限时查询为空，按没找到处理。
+     */
+    private fun matchPickedMedia(uri: Uri, claimed: MutableSet<Long>? = null): MediaItemParts? {
+        if (uri.scheme != "content") return null
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, bounds)
+            }
+        } catch (e: Exception) {
+            Log.i("AlbumMediaStore", "读取副本尺寸失败: $uri", e)
+            return null
+        }
+        val width = bounds.outWidth
+        val height = bounds.outHeight
+        if (width <= 0 || height <= 0) return null
+        val takenAt = readExifTakenAt(uri) ?: return null
+        // EXIF 只精确到秒，MediaStore 的 datetaken 与它可能有几秒偏差。
+        val window = 15_000L
+        val projection = arrayOf(MediaStore.MediaColumns._ID, "datetaken", MediaStore.MediaColumns.SIZE)
+        val selection = "datetaken BETWEEN ? AND ? AND width = ? AND height = ?"
+        val args = arrayOf(
+            (takenAt - window).toString(),
+            (takenAt + window).toString(),
+            width.toString(),
+            height.toString()
+        )
+        val cursor = try {
+            contentResolver.query(
+                collectionUri(MediaStore.VOLUME_EXTERNAL, COLLECTION_IMAGES),
+                projection,
+                selection,
+                args,
+                "datetaken ASC"
+            )
+        } catch (e: Exception) {
+            Log.i("AlbumMediaStore", "按拍摄时间回查失败: $uri", e)
+            return null
+        }
+        val candidates = ArrayList<MatchCandidate>()
+        cursor?.use {
+            val idIndex = it.getColumnIndex(MediaStore.MediaColumns._ID)
+            val sizeIndex = it.getColumnIndex(MediaStore.MediaColumns.SIZE)
+            while (it.moveToNext() && idIndex >= 0) {
+                val id = it.getLong(idIndex)
+                if (claimed?.contains(id) == true) continue
+                val size = if (sizeIndex >= 0) it.getLong(sizeIndex) else 0L
+                candidates.add(MatchCandidate(id, size))
+            }
+        }
+        if (candidates.isEmpty()) {
+            Log.i("AlbumMediaStore", "没有找到拍摄时间/尺寸一致的原图: $uri")
+            return null
+        }
+        // 连拍里同一秒可能有好几张同尺寸的照片：选择器只是把副本的 GPS EXIF
+        // 去掉，文件大小只差几百字节，按「尺寸最接近副本」挑最稳。
+        val copySize = querySize(uri) ?: 0L
+        val chosen = if (copySize > 0 && candidates.size > 1) {
+            candidates.minByOrNull { abs(it.size - copySize) }!!
+        } else {
+            candidates.first()
+        }
+        if (candidates.size > 1) {
+            Log.i(
+                "AlbumMediaStore",
+                "副本匹配到 ${candidates.size} 条候选，选 id=${chosen.id}" +
+                    "（副本 $copySize B，候选 ${chosen.size} B）"
+            )
+        }
+        claimed?.add(chosen.id)
+        return MediaItemParts(MediaStore.VOLUME_EXTERNAL, COLLECTION_IMAGES, chosen.id)
+    }
+
+    /** 副本的文件大小：去掉 GPS EXIF 后只比原图小一点，用来在多条候选里挑。 */
+    private fun querySize(uri: Uri): Long? {
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use {
+                if (it.moveToFirst()) {
+                    val index = it.getColumnIndex(OpenableColumns.SIZE)
+                    if (index >= 0 && !it.isNull(index)) return it.getLong(index)
+                }
+            }
+        } catch (_: Exception) {
+            // 换一种方式再取
+        }
+        return try {
+            contentResolver.openAssetFileDescriptor(uri, "r")?.use { it.length }?.takeIf { it > 0 }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** 读副本的 EXIF 拍摄时间（DateTimeOriginal 优先，退化到 DateTime）。 */
+    private fun readExifTakenAt(uri: Uri): Long? {
+        val exif = try {
+            contentResolver.openInputStream(uri)?.use { ExifInterface(it) }
+        } catch (e: Exception) {
+            Log.i("AlbumMediaStore", "读取副本 EXIF 失败: $uri", e)
+            null
+        } ?: return null
+        val raw = exif.getAttribute("DateTimeOriginal")
+            ?: exif.getAttribute("DateTime")
+            ?: return null
+        val offset = exif.getAttribute("OffsetTimeOriginal")
+        return parseExifDate(raw, offset)
+    }
+
+    private fun parseExifDate(value: String, offset: String?): Long? {
+        val zone = when {
+            offset.isNullOrBlank() -> TimeZone.getDefault()
+            else -> TimeZone.getTimeZone("GMT$offset")
+        }
+        return try {
+            SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US).apply {
+                timeZone = zone
+            }.parse(value)?.time
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**

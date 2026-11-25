@@ -253,6 +253,17 @@ void main() {
       );
     });
 
+
+    test('厂商选择器给的副本 URI 放行，交给原生按 EXIF 回查原图', () {
+      expect(
+        sourceTargetRejection((
+          uri: 'content://com.hyper.photopicker.fileProvider/cache/1795601712401.jpg',
+          isVideo: false,
+        )),
+        isNull,
+      );
+    });
+
     test('DocumentsUI 回退的 document URI 也放行（没有相册选择器的机型）', () {
       expect(
         sourceTargetRejection((
@@ -320,7 +331,7 @@ void main() {
         ),
         SourceDeleteFailure.unsupported,
       );
-      // 不是相册 authority
+      // document 路径但不带 image:/video: 的 id：系统删不了
       expect(
         sourceTargetRejection(
           (uri: 'content://com.android.providers.media.documents/document/1',
