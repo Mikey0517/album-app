@@ -494,6 +494,10 @@ LiquidGlassSettings appGlassPinnedSettings(BuildContext context) =>
       thickness: appGlassPinnedThickness,
       refractiveIndex: appGlassPinnedRefractiveIndex,
       chromaticAberration: appGlassPinnedChromaticAberration,
+      // 吸顶条不要上下那圈高光边：直边条横贯整屏，顶部贴着状态栏/页头，底部
+      // 是一条笔直的亮线，看起来就像一条 1px 边框（用户反馈「有条线」）。
+      // 玻璃本体的折射/模糊/scrim 不受影响，只是不再描这圈边。
+      rimHighlight: false,
     );
 
 /// premium chrome 的唯一一份参数表：footer 与三处吸顶条只在三个折射数上分家，
@@ -503,6 +507,7 @@ LiquidGlassSettings _appGlassPremiumChrome(
   required double thickness,
   required double refractiveIndex,
   required double chromaticAberration,
+  bool rimHighlight = true,
 }) {
   final dark = AppColors.isDark;
   return LiquidGlassSettings(
@@ -516,8 +521,8 @@ LiquidGlassSettings _appGlassPremiumChrome(
     saturation: appGlassChromeSaturation,
     chromaticAberration: chromaticAberration,
     frost: 0.0,
-    rimShade: dark ? 0.28 : 0.34,
-    rimLight: dark ? 0.34 : 0.42,
+    rimShade: rimHighlight ? (dark ? 0.28 : 0.34) : 0.0,
+    rimLight: rimHighlight ? (dark ? 0.34 : 0.42) : 0.0,
     edgeAbsorption: 0.12,
   );
 }

@@ -394,6 +394,9 @@ class UploadManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 还有上传在跑或排队：批量收尾之前不要弹「删除原图」的系统确认框。
+  bool get isBusy => _running || _queue.isNotEmpty;
+
   /// 取走「已上传成功、带相册 URI、还没提示过删除原图」的条目。
   /// 每个条目只会被取走一次，避免重复弹窗。
   List<UploadItem> takeCompletedWithSource({int? albumId}) {

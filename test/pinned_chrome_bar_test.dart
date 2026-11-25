@@ -326,11 +326,14 @@ void main() {
           reason: '${site.name} 的光照强度与 footer 不一致');
       expect(site.edgeAbsorption, closeTo(footer.edgeAbsorption, 1e-9),
           reason: '${site.name} 的边缘吸收与 footer 不一致（暗边会被放大）');
-      expect(site.rimShade, closeTo(footer.rimShade, 1e-9),
-          reason: '${site.name} 的 rimShade 与 footer 不一致');
       expect(site.tintAlpha, closeTo(footer.tintAlpha, 1e-9),
           reason: '${site.name} 的 tint 与 footer 不一致');
+      // 吸顶条**不要**那圈高光边：直边条横贯整屏，底部会留下一条像 1px 边框
+      // 的亮线（footer 是胶囊，那圈边是它圆角上的高光，保留）。
+      expect(site.rimShade, 0.0,
+          reason: '${site.name} 还画着 rimShade（底部那条亮线）');
     }
+    expect(footer.rimShade, greaterThan(0), reason: 'footer 的 rim 高光要保留');
     expect(footer.blur, appGlassChromeBlur);
     expect(footer.blur, 2, reason: '模糊保持 2：折射才不会被糊掉');
     expect(footer.saturation, appGlassChromeSaturation);

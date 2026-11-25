@@ -21,15 +21,8 @@ class _Harness extends StatelessWidget {
           builder: (inner) => TextButton(
             onPressed: () async {
               final messenger = ScaffoldMessenger.of(inner);
-              final confirmed = await confirmDeleteSourceMedia(
-                inner,
-                items,
-                targetLabel: '朋友圈',
-                action: '发布到',
-              );
-              if (confirmed) {
-                await deleteSourceMedia(items, messenger: messenger);
-              }
+              // 新流程：不再弹 App 自己的确认框，直接交给系统弹窗。
+              await deleteSourceMedia(items, messenger: messenger);
             },
             child: const Text('发布'),
           ),
@@ -72,7 +65,7 @@ void main() {
     messenger.setMockMethodCallHandler(channel, null);
   });
 
-  testWidgets('有源 URI 会弹窗，点删除会调用 MediaStore 删掉原图', (tester) async {
+  testWidgets('不再弹 App 自己的确认框，直接交给系统弹窗删原图', (tester) async {
     final calls = <MethodCall>[];
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
@@ -85,18 +78,12 @@ void main() {
       (uri: 'content://media/external/video/media/2', isVideo: true),
     ]));
 
-    expect(find.text('删除手机里的原图？'), findsNothing, reason: '还没发布，不能弹');
-
     await tester.tap(find.text('发布'));
     await tester.pumpAndSettle();
 
-    expect(find.text('删除手机里的原图？'), findsOneWidget);
-    expect(find.textContaining('2 项已发布到朋友圈。'), findsOneWidget);
-    expect(find.textContaining('删除后手机相册里就没有这些照片了'), findsOneWidget);
-    expect(find.text('保留'), findsOneWidget);
-
-    await tester.tap(find.text('删除'));
-    await tester.pumpAndSettle();
+    // 确认完全交给系统弹窗：App 这一层不再出现「删除手机里的原图？」。
+    expect(find.text('删除手机里的原图？'), findsNothing);
+    expect(find.text('保留'), findsNothing);
 
     expect(calls.map((call) => call.method),
         ['resolveDeleteUris', 'deleteUris'], reason: '先查库确认，再交给系统删');
@@ -142,11 +129,10 @@ void main() {
     expect(channelHit, isFalse);
   });
 
-  testWidgets('点保留不会调用 MediaStore', (tester) async {
-    var channelHit = false;
+  testWidgets('用户在系统弹窗里取消：提示原图还在，不抛异常', (tester) async {
     messenger.setMockMethodCallHandler(channel, (call) async {
-      channelHit = true;
-      return {'deleted': 1, 'failed': 0};
+      if (call.method == 'resolveDeleteUris') return _allResolvable(call);
+      return {'deleted': 0, 'failed': 1, 'reason': 'user_cancelled'};
     });
 
     await tester.pumpWidget(_app([
@@ -155,11 +141,8 @@ void main() {
     await tester.tap(find.text('发布'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('保留'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('删除手机里的原图？'), findsNothing);
-    expect(channelHit, isFalse);
+    expect(find.text('已取消删除，手机相册里的原图还在'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   test('删除结果文案：全部删除 / 部分删除 / 失败要说清原因和数量', () {

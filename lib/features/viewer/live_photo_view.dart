@@ -115,7 +115,9 @@ class _LivePhotoViewState extends State<LivePhotoView> {
 
   Future<void> _ensureVideo() async {
     if (_video != null || _initializing || !_canPlay) return;
-    _initializing = true;
+    // 按钮要立刻变成 loading：这一步不 setState 的话，用户点了播放只会看到
+    // 按钮还是播放箭头，直到视频初始化完才有反馈。
+    setState(() => _initializing = true);
     try {
       final url = fullUrl(widget.media.liveVideoUrl!);
       debugPrint('动态视频 URL: $url');
@@ -143,7 +145,11 @@ class _LivePhotoViewState extends State<LivePhotoView> {
       }
       widget.onPlayingChanged(false);
     } finally {
-      _initializing = false;
+      if (mounted) {
+        setState(() => _initializing = false);
+      } else {
+        _initializing = false;
+      }
     }
   }
 
@@ -272,12 +278,24 @@ class _LivePhotoViewState extends State<LivePhotoView> {
               ),
               shape: const CircleBorder(),
             ),
+            // 正在拉视频：按钮自己变成 loading（不再只在画面中间转圈），
+            // 用户点的那个位置就有反馈。
             icon: AnimatedSwitcher(
               duration: const Duration(milliseconds: 150),
-              child: Icon(
-                _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                key: ValueKey<bool>(_playing),
-              ),
+              child: _initializing
+                  ? const SizedBox(
+                      key: ValueKey<String>('live-photo-loading'),
+                      width: livePhotoPlayIconSize * 0.7,
+                      height: livePhotoPlayIconSize * 0.7,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Icon(
+                      _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                      key: ValueKey<bool>(_playing),
+                    ),
             ),
           ),
         ),
@@ -322,17 +340,6 @@ class _LivePhotoViewState extends State<LivePhotoView> {
               value: video.value,
               frameAspectRatio: _stillAspectRatio,
               child: VideoPlayer(video),
-            ),
-          if (_initializing)
-            const Center(
-              child: SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white70,
-                ),
-              ),
             ),
         ],
       ),

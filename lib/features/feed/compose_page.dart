@@ -454,22 +454,13 @@ class _ComposePageState extends State<ComposePage> {
         _publishing = false;
         _processingUpload = false;
       });
-      // 发布成功后照相册页的做法问一次要不要删手机里的原图。
-      // 先问再关：弹窗要挂在还活着的页面上（mounted），删除本身不挡着关闭。
+      // 发布成功：先关掉发布页，再把原图交给系统弹窗确认（App 自己不弹）。
+      // 系统确认框不依赖页面还在，取消/失败的结果用提前取好的 messenger 提示。
       final navigator = Navigator.of(context);
       final messenger = ScaffoldMessenger.of(context);
       final targets = _sourceMediaTargets();
-      final confirmed = await confirmDeleteSourceMedia(
-        context,
-        targets,
-        targetLabel: '朋友圈',
-        action: '发布到',
-      );
-      if (!mounted) return;
       navigator.pop(true);
-      if (confirmed) {
-        unawaited(deleteSourceMedia(targets, messenger: messenger));
-      }
+      unawaited(deleteSourceMedia(targets, messenger: messenger));
     } catch (e) {
       if (!mounted) return;
       setState(() {

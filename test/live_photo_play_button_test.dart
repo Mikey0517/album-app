@@ -1,7 +1,51 @@
+import 'dart:async';
+
 import 'package:album_app/features/viewer/live_photo_view.dart';
 import 'package:album_app/models/media.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:video_player/video_player.dart';
+
+/// 初始化挂起的替身控制器：让测试停在「点了播放、视频还在加载」那一帧。
+class _PendingVideoController extends VideoPlayerController {
+  _PendingVideoController()
+      : super.networkUrl(Uri.parse('https://example.test/1.mp4'));
+
+  final Completer<VideoPlayerValue> _ready = Completer<VideoPlayerValue>();
+
+  void finish() {
+    _ready.complete(const VideoPlayerValue(
+      duration: Duration(seconds: 2),
+      size: Size(1920, 1080),
+      isInitialized: true,
+    ));
+  }
+
+  @override
+  Future<void> initialize() async {
+    value = await _ready.future;
+  }
+
+  @override
+  Future<void> play() async {
+    value = value.copyWith(isPlaying: true);
+  }
+
+  @override
+  Future<void> pause() async {
+    value = value.copyWith(isPlaying: false);
+  }
+
+  @override
+  Future<void> seekTo(Duration position) async {
+    value = value.copyWith(position: position);
+  }
+
+  @override
+  Future<void> setVolume(double volume) async {
+    value = value.copyWith(volume: volume);
+  }
+}
 
 Media _live({bool withVideo = true}) => Media(
       id: 1,
@@ -28,6 +72,7 @@ void main() {
     required Media media,
     bool uiVisible = true,
     double bottomClearance = 0,
+    VideoPlayerController Function(Uri url)? controllerFactory,
   }) async {
     tester.view.physicalSize = _phone;
     tester.view.devicePixelRatio = 1.0;
@@ -47,6 +92,7 @@ void main() {
           uiVisible: uiVisible,
           bottomClearance: bottomClearance,
           onPlayingChanged: (_) {},
+          controllerFactory: controllerFactory,
         ),
       ),
     );
@@ -133,5 +179,43 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byKey(livePhotoPlayButtonKey), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('视频加载中：按钮自己变成 loading，加载完回到暂停图标', (tester) async {
+    final controller = _PendingVideoController();
+    await pumpView(
+      tester,
+      media: _live(),
+      controllerFactory: (_) => controller,
+    );
+
+    final button = find.byKey(livePhotoPlayButtonKey);
+    await tester.tap(button);
+    await tester.pump();
+    // AnimatedSwitcher 会把旧图标淡出 150ms，等这次切换走完再看。
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(
+      find.descendant(
+        of: button,
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+      reason: '点了播放、视频还没就绪：按钮原地转圈',
+    );
+    expect(
+      find.descendant(of: button, matching: find.byIcon(Icons.play_arrow_rounded)),
+      findsNothing,
+      reason: '加载中不该还是播放箭头',
+    );
+
+    controller.finish();
+    await tester.pumpAndSettle();
+
+    expect(
+      find.descendant(of: button, matching: find.byIcon(Icons.pause_rounded)),
+      findsOneWidget,
+      reason: '加载完开始播放，按钮变成暂停',
+    );
   });
 }

@@ -78,6 +78,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   bool _batchDownloading = false;
   bool _batchDeleting = false;
   bool _batchMoving = false;
+  // 系统删除确认框已经弹出来了，避免同一批重复弹。
+  bool _offeringDeleteOriginals = false;
   final Set<int> _selected = {};
   int? _coverSelectedId;
   final ScrollController _gridScroll = ScrollController();
@@ -132,7 +134,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     AlbumViewSettings.group.addListener(_onViewChanged);
     AppEvents.albumContentRevision.addListener(_onAlbumContentChanged);
     _gridScroll.addListener(_onScroll);
+    UploadManager.instance.addListener(_onUploadsChanged);
     _load();
+    // 上一次上传如果是在页面关掉之后才完成的，这里补一次系统确认框。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_offerDeleteOriginals());
+    });
   }
 
   @override
@@ -140,6 +147,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     AlbumViewSettings.sort.removeListener(_onViewChanged);
     AlbumViewSettings.group.removeListener(_onViewChanged);
     AppEvents.albumContentRevision.removeListener(_onAlbumContentChanged);
+    UploadManager.instance.removeListener(_onUploadsChanged);
     _gridScroll.removeListener(_onScroll);
     _gridScroll.dispose();
     super.dispose();
@@ -222,11 +230,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     });
   }
 
-  /// 上传成功后问用户要不要删掉手机相册里的原图（只删这一批上传成功的）。
-  /// 弹窗、删除与结果提示都在 [source_media_cleanup.dart] 里，动态页共用同一份。
+  /// 上传完成后把这一批原图交给系统弹窗确认删除（只删这一批上传成功的）。
+  ///
+  /// 不在 App 里再弹一层「删不删」：确认就是系统那个列出照片的弹窗。
   Future<void> _offerDeleteOriginals() async {
     // 删除系统相册原图只有 Android 实现，iOS 上不提示（也不提前消费掉待提示的条目）。
-    if (!supportsSourceMediaCleanup || !mounted) return;
+    if (!supportsSourceMediaCleanup || !mounted || _offeringDeleteOriginals) {
+      return;
+    }
     final uploaded =
         UploadManager.instance.takeCompletedWithSource(albumId: _album.id);
     if (uploaded.isEmpty) return;
@@ -236,13 +247,24 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     ];
     // 先取 messenger：删除要等系统确认弹窗，期间页面被关掉也要能提示结果。
     final messenger = ScaffoldMessenger.of(context);
-    final confirmed = await confirmDeleteSourceMedia(
-      context,
-      targets,
-      targetLabel: '「${_album.title}」',
-    );
-    if (!confirmed) return;
-    await deleteSourceMedia(targets, messenger: messenger);
+    _offeringDeleteOriginals = true;
+    try {
+      await deleteSourceMedia(targets, messenger: messenger);
+    } finally {
+      _offeringDeleteOriginals = false;
+    }
+  }
+
+  /// 上传状态一变就看看有没有「传完了、还没提示过删除原图」的条目。
+  ///
+  /// 以前只靠批量结束的回调，页面刚好被关掉就再也没人提示。现在队列空闲时补
+  /// 一次，进来时也会在首帧后补一次。
+  void _onUploadsChanged() {
+    if (!mounted || _offeringDeleteOriginals) return;
+    if (UploadManager.instance.isBusy) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_offerDeleteOriginals());
+    });
   }
 
   Future<void> _shareAlbum() async {
@@ -272,7 +294,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       sourceUris: picked.uris,
       onFinished: () {
         if (mounted) _load(silent: true);
-        unawaited(_offerDeleteOriginals());
       },
     );
   }

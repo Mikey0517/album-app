@@ -102,8 +102,10 @@ class AppSegmentedBar extends StatelessWidget {
     return SizedBox(
       key: surfaceKey,
       height: kAppSegmentedBarPillHeight,
-      // 水平居中：四段不铺满时也居中；低分辨率窄屏上宁可横滑也不压字。
-      child: Center(
+      // 靠左排：分类是「一组筛选项」，要从条带左边读起，不是一行居中的标题。
+      // 低分辨率窄屏上宁可横滑也不压字。
+      child: Align(
+        alignment: Alignment.centerLeft,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           physics: const ClampingScrollPhysics(),
