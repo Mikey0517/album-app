@@ -5,7 +5,9 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29"/>
 
+    <!-- 关掉系统/云备份：本地私有文件空间里的内容不能被手机云备份带走。 -->
     <application
+        android:allowBackup="false"
         android:label="家庭相册"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
