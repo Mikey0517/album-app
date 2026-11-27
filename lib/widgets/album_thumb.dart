@@ -89,14 +89,15 @@ class AlbumThumb extends StatelessWidget {
     final localPath = media.localPath;
     final Widget image;
     if (localPath != null && localPath.isNotEmpty) {
-      final thumbPath = media.localThumbPath;
-      final preview = media.localPreviewPath;
-      // HEIC/HEIF/AVIF 还没有 JPEG 预览时不能交给 Image.file：引擎解码会 abort。
-      if (thumbPath == null && preview == null && media.localImageNeedsPreview) {
+      // 本地媒体绝不能把「原文件」交给 Image.file：
+      // - 图片原图可能是数十 MP/HEIC，引擎全尺寸解码会 OOM 后 abort；
+      // - 视频原文件根本不是图片，ImageDecoder 按容器尺寸申请巨型 Bitmap 同样 abort。
+      // 所以：图片只认 JPEG 预览，视频只认抽帧封面；没有就先显示占位。
+      final displayPath =
+          media.isVideo ? media.localThumbPath : media.localPreviewPath;
+      if (displayPath == null || displayPath.isEmpty) {
         return _placeholder(showPlay: media.isVideo);
       }
-      // 本地视频用抽出来的封面帧；HEIC 等用原生转好的 JPEG；其余读原文件。
-      final displayPath = thumbPath ?? preview ?? localPath;
       image = Image.file(
         File(displayPath),
         fit: fit,

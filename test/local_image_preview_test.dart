@@ -64,4 +64,37 @@ void main() {
     );
     expect(find.byType(Image), findsNothing);
   });
+
+  testWidgets('本地视频没有封面时不把原视频交给 Image.file', (tester) async {
+    final media = Media(
+      id: 2,
+      type: 'video',
+      thumbUrl: null,
+      url: '',
+      width: null,
+      height: null,
+      durationMs: null,
+      takenAt: DateTime(2026),
+      createdAt: DateTime(2026),
+      postId: null,
+      originalFormat: 'mp4',
+      fileSize: 1,
+      localPath: '/tmp/not-exists.mp4',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 100,
+              height: 100,
+              child: AlbumThumb(media: media),
+            ),
+          ),
+        ),
+      ),
+    );
+    // 视频原文件被 ImageDecoder 当图片解会按容器尺寸申请巨型 Bitmap → abort。
+    expect(find.byType(Image), findsNothing);
+  });
 }

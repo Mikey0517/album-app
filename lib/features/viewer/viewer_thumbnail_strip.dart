@@ -131,6 +131,12 @@ class _ViewerThumbnailStripState extends State<ViewerThumbnailStrip> {
           final path = media.thumbUrl ?? media.url;
           final localPath = media.localPath;
           final isLocal = localPath != null && localPath.isNotEmpty;
+          // 本地媒体只认「预览图/视频封面」，没有就显示占位；绝不把原文件
+          // （大图或视频）交给 Image.file——那会 OOM 后 abort。
+          final localDisplay = isLocal
+              ? (media.isVideo ? media.localThumbPath : media.localPreviewPath)
+              : null;
+          final localSafe = localDisplay != null && localDisplay.isNotEmpty;
           return GestureDetector(
             onTap: () => widget.onSelected(index),
             child: AnimatedContainer(
@@ -149,14 +155,9 @@ class _ViewerThumbnailStripState extends State<ViewerThumbnailStrip> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (isLocal &&
-                        !(media.localImageNeedsPreview &&
-                            (media.localPreviewPath == null ||
-                                media.localPreviewPath!.isEmpty)))
+                    if (isLocal && localSafe)
                       Image.file(
-                        File(media.localThumbPath ??
-                            media.localPreviewPath ??
-                            localPath),
+                        File(localDisplay),
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Container(
                           color: AppColors.mediaPlaceholder,

@@ -79,6 +79,9 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
   /// 预览生成串行化：几十张大图同时解码会瞬间吃掉几百 MB。
   Future<void> _previewQueue = Future<void>.value();
 
+  /// 视频探测（时长/封面）也串行：每个都会拉起 ExoPlayer，并发同样吃内存。
+  Future<void> _probeQueue = Future<void>.value();
+
   /// 已经刷进网格的导入条数：导入队列每完成一条就刷新一次列表。
   int _importedSeen = 0;
 
@@ -200,8 +203,8 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
         unawaited(_detectNeedsPreview(file));
       }
       if (file.isVideo) {
-        unawaited(_probeDuration(file));
-        unawaited(_probeVideoThumb(file));
+        _enqueueProbe(() => _probeDuration(file));
+        _enqueueProbe(() => _probeVideoThumb(file));
       } else if (file.isImage && !_motion.containsKey(file.path)) {
         unawaited(_probeMotion(file));
       }
@@ -213,6 +216,11 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
     if (_needsPreview[file.path] == true) return;
     _needsPreview[file.path] = true;
     unawaited(_enqueuePreview(file));
+  }
+
+  /// 视频探测串行排队。
+  void _enqueueProbe(Future<void> Function() task) {
+    _probeQueue = _probeQueue.then((_) => task()).catchError((_) {});
   }
 
   /// 串行排队生成预览：一张解完再解下一张。
