@@ -259,10 +259,10 @@ class MainActivity : FlutterFragmentActivity() {
                 try {
                     val name = queryDisplayName(uri) ?: "file_${System.currentTimeMillis()}"
                     picked.add(
-                        mapOf(
+                        mapOf<String, Any>(
                             "uri" to uri.toString(),
                             "name" to name,
-                            "mime" to contentResolver.getType(uri) ?: "",
+                            "mime" to (contentResolver.getType(uri) ?: ""),
                             "size" to queryPickSize(uri)
                         )
                     )
