@@ -23,6 +23,7 @@ class ImageEncoder {
     String path, {
     int maxEdge = 512,
     int quality = 80,
+    bool allowDartFallback = true,
   }) async {
     if (Platform.isAndroid) {
       try {
@@ -38,6 +39,7 @@ class ImageEncoder {
         // 原生通道不可用时退回纯 Dart 实现。
       }
     }
+    if (!allowDartFallback) return null;
     return _encodeWithDart(path, maxEdge);
   }
 

@@ -8,6 +8,7 @@ import android.content.ContentUris
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.media.ExifInterface
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -986,15 +987,26 @@ class MainActivity : FlutterFragmentActivity() {
     private fun compressToJpeg(path: String, maxEdge: Int, quality: Int): ByteArray? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            Log.w("AlbumImage", "decode bounds failed: $path")
+            return null
+        }
         var sample = 1
         while (max(bounds.outWidth, bounds.outHeight) / (sample * 2) >= maxEdge) {
             sample *= 2
         }
+        // BitmapFactory 解 HEIF 最稳；解不了再退回 ImageDecoder（软件分配器，
+        // 绕开引擎里硬件分配器 + gain map 的 JNI 崩溃）。
         var bitmap = BitmapFactory.decodeFile(
             path,
             BitmapFactory.Options().apply { inSampleSize = sample }
-        ) ?: return null
+        )
+        if (bitmap == null) {
+            Log.i("AlbumImage", "BitmapFactory failed, retry via ImageDecoder: $path")
+            bitmap = decodeWithImageDecoder(path, sample)
+        }
+        if (bitmap == null) return null
+        Log.i("AlbumImage", "decoded ${bounds.outWidth}x${bounds.outHeight} -> ${bitmap.width}x${bitmap.height} ($path)")
         val scale = maxEdge.toFloat() / max(bitmap.width, bitmap.height)
         if (scale < 1f) {
             val scaled = Bitmap.createScaledBitmap(
@@ -1021,6 +1033,29 @@ class MainActivity : FlutterFragmentActivity() {
      * 这里把启动 Intent 交给 AlarmManager（setAlarmClock，见
      * [scheduleAlarmClockRelaunch]），进程退出之后再由系统拉起新进程。
      */
+    /** HEIF 兜底解码：软件分配器 + 捕获所有异常（Java 异常不会 abort 进程）。 */
+    private fun decodeWithImageDecoder(path: String, sample: Int): Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null
+        return try {
+            val source = ImageDecoder.createSource(File(path))
+            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                val longest = max(info.size.width, info.size.height)
+                if (longest > 0 && sample > 1) {
+                    val target = (longest / sample).coerceAtLeast(1)
+                    val scale = target.toFloat() / longest
+                    decoder.setTargetSize(
+                        (info.size.width * scale).roundToInt().coerceAtLeast(1),
+                        (info.size.height * scale).roundToInt().coerceAtLeast(1)
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("AlbumImage", "ImageDecoder decode failed: $path", e)
+            null
+        }
+    }
+
     private fun registerAppControl(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "album/app")
             .setMethodCallHandler { call, result ->

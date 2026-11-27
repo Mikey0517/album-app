@@ -38,6 +38,10 @@ class Media {
   /// 显示永远优先用它；保存到相册仍用 [localPath] 的原文件。
   final String? localPreviewPath;
 
+  /// 文件头识别结果：这个本地图是不是必须先用预览图（true/false）；
+  /// null 表示按扩展名判断。
+  final bool? localNeedsPreview;
+
   const Media({
     required this.id,
     required this.type,
@@ -60,6 +64,7 @@ class Media {
     this.localMotion = false,
     this.localThumbPath,
     this.localPreviewPath,
+    this.localNeedsPreview,
   });
 
   factory Media.fromJson(Map<String, dynamic> json) {
@@ -105,7 +110,9 @@ class Media {
   bool get localImageNeedsPreview =>
       isLocal &&
       !isVideo &&
-      const {'heic', 'heif', 'hif', 'heics', 'avif'}.contains(localExtension);
+      (localNeedsPreview ??
+          const {'heic', 'heif', 'hif', 'heics', 'avif'}
+              .contains(localExtension));
 
   bool get isVideo => type == 'video';
   bool get isImage => type == 'image';

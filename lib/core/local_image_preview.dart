@@ -31,15 +31,51 @@ class LocalImagePreview {
   static bool isSafeForFlutter(String path) =>
       !riskyExtensions.contains(extensionOf(path));
 
+  /// 扩展名可能骗人（比如 .jpg 实际是 HEIC）：再读文件头认一次品牌。
+  ///
+  /// HEIF/AVIF 的 `ftyp` box 在第 4~12 字节：`ftypheic` / `ftypheix` /
+  /// `ftyphevc` / `ftypmif1` / `ftypavif` 等。
+  static Future<bool> needsPreview(String path) async {
+    if (riskyExtensions.contains(extensionOf(path))) return true;
+    try {
+      final file = File(path);
+      final length = await file.length();
+      if (length < 12) return false;
+      final raf = await file.open();
+      try {
+        final header = await raf.read(12);
+        if (header.length < 12) return false;
+        final brand = String.fromCharCodes(header.sublist(4, 8));
+        if (brand != 'ftyp') return false;
+        final type = String.fromCharCodes(header.sublist(8, 12)).toLowerCase();
+        return type.startsWith('hei') ||
+            type == 'mif1' ||
+            type == 'avif' ||
+            type == 'avis';
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// 返回可安全显示的图片路径：
   /// - 安全格式：原路径；
   /// - HEIC/HEIF/AVIF：生成过的 JPEG 缓存，没有就现场生成；失败返回 null。
   static Future<String?> resolve(String path, {int maxEdge = 2560}) async {
     if (path.isEmpty) return null;
-    if (isSafeForFlutter(path)) return path;
+    if (!await needsPreview(path)) return path;
     final cached = await _cachePath(path);
     if (await cached.exists()) return cached.path;
-    final encoded = await ImageEncoder.encode(path, maxEdge: maxEdge, quality: 90);
+    // 绝不能走 Dart 的 instantiateImageCodec 兜底：它还是 ImageDecoder，
+    // 解 HEIC 一样会 abort 进程。原生失败就返回 null（页面显示占位）。
+    final encoded = await ImageEncoder.encode(
+      path,
+      maxEdge: maxEdge,
+      quality: 90,
+      allowDartFallback: false,
+    );
     if (encoded == null || encoded.bytes.isEmpty) return null;
     await cached.parent.create(recursive: true);
     await cached.writeAsBytes(encoded.bytes, flush: true);
