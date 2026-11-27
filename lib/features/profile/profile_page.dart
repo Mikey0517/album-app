@@ -19,6 +19,7 @@ import '../../core/design/text_styles.dart';
 import '../../core/feed_view_settings.dart';
 import '../../core/formatters.dart';
 import '../../core/page_backdrop_controller.dart';
+import '../../core/patch/patch_service.dart';
 import '../../core/server_config.dart';
 import '../../core/server_settings_dialog.dart';
 import '../../models/app_user.dart';
@@ -323,7 +324,13 @@ class _ProfilePageState extends State<ProfilePage> with WidgetsBindingObserver {
         if (result.patchApplied) {
           await showPatchReadyDialog(context, notes: patch.notes);
         } else {
-          _snack('补丁下载失败，请检查网络后重试');
+          // 补丁这条路走不通时把原因说清楚，并直接给安装包更新（有的话）。
+          final reason = PatchService.lastError ?? '未知原因';
+          _snack('补丁安装失败：$reason');
+          final fallback = result.release;
+          if (fallback != null) {
+            await showForceUpdateDialog(context, fallback);
+          }
         }
         return;
       }

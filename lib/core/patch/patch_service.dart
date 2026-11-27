@@ -57,6 +57,9 @@ class PatchService {
   /// 同一时间只跑一份下载：启动检查与「我的 → 检查更新」可能撞在一起。
   static Future<bool>? _applying;
 
+  /// 上一次补丁安装失败的原因（给「检查更新」提示用，也方便用户反馈）。
+  static String? lastError;
+
   /// 当前已安装的补丁版本，0 表示没有补丁。
   static int get appliedVersion => _appliedVersion;
 
@@ -116,23 +119,34 @@ class PatchService {
   }
 
   static Future<bool> _apply(PatchInfo info) async {
+    lastError = null;
     try {
-      if (!info.isValid) return false;
+      if (!info.isValid) {
+        lastError = '补丁信息无效';
+        return false;
+      }
       if (_apkVersionCode <= 0) {
         final package = await PackageInfo.fromPlatform();
         _apkVersionCode = int.tryParse(package.buildNumber) ?? 0;
       }
-      if (_apkVersionCode <= 0) return false;
+      if (_apkVersionCode <= 0) {
+        lastError = '读不到当前版本号';
+        return false;
+      }
 
       final bytes =
           await _download('${ServerConfig.current}${info.downloadPath}');
-      if (bytes == null) return false;
+      if (bytes == null) {
+        lastError ??= '下载失败（网络或服务器）';
+        return false;
+      }
 
       // 自己先验一遍 sha256：服务端给的就是它，校验通过再交给原生。
       if (info.sha256.isNotEmpty) {
         final actual = sha256.convert(bytes).toString();
         if (actual != info.sha256) {
           debugPrint('补丁校验失败：期望 ${info.sha256}，实际 $actual');
+          lastError = '文件校验失败（下载不完整）';
           return false;
         }
       }
@@ -144,12 +158,15 @@ class PatchService {
       );
       if (!result.ok) {
         debugPrint('补丁应用失败: ${result.error} ${result.message}');
+        lastError = '安装失败：${result.error?.name ?? '未知'}'
+            '${result.message == null ? '' : '（${result.message}）'}';
         return false;
       }
       _appliedVersion = info.patchVersion;
       return true;
     } catch (e, s) {
       debugPrint('热更新应用失败: $e $s');
+      lastError ??= '安装异常：$e';
       return false;
     }
   }
@@ -201,6 +218,7 @@ class PatchService {
       return Uint8List.fromList(data);
     } catch (e) {
       debugPrint('下载补丁失败: $e');
+      lastError ??= '下载失败：$e';
       return null;
     } finally {
       dio?.close(force: true);

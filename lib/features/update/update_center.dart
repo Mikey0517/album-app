@@ -47,6 +47,16 @@ class UpdateCenter {
     var applied = false;
     if (patch != null && downloadPatch) {
       applied = await (applyPatch ?? PatchService.apply)(patch);
+      if (!applied) {
+        // 补丁装不上（原生拒绝、黑名单、文件校验失败……）：退回安装包更新，
+        // 别让用户卡在「补丁下载失败」这一条死路上。
+        final release = await releaseFuture.catchError((_) => null);
+        return UpdateCheckResult(
+          patch: patch,
+          release: release,
+          patchApplied: false,
+        );
+      }
     }
     if (patch != null) {
       // 补丁优先：APK 的结论已经用不上了，别再等它把启动拖长；异常自己吞掉。

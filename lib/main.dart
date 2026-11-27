@@ -33,6 +33,7 @@ import 'features/update/changelog_dialog.dart';
 import 'features/update/force_update_dialog.dart';
 import 'features/update/patch_ready_dialog.dart';
 import 'features/update/update_center.dart';
+import 'features/update/update_service.dart';
 import 'features/update/version_tracker.dart';
 
 Future<void> main() async {
@@ -215,17 +216,38 @@ class _AlbumAppState extends State<AlbumApp> with WidgetsBindingObserver {
     }
   }
 
-  /// 下载并安装补丁，成功才弹「重启生效」；失败静默，下次检查再试。
+  /// 下载并安装补丁，成功才弹「重启生效」。
+  ///
+  /// 装不上（原生拒绝、黑名单、校验失败……）时不能一直卡在补丁这条路上：
+  /// 立刻退回安装包更新，服务端有新 APK 就弹更新框——否则每次启动都会重试
+  /// 同一个装不上的补丁，用户永远拿不到新版本。
   Future<void> _applyPatch(PatchInfo patch) async {
     try {
       final applied = await PatchService.apply(patch);
-      if (!applied || !mounted) return;
+      if (!mounted) return;
+      if (!applied) {
+        unawaited(_fallbackToAppUpdate());
+        return;
+      }
       // context 在 await 之后现取现用，避免跨异步间隙持有。
       final ctx = _navigatorKey.currentContext;
       if (ctx == null || !ctx.mounted) return;
       await showPatchReadyDialog(ctx, notes: patch.notes);
     } catch (_) {
       // 热更新失败不应该打扰用户。
+    }
+  }
+
+  /// 补丁装不上时的兜底：查一次安装包更新，有新版就弹强制更新框。
+  Future<void> _fallbackToAppUpdate() async {
+    try {
+      final release = await UpdateService.check();
+      if (release == null || !mounted) return;
+      final ctx = _navigatorKey.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      await showForceUpdateDialog(ctx, release);
+    } catch (_) {
+      // 兜底失败也不打扰用户，下次启动再试。
     }
   }
 
