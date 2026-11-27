@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -87,11 +88,17 @@ class _VideoViewState extends State<VideoView> {
   Future<void> _initialize() async {
     try {
       final uri = Uri.parse(fullUrl(widget.media.url));
+      final localPath = widget.media.localPath;
       final controller = widget.controllerFactory?.call(uri) ??
-          VideoPlayerController.networkUrl(
-            uri,
-            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-          );
+          (localPath != null && localPath.isNotEmpty
+              ? VideoPlayerController.file(
+                  File(localPath),
+                  videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+                )
+              : VideoPlayerController.networkUrl(
+                  uri,
+                  videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+                ));
       _controller = controller;
       await controller.initialize();
       controller.addListener(_onValueChanged);
@@ -194,6 +201,17 @@ class _VideoViewState extends State<VideoView> {
     final controller = _controller;
     final initialized = controller != null && controller.value.isInitialized;
     final thumb = widget.media.thumbUrl;
+    final localThumb = widget.media.localThumbPath;
+    final Widget? poster = localThumb != null && localThumb.isNotEmpty
+        ? Image.file(File(localThumb), fit: BoxFit.contain)
+        : (thumb != null && thumb.isNotEmpty
+            ? CachedNetworkImage(
+                cacheManager: MediaCache.manager,
+                imageUrl: fullUrl(thumb),
+                fit: BoxFit.contain,
+                errorWidget: (_, __, ___) => const SizedBox.shrink(),
+              )
+            : null);
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onToggleUi,
@@ -201,18 +219,13 @@ class _VideoViewState extends State<VideoView> {
         fit: StackFit.expand,
         children: [
           const ColoredBox(color: Colors.black),
-          if (thumb != null && thumb.isNotEmpty)
+          if (poster != null)
             IgnorePointer(
               child: Opacity(
                 opacity: initialized ? 0 : 1,
                 child: Hero(
                   tag: widget.heroTag,
-                  child: CachedNetworkImage(
-                    cacheManager: MediaCache.manager,
-                    imageUrl: fullUrl(thumb),
-                    fit: BoxFit.contain,
-                    errorWidget: (_, __, ___) => const SizedBox.shrink(),
-                  ),
+                  child: poster,
                 ),
               ),
             ),

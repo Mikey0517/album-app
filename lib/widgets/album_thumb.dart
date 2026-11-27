@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -83,28 +84,41 @@ class AlbumThumb extends StatelessWidget {
   }
 
   Widget _buildImage(BuildContext context) {
-    final path = imagePath ?? media.previewPath;
-    if ((!_usesOwnPath && media.thumbFailed) ||
-        path == null ||
-        path.isEmpty) {
-      return _placeholder(showPlay: media.isVideo);
-    }
-    final url = fullUrl(path);
     final background = backgroundColor ?? AppColors.mediaPlaceholder;
+    // 本地文件（隐藏空间）：直接读文件，不经过服务器；角标照旧。
+    final localPath = media.localPath;
+    final Widget image;
+    if (localPath != null && localPath.isNotEmpty) {
+      // 本地视频：用抽出来的封面帧（和相册里的视频缩略图一样是画面，不是占位图标）。
+      final thumbPath = media.localThumbPath;
+      image = Image.file(
+        File(thumbPath != null && thumbPath.isNotEmpty ? thumbPath : localPath),
+        fit: fit,
+        cacheWidth: cacheWidth,
+        errorBuilder: (_, __, ___) => _placeholder(showPlay: media.isVideo),
+      );
+    } else {
+      final path = imagePath ?? media.previewPath;
+      if ((!_usesOwnPath && media.thumbFailed) ||
+          path == null ||
+          path.isEmpty) {
+        return _placeholder(showPlay: media.isVideo);
+      }
+      image = CachedNetworkImage(
+        cacheManager: MediaCache.manager,
+        imageUrl: fullUrl(path),
+        fit: fit,
+        memCacheWidth: cacheWidth,
+        fadeInDuration: const Duration(milliseconds: 200),
+        placeholder: (context, url) => Container(color: background),
+        errorWidget: (context, url, error) => _placeholder(showPlay: false),
+      );
+    }
     return Stack(
       fit: StackFit.expand,
       children: [
         Container(color: background),
-        CachedNetworkImage(
-          cacheManager: MediaCache.manager,
-          imageUrl: url,
-          fit: fit,
-          memCacheWidth: cacheWidth,
-          fadeInDuration: const Duration(milliseconds: 200),
-          placeholder: (context, url) => Container(color: background),
-          errorWidget: (context, url, error) =>
-              _placeholder(showPlay: false),
-        ),
+        image,
         if (media.isVideo && showVideoBadge)
           Positioned(
             left: 4,

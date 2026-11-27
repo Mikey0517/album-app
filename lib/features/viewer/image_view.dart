@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -40,6 +42,45 @@ class _ImageViewState extends State<ImageView> {
   @override
   Widget build(BuildContext context) {
     final url = fullUrl(_stillPath);
+    final localPath = widget.media.localPath;
+    // 本地文件（隐藏空间）：和相册里一样是全屏 contain + 双指缩放，只是图源
+    // 换成文件。
+    final Widget still = localPath != null && localPath.isNotEmpty
+        ? Image.file(
+            File(localPath),
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => const Center(
+              child: Icon(Icons.broken_image_outlined,
+                  size: 48, color: Colors.white38),
+            ),
+          )
+        : CachedNetworkImage(
+            cacheManager: MediaCache.manager,
+            imageUrl: url,
+            fit: BoxFit.contain,
+            fadeInDuration: const Duration(milliseconds: 200),
+            placeholder: (_, __) => const SizedBox.expand(
+              child: ColoredBox(color: Colors.black),
+            ),
+            errorWidget: (_, __, ___) {
+              final thumb = widget.media.thumbUrl;
+              if (thumb != null && thumb.isNotEmpty && thumb != _stillPath) {
+                return CachedNetworkImage(
+                  cacheManager: MediaCache.manager,
+                  imageUrl: fullUrl(thumb),
+                  fit: BoxFit.contain,
+                  errorWidget: (_, __, ___) => const Center(
+                    child: Icon(Icons.broken_image_outlined,
+                        size: 48, color: Colors.white38),
+                  ),
+                );
+              }
+              return const Center(
+                child: Icon(Icons.broken_image_outlined,
+                    size: 48, color: Colors.white38),
+              );
+            },
+          );
     return ZoomablePhoto(
       onTap: widget.onTap,
       onZoomChanged: widget.onZoomChanged,
@@ -50,38 +91,7 @@ class _ImageViewState extends State<ImageView> {
         child: Center(
           child: Hero(
             tag: widget.heroTag,
-            child: Material(
-              color: Colors.transparent,
-              child: CachedNetworkImage(
-                cacheManager: MediaCache.manager,
-                imageUrl: url,
-                fit: BoxFit.contain,
-                fadeInDuration: const Duration(milliseconds: 200),
-                placeholder: (_, __) => const SizedBox.expand(
-                  child: ColoredBox(color: Colors.black),
-                ),
-                errorWidget: (_, __, ___) {
-                  final thumb = widget.media.thumbUrl;
-                  if (thumb != null &&
-                      thumb.isNotEmpty &&
-                      thumb != _stillPath) {
-                    return CachedNetworkImage(
-                      cacheManager: MediaCache.manager,
-                      imageUrl: fullUrl(thumb),
-                      fit: BoxFit.contain,
-                      errorWidget: (_, __, ___) => const Center(
-                        child: Icon(Icons.broken_image_outlined,
-                            size: 48, color: Colors.white38),
-                      ),
-                    );
-                  }
-                  return const Center(
-                    child: Icon(Icons.broken_image_outlined,
-                        size: 48, color: Colors.white38),
-                  );
-                },
-              ),
-            ),
+            child: Material(color: Colors.transparent, child: still),
           ),
         ),
       ),

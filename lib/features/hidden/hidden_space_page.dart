@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
 import '../../core/design/colors.dart';
@@ -12,9 +13,11 @@ import '../../core/formatters.dart';
 import '../../core/responsive.dart';
 import '../../core/hidden_space/hidden_lock.dart';
 import '../../core/hidden_space/hidden_space_store.dart';
+import '../../core/motion_photo.dart';
+import '../../models/media.dart';
+import '../../widgets/album_thumb.dart';
 import '../album/album_detail_page.dart' show AlbumUploadFab;
-import '../feed/preview/image_preview_page.dart';
-import '../feed/preview/video_preview_page.dart';
+import '../viewer/media_viewer_page.dart';
 
 /// 隐藏空间：四指下拉进入。
 ///
@@ -52,8 +55,20 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
 
   List<HiddenFile> _files = const [];
 
-  /// 视频缩略图：同一条只生成一次。
-  final Map<String, Future<Uint8List?>> _videoThumbs = {};
+  /// 本地图片是不是动态照片（XMP 探测），缩略图角标和全屏播放都靠它。
+  final Map<String, bool> _motion = {};
+
+  /// 本地视频时长（毫秒）；探测不到就记 null。
+  final Map<String, int?> _durations = {};
+
+  /// 本地视频的封面帧（临时目录里的 jpg），和相册里的视频缩略图同一种画面。
+  final Map<String, String?> _videoThumbPaths = {};
+
+  /// 本地视频的分辨率（探测时长时顺带拿到），详情页要用。
+  final Map<String, Size> _videoSizes = {};
+
+  /// 正在探测时避免重复排队。
+  final Set<String> _probing = {};
 
   @override
   void initState() {
@@ -157,6 +172,103 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
     final files = await HiddenSpaceStore.load();
     if (!mounted) return;
     setState(() => _files = files);
+    for (final file in files) {
+      if (file.isVideo) {
+        unawaited(_probeDuration(file));
+        unawaited(_probeVideoThumb(file));
+      } else if (file.isImage && !_motion.containsKey(file.path)) {
+        unawaited(_probeMotion(file));
+      }
+    }
+  }
+
+  /// 探测本地图片是不是动态照片：相册里的「动态」角标和大屏播放都靠这个。
+  Future<void> _probeMotion(HiddenFile file) async {
+    if (_probing.contains(file.path)) return;
+    _probing.add(file.path);
+    final motion = await isMotionPhotoFile(file.path);
+    _probing.remove(file.path);
+    _motion[file.path] = motion;
+    if (mounted) setState(() {});
+  }
+
+  /// 探测本地视频时长（缩略图上的时长角标和全屏控制条要用）。
+  Future<void> _probeDuration(HiddenFile file) async {
+    if (_durations.containsKey(file.path) || _probing.contains(file.path)) {
+      return;
+    }
+    _probing.add(file.path);
+    VideoPlayerController? controller;
+    try {
+      controller = VideoPlayerController.file(File(file.path));
+      await controller.initialize();
+      _durations[file.path] = controller.value.duration.inMilliseconds;
+      final size = controller.value.size;
+      if (size.width > 0 && size.height > 0) _videoSizes[file.path] = size;
+    } catch (_) {
+      _durations[file.path] = null;
+    } finally {
+      await controller?.dispose();
+      _probing.remove(file.path);
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// 抽一帧当本地视频的封面（相册里的视频缩略图也是画面，不是占位图标）。
+  Future<void> _probeVideoThumb(HiddenFile file) async {
+    if (_videoThumbPaths.containsKey(file.path) ||
+        _probing.contains(file.path)) {
+      return;
+    }
+    _probing.add(file.path);
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final dir = Directory('${tempDir.path}/hidden_thumbs');
+      if (!await dir.exists()) await dir.create(recursive: true);
+      _videoThumbPaths[file.path] = await VideoThumbnail.thumbnailFile(
+        video: file.path,
+        thumbnailPath: dir.path,
+        imageFormat: ImageFormat.JPEG,
+        maxWidth: 400,
+        quality: 75,
+      );
+    } catch (_) {
+      _videoThumbPaths[file.path] = null;
+    } finally {
+      _probing.remove(file.path);
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// 把可打开的文件转成 [Media]，交给全屏浏览页（图片/视频和相册里同一套）。
+  ({List<Media> items, Map<String, int> indexById}) _openableMedia() {
+    final items = <Media>[];
+    final indexById = <String, int>{};
+    for (final file in _files) {
+      if (!file.canOpen) continue;
+      final index = items.length;
+      indexById[file.id] = index;
+      items.add(
+        Media(
+          id: index,
+          type: file.isVideo ? 'video' : 'image',
+          thumbUrl: null,
+          url: '',
+          width: _videoSizes[file.path]?.width.round(),
+          height: _videoSizes[file.path]?.height.round(),
+          durationMs: _durations[file.path],
+          takenAt: file.addedAt,
+          createdAt: file.addedAt,
+          postId: null,
+          originalFormat: file.extension.isEmpty ? null : file.extension,
+          fileSize: file.size,
+          localPath: file.path,
+          localMotion: _motion[file.path] ?? false,
+          localThumbPath: _videoThumbPaths[file.path],
+        ),
+      );
+    }
+    return (items: items, indexById: indexById);
   }
 
   Future<void> _importFiles() async {
@@ -181,21 +293,14 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _open(HiddenFile file) {
-    if (file.isImage) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ImagePreviewPage(path: file.path),
-        ),
-      );
-    } else if (file.isVideo) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => VideoPreviewPage(path: file.path),
-        ),
-      );
-    }
-    // 其它类型先不处理。
+  void _open(List<Media> items, int index) {
+    Navigator.of(context).push(
+      MediaViewerPage.route(
+        items: items,
+        initialIndex: index,
+        heroPrefix: 'hidden_',
+      ),
+    );
   }
 
   Future<void> _delete(HiddenFile file) async {
@@ -230,7 +335,8 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
       return const Scaffold(
         backgroundColor: Colors.black,
         body: Center(
-          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+          child:
+              CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
         ),
       );
     }
@@ -240,9 +346,8 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
 
   Widget _buildGate() {
     final setting = !_configured;
-    final title = setting
-        ? (_firstPin == null ? '设置 6 位数字密码' : '再输入一次')
-        : '输入密码';
+    final title =
+        setting ? (_firstPin == null ? '设置 6 位数字密码' : '再输入一次') : '输入密码';
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -257,7 +362,8 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(title, style: AppText.titleMedium.copyWith(color: Colors.white)),
+                Text(title,
+                    style: AppText.titleMedium.copyWith(color: Colors.white)),
                 if (setting && _firstPin == null) ...[
                   const SizedBox(height: 6),
                   Text(
@@ -367,139 +473,97 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
 
   Widget _buildGrid() {
     // 几何照搬相册页的媒体网格：外边距 12、格间距 2、圆角 4、手机 4 列。
+    final columns = responsiveColumns(context, 4);
+    final width = MediaQuery.sizeOf(context).width;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final tile = (width - 12 * 2 - 2 * (columns - 1)) / columns;
+    final cacheWidth = (tile * dpr).round();
+    final openable = _openableMedia();
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: responsiveColumns(context, 4),
+        crossAxisCount: columns,
         crossAxisSpacing: 2,
         mainAxisSpacing: 2,
       ),
       itemCount: _files.length,
       itemBuilder: (context, index) {
         final file = _files[index];
-        return _HiddenTile(
-          file: file,
-          videoThumbnail: file.isVideo
-              ? _videoThumbs.putIfAbsent(file.path, () => _loadVideoThumb(file))
-              : null,
-          onTap: file.canOpen ? () => _open(file) : null,
+        final mediaIndex = openable.indexById[file.id];
+        if (mediaIndex == null) {
+          // 打不开的类型：图标 + 文件名（先只列出来）。
+          return _HiddenTile(file: file, onLongPress: () => _delete(file));
+        }
+        final media = openable.items[mediaIndex];
+        return AlbumThumb(
+          media: media,
+          radius: AppRadius.xs,
+          cacheWidth: cacheWidth,
+          // 时长还没探测完就先别挂角标，免得显示成 00:00。
+          showVideoBadge: !file.isVideo || media.durationMs != null,
+          heroTag: 'hidden_${media.id}',
+          onTap: () => _open(openable.items, mediaIndex),
           onLongPress: () => _delete(file),
         );
       },
     );
   }
-
-  Future<Uint8List?> _loadVideoThumb(HiddenFile file) async {
-    try {
-      return await VideoThumbnail.thumbnailData(
-        video: file.path,
-        imageFormat: ImageFormat.JPEG,
-        maxWidth: 240,
-        quality: 70,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
 }
 
-/// 隐藏空间里的一个格子：图片/视频显示缩略图，其它类型显示图标 + 文件名。
+/// 打不开的文件（PDF/文档/压缩包等）：图标 + 文件名 + 大小。
+///
+/// 图片/视频走 [AlbumThumb] 和相册里完全一致，这里只负责剩下的类型。
 class _HiddenTile extends StatelessWidget {
   final HiddenFile file;
-  final Future<Uint8List?>? videoThumbnail;
-  final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
-  const _HiddenTile({
-    required this.file,
-    this.videoThumbnail,
-    this.onTap,
-    this.onLongPress,
-  });
+  const _HiddenTile({required this.file, this.onLongPress});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
       onLongPress: onLongPress,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadius.xs),
         child: Container(
           color: Colors.white.withValues(alpha: 0.06),
-          child: Stack(
-            fit: StackFit.expand,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildPreview(),
-              if (file.isVideo)
-                const Center(
-                  child: Icon(Icons.play_circle_fill,
-                      size: 30, color: Colors.white70),
+              Icon(
+                _iconForExtension(file.extension),
+                size: 30,
+                color: Colors.white.withValues(alpha: 0.55),
+              ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  file.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10,
+                    height: 1.3,
+                    color: Colors.white.withValues(alpha: 0.62),
+                  ),
                 ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                formatBytes(file.size),
+                style: TextStyle(
+                  fontSize: 9,
+                  color: Colors.white.withValues(alpha: 0.38),
+                ),
+              ),
             ],
           ),
         ),
       ),
     );
   }
-
-  Widget _buildPreview() {
-    if (file.isImage) {
-      return Image.file(
-        File(file.path),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _icon(Icons.broken_image_outlined),
-      );
-    }
-    if (file.isVideo) {
-      final future = videoThumbnail;
-      if (future == null) return _icon(Icons.videocam_outlined);
-      return FutureBuilder<Uint8List?>(
-        future: future,
-        builder: (context, snapshot) {
-          final bytes = snapshot.data;
-          if (bytes == null) return _icon(Icons.videocam_outlined);
-          return Image.memory(bytes, fit: BoxFit.cover);
-        },
-      );
-    }
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(
-          _iconForExtension(file.extension),
-          size: 30,
-          color: Colors.white.withValues(alpha: 0.55),
-        ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          child: Text(
-            file.name,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 10,
-              height: 1.3,
-              color: Colors.white.withValues(alpha: 0.62),
-            ),
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          formatBytes(file.size),
-          style: TextStyle(
-            fontSize: 9,
-            color: Colors.white.withValues(alpha: 0.38),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _icon(IconData icon) => Center(
-        child: Icon(icon, size: 30, color: Colors.white.withValues(alpha: 0.5)),
-      );
 
   static IconData _iconForExtension(String extension) {
     switch (extension) {

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -127,6 +129,8 @@ class _ViewerThumbnailStripState extends State<ViewerThumbnailStrip> {
           final media = widget.items[index];
           final current = index == widget.currentIndex;
           final path = media.thumbUrl ?? media.url;
+          final localPath = media.localPath;
+          final isLocal = localPath != null && localPath.isNotEmpty;
           return GestureDetector(
             onTap: () => widget.onSelected(index),
             child: AnimatedContainer(
@@ -145,16 +149,30 @@ class _ViewerThumbnailStripState extends State<ViewerThumbnailStrip> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    CachedNetworkImage(
-                      cacheManager: MediaCache.manager,
-                      imageUrl: fullUrl(path),
-                      fit: BoxFit.cover,
-                      errorWidget: (_, __, ___) => Container(
-                        color: AppColors.mediaPlaceholder,
-                        child: Icon(Icons.image_outlined,
-                            size: 14, color: AppColors.textTertiary),
+                    if (isLocal)
+                      Image.file(
+                        File(media.localThumbPath != null &&
+                                media.localThumbPath!.isNotEmpty
+                            ? media.localThumbPath!
+                            : localPath),
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(
+                          color: AppColors.mediaPlaceholder,
+                          child: Icon(Icons.image_outlined,
+                              size: 14, color: AppColors.textTertiary),
+                        ),
+                      )
+                    else
+                      CachedNetworkImage(
+                        cacheManager: MediaCache.manager,
+                        imageUrl: fullUrl(path),
+                        fit: BoxFit.cover,
+                        errorWidget: (_, __, ___) => Container(
+                          color: AppColors.mediaPlaceholder,
+                          child: Icon(Icons.image_outlined,
+                              size: 14, color: AppColors.textTertiary),
+                        ),
                       ),
-                    ),
                     if (media.isVideo || media.isLivePhoto)
                       Container(
                         color: Colors.black26,

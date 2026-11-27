@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/motion_photo.dart';
 import '../../core/url_utils.dart';
 import '../../models/media.dart';
 import '../../core/media_cache.dart';
@@ -80,9 +82,10 @@ class _LivePhotoViewState extends State<LivePhotoView> {
   bool _autoStarted = false;
   bool _resetting = false;
 
-  bool get _canPlay =>
-      widget.media.liveVideoUrl != null &&
-      widget.media.liveVideoUrl!.trim().isNotEmpty;
+  bool get _canPlay => widget.media.isLocal
+      ? widget.media.localMotion
+      : (widget.media.liveVideoUrl != null &&
+          widget.media.liveVideoUrl!.trim().isNotEmpty);
 
   @override
   void initState() {
@@ -119,14 +122,30 @@ class _LivePhotoViewState extends State<LivePhotoView> {
     // 按钮还是播放箭头，直到视频初始化完才有反馈。
     setState(() => _initializing = true);
     try {
-      final url = fullUrl(widget.media.liveVideoUrl!);
-      debugPrint('动态视频 URL: $url');
-      final uri = Uri.parse(url);
-      final controller = widget.controllerFactory?.call(uri) ??
-          VideoPlayerController.networkUrl(
-            uri,
-            videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
-          );
+      final localPath = widget.media.localPath;
+      final VideoPlayerController controller;
+      if (localPath != null && localPath.isNotEmpty) {
+        // 本地动态照片：相册里那份内嵌 MP4 用 XMP 信息从文件尾部抽出来。
+        final info = await motionPhotoInfoFile(localPath);
+        if (info == null) throw StateError('不是动态照片');
+        final videoPath = await extractMotionVideoFile(localPath, info);
+        if (videoPath == null || videoPath.isEmpty) {
+          throw StateError('提取动态视频失败');
+        }
+        controller = VideoPlayerController.file(
+          File(videoPath),
+          videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+        );
+      } else {
+        final url = fullUrl(widget.media.liveVideoUrl!);
+        debugPrint('动态视频 URL: $url');
+        final uri = Uri.parse(url);
+        controller = widget.controllerFactory?.call(uri) ??
+            VideoPlayerController.networkUrl(
+              uri,
+              videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
+            );
+      }
       _video = controller;
       await controller.initialize();
       // 动态照片要带声音播放（和系统相册一致）。
@@ -303,6 +322,30 @@ class _LivePhotoViewState extends State<LivePhotoView> {
     );
   }
 
+  Widget _buildStill() {
+    final localPath = widget.media.localPath;
+    if (localPath != null && localPath.isNotEmpty) {
+      return Image.file(
+        File(localPath),
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const Center(
+          child: Icon(Icons.broken_image_outlined,
+              size: 48, color: Colors.white38),
+        ),
+      );
+    }
+    return CachedNetworkImage(
+      cacheManager: MediaCache.manager,
+      imageUrl: fullUrl(_stillPath),
+      fit: BoxFit.contain,
+      fadeInDuration: const Duration(milliseconds: 180),
+      errorWidget: (_, __, ___) => const Center(
+        child:
+            Icon(Icons.broken_image_outlined, size: 48, color: Colors.white38),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final video = _video;
@@ -320,16 +363,7 @@ class _LivePhotoViewState extends State<LivePhotoView> {
             tag: widget.heroTag,
             child: Material(
               color: Colors.transparent,
-              child: CachedNetworkImage(
-                cacheManager: MediaCache.manager,
-                imageUrl: fullUrl(_stillPath),
-                fit: BoxFit.contain,
-                fadeInDuration: const Duration(milliseconds: 180),
-                errorWidget: (_, __, ___) => const Center(
-                  child: Icon(Icons.broken_image_outlined,
-                      size: 48, color: Colors.white38),
-                ),
-              ),
+              child: _buildStill(),
             ),
           ),
           if (showVideo)

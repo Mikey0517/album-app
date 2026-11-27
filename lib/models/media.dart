@@ -13,11 +13,26 @@ class Media {
   final String? originalFormat;
   final bool thumbFailed;
   final bool favorite;
+
   /// 原图 EXIF 里的 GPS 坐标，没有就是 null。
   final double? latitude;
   final double? longitude;
+
   /// 原文件的字节数，服务端只对新上传的文件填充。
   final int? fileSize;
+
+  /// 本地文件路径：隐藏空间等「不经过服务器」的媒体用它。
+  ///
+  /// 有值时取图/放视频一律读本地文件，[url] / [thumbUrl] 不再使用；详情页、
+  /// 保存到相册、全屏浏览都能照常工作。
+  final String? localPath;
+
+  /// 本地文件是不是动态照片（XMP 探测过）。服务器媒体仍按 [liveVideoUrl] 判断。
+  final bool localMotion;
+
+  /// 本地视频的封面图（从视频里抽的第一帧，缓存在临时目录）。相册里的视频
+  /// 缩略图来自服务端，本地视频靠它把格子/全屏封面补齐。
+  final String? localThumbPath;
 
   const Media({
     required this.id,
@@ -37,6 +52,9 @@ class Media {
     this.latitude,
     this.longitude,
     this.fileSize,
+    this.localPath,
+    this.localMotion = false,
+    this.localThumbPath,
   });
 
   factory Media.fromJson(Map<String, dynamic> json) {
@@ -64,10 +82,13 @@ class Media {
     );
   }
 
+  /// 是不是本地文件（隐藏空间导入的那些）。
+  bool get isLocal => localPath != null && localPath!.isNotEmpty;
+
   bool get isVideo => type == 'video';
   bool get isImage => type == 'image';
   bool get isLivePhoto =>
-      liveVideoUrl != null && liveVideoUrl!.trim().isNotEmpty;
+      localMotion || (liveVideoUrl != null && liveVideoUrl!.trim().isNotEmpty);
 
   /// 没有缩略图时图片回退原图；视频只能显示占位块。
   String? get previewPath {

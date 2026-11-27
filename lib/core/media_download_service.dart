@@ -24,6 +24,22 @@ class MediaDownloadService {
     Media media, {
     void Function(double? progress)? onProgress,
   }) async {
+    // 本地文件（隐藏空间）：不用下载，直接写进系统相册。
+    if (media.isLocal) {
+      final path = media.localPath!;
+      try {
+        onProgress?.call(1);
+        await _ensureGalleryAccess();
+        if (media.isVideo) {
+          await Gal.putVideo(path, album: albumName);
+        } else {
+          await Gal.putImage(path, album: albumName);
+        }
+      } on GalException catch (e) {
+        throw MediaDownloadException(_galMessage(e.type));
+      }
+      return;
+    }
     final dio = Dio(
       BaseOptions(
         connectTimeout: const Duration(seconds: 15),
