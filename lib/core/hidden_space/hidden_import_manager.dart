@@ -5,6 +5,8 @@ import 'package:uuid/uuid.dart';
 
 import '../local_image_preview.dart';
 import '../media_picker.dart';
+import '../media_store.dart';
+import '../source_media_cleanup.dart';
 import 'hidden_space_store.dart';
 
 /// 导入队列里的一条：来源（content URI）+ 复制进度。
@@ -95,10 +97,12 @@ class HiddenImportManager extends ChangeNotifier {
     if (_running) return;
     _running = true;
     notifyListeners();
+    final batch = <HiddenImportItem>[];
     try {
       String? targetDir;
       for (final item in List<HiddenImportItem>.of(items)) {
         if (item.done || item.failed) continue;
+        batch.add(item);
         try {
           targetDir ??= (await HiddenSpaceStore.directory()).path;
           // 0.05 表示「这一条已经开始」，列表里能看到它从等待变成上传中。
@@ -132,6 +136,27 @@ class HiddenImportManager extends ChangeNotifier {
     } finally {
       _running = false;
       notifyListeners();
+    }
+    // 导入完成：和相册上传一样，把这一批的源文件交给系统确认删除。
+    unawaited(_offerDeleteSources(batch));
+  }
+
+  /// 导入成功的源文件 → 系统删除确认框（App 自己不弹第二层确认）。
+  Future<void> _offerDeleteSources(List<HiddenImportItem> batch) async {
+    if (!supportsSourceMediaCleanup) return;
+    final targets = <SourceTarget>[
+      for (final item in batch)
+        if (item.done)
+          (
+            uri: item.source.uri,
+            isVideo: item.source.mime.startsWith('video/'),
+          ),
+    ];
+    if (targets.isEmpty) return;
+    try {
+      await MediaStore.deleteSources(targets);
+    } catch (_) {
+      // 删除失败不打扰导入结果；系统相册里原文件还在，用户可手动删。
     }
   }
 

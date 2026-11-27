@@ -15,11 +15,16 @@ import '../../core/hidden_space/hidden_import_manager.dart';
 import '../../core/hidden_space/hidden_lock.dart';
 import '../../core/hidden_space/hidden_space_store.dart';
 import '../../core/local_image_preview.dart';
+import '../../core/media_download_service.dart';
 import '../../core/media_picker.dart';
 import '../../core/motion_photo.dart';
 import '../../models/media.dart';
 import '../../widgets/album_thumb.dart';
+import '../../widgets/app_segmented_bar.dart';
+import '../../widgets/selection_footer.dart';
 import '../album/album_detail_page.dart' show AlbumUploadFab;
+import '../album/album_media_filter.dart';
+import '../album/album_media_filter_bar.dart';
 import '../viewer/media_viewer_page.dart';
 import 'hidden_import_status.dart';
 
@@ -315,29 +320,10 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
     final indexById = <String, int>{};
     for (final file in _files) {
       if (!file.canOpen) continue;
-      final index = items.length;
-      indexById[file.id] = index;
-      items.add(
-        Media(
-          id: index,
-          type: file.isVideo ? 'video' : 'image',
-          thumbUrl: null,
-          url: '',
-          width: _videoSizes[file.path]?.width.round(),
-          height: _videoSizes[file.path]?.height.round(),
-          durationMs: _durations[file.path],
-          takenAt: file.addedAt,
-          createdAt: file.addedAt,
-          postId: null,
-          originalFormat: file.extension.isEmpty ? null : file.extension,
-          fileSize: file.size,
-          localPath: file.path,
-          localMotion: _motion[file.path] ?? false,
-          localThumbPath: _videoThumbPaths[file.path],
-          localPreviewPath: file.previewPath,
-          localNeedsPreview: _needsPreview[file.path],
-        ),
-      );
+      final media = _mediaForFile(file);
+      if (media == null) continue;
+      indexById[file.id] = items.length;
+      items.add(media);
     }
     return (items: items, indexById: indexById);
   }
@@ -370,13 +356,60 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
     );
   }
 
-  Future<void> _delete(HiddenFile file) async {
+  // ---------------------------------------------------------------------------
+  // 多选 / 分类
+  // ---------------------------------------------------------------------------
+
+  /// 长按进入多选；选中的文件在底部操作条上删除/下载。
+  final Set<String> _selected = {};
+
+  /// 批量操作进行中（下载/删除），按钮置灰防重复点。
+  bool _selectionBusy = false;
+
+  /// 顶部类型筛选，和相册同一套（全部 / 照片 / 动态照片 / 视频）。
+  AlbumMediaFilter _filter = AlbumMediaFilter.all;
+
+  bool get _selecting => _selected.isNotEmpty;
+
+  void _onTapFile(HiddenFile file, List<Media> openable, Map<String, int> indexById) {
+    if (_selecting) {
+      _toggleSelected(file);
+      return;
+    }
+    final mediaIndex = indexById[file.id];
+    // 打不开的类型点了不处理。
+    if (mediaIndex == null) return;
+    _open(openable, mediaIndex);
+  }
+
+  void _onLongPressFile(HiddenFile file) {
+    if (_selected.contains(file.id)) return;
+    setState(() => _selected.add(file.id));
+  }
+
+  void _toggleSelected(HiddenFile file) {
+    setState(() {
+      if (!_selected.add(file.id)) _selected.remove(file.id);
+    });
+  }
+
+  void _clearSelection() => setState(_selected.clear);
+
+  Future<void> _deleteSelected() async {
+    if (_selectionBusy) return;
+    final targets = [
+      for (final file in _files)
+        if (_selected.contains(file.id)) file,
+    ];
+    if (targets.isEmpty) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: AppColors.bgSurface,
-        title: const Text('删除这个文件？', style: AppText.titleMedium),
-        content: Text(file.name, style: AppText.bodySmall),
+        title: Text('删除选中的 ${targets.length} 个文件？',
+            style: AppText.titleMedium),
+        content: const Text('文件会从隐藏空间里移除，删除后无法恢复。',
+            style: AppText.bodySmall),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -390,10 +423,76 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
         ],
       ),
     );
-    if (confirmed != true) return;
-    final files = await HiddenSpaceStore.delete(file);
+    if (confirmed != true || !mounted) return;
+    setState(() => _selectionBusy = true);
+    var files = _files;
+    try {
+      for (final file in targets) {
+        files = await HiddenSpaceStore.delete(file);
+      }
+    } catch (e) {
+      if (mounted) _snack('删除失败：$e');
+    }
     if (!mounted) return;
-    setState(() => _files = files);
+    setState(() {
+      _files = files;
+      _selected.clear();
+      _selectionBusy = false;
+    });
+  }
+
+  /// 把选中的图片/视频存进系统相册（写的是原文件，不是预览图）。
+  Future<void> _downloadSelected() async {
+    if (_selectionBusy) return;
+    final targets = [
+      for (final file in _files)
+        if (_selected.contains(file.id) && file.canOpen) file,
+    ];
+    if (targets.isEmpty) {
+      _snack('选中的文件暂时不能保存到相册');
+      return;
+    }
+    setState(() => _selectionBusy = true);
+    var saved = 0;
+    var failed = 0;
+    for (final file in targets) {
+      final media = _mediaForFile(file);
+      if (media == null) {
+        failed++;
+        continue;
+      }
+      try {
+        await MediaDownloadService.save(media);
+        saved++;
+      } catch (_) {
+        failed++;
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _selectionBusy = false;
+      if (failed == 0) _selected.clear();
+    });
+    _snack(
+      failed == 0
+          ? '已保存 $saved 项到系统相册'
+          : '已保存 $saved 项，$failed 项失败',
+    );
+  }
+
+  /// 当前筛选下要显示的文件：打不开的类型只出现在「全部」里。
+  List<HiddenFile> _visibleFiles(
+    List<Media> items,
+    Map<String, int> indexById,
+  ) {
+    if (_filter == AlbumMediaFilter.all) return _files;
+    final visible = <HiddenFile>[];
+    for (final file in _files) {
+      final index = indexById[file.id];
+      if (index == null) continue;
+      if (_filter.matches(items[index])) visible.add(file);
+    }
+    return visible;
   }
 
   @override
@@ -486,18 +585,41 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
   }
 
   Widget _buildVault() {
+    final openable = _openableMedia();
+    final visible = _visibleFiles(openable.items, openable.indexById);
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        title: Text('${_files.length} 个文件', style: AppText.body),
-      ),
+      appBar: _selecting
+          ? _buildSelectionAppBar(visible)
+          : AppBar(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              title: Text('${_files.length} 个文件', style: AppText.body),
+              // 分类条和相册完全一致（同一份 AlbumMediaFilterBar）。
+              bottom: _files.isEmpty
+                  ? null
+                  : PreferredSize(
+                      preferredSize:
+                          const Size.fromHeight(kAppSegmentedBarHeight),
+                      child: AppSegmentedBarSurface(
+                        child: AlbumMediaFilterBar(
+                          counts: AlbumMediaCounts.from(openable.items),
+                          selected: _filter,
+                          onChanged: (filter) =>
+                              setState(() => _filter = filter),
+                        ),
+                      ),
+                    ),
+            ),
       body: Stack(
         children: [
           Positioned.fill(
-            child: _files.isEmpty ? _buildEmpty() : _buildGrid(),
+            child: _files.isEmpty
+                ? _buildEmpty()
+                : visible.isEmpty
+                    ? _buildFilteredEmpty()
+                    : _buildGrid(openable, visible),
           ),
           // 「上传中 x/y」状态条：只在隐藏空间里出现（退出就看不到），点开是
           // 和相册上传列表一样的面板。
@@ -514,10 +636,58 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
         ],
       ),
       // 和相册页同一个上传按钮（玻璃圆钮），导入文件就是它。
-      floatingActionButton: AlbumUploadFab(
-        label: '导入文件',
-        onPressed: _importFiles,
+      floatingActionButton: _selecting
+          ? null
+          : AlbumUploadFab(
+              label: '导入文件',
+              onPressed: _importFiles,
+            ),
+      bottomNavigationBar: _selecting ? _buildSelectionBar() : null,
+    );
+  }
+
+  AppBar _buildSelectionAppBar(List<HiddenFile> visible) {
+    return AppBar(
+      backgroundColor: Colors.black,
+      foregroundColor: Colors.white,
+      elevation: 0,
+      leading: IconButton(
+        onPressed: _clearSelection,
+        icon: const Icon(Icons.close),
+        tooltip: '取消选择',
       ),
+      title: Text('已选 ${_selected.length} 项', style: AppText.body),
+      actions: [
+        TextButton(
+          onPressed: visible.isEmpty
+              ? null
+              : () => setState(() {
+                    _selected
+                      ..clear()
+                      ..addAll(visible.map((file) => file.id));
+                  }),
+          child: const Text('全选'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSelectionBar() {
+    return SelectionFooter(
+      safeArea: true,
+      actions: [
+        SelectionFooterAction(
+          icon: Icons.download_outlined,
+          label: _selectionBusy ? '保存中' : '下载',
+          onTap: _selectionBusy ? null : _downloadSelected,
+        ),
+        SelectionFooterAction(
+          icon: Icons.delete_outline,
+          label: _selectionBusy ? '删除中' : '删除',
+          danger: true,
+          onTap: _selectionBusy ? null : _deleteSelected,
+        ),
+      ],
     );
   }
 
@@ -540,14 +710,33 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
     );
   }
 
-  Widget _buildGrid() {
+  Widget _buildFilteredEmpty() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_filter.emptyIcon,
+              size: 44, color: Colors.white.withValues(alpha: 0.32)),
+          const SizedBox(height: 12),
+          Text(
+            '筛选后没有${_filter.noun}',
+            style: AppText.body.copyWith(color: Colors.white70),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGrid(
+    ({List<Media> items, Map<String, int> indexById}) openable,
+    List<HiddenFile> visible,
+  ) {
     // 几何照搬相册页的媒体网格：外边距 12、格间距 2、圆角 4、手机 4 列。
     final columns = responsiveColumns(context, 4);
     final width = MediaQuery.sizeOf(context).width;
     final dpr = MediaQuery.devicePixelRatioOf(context);
     final tile = (width - 12 * 2 - 2 * (columns - 1)) / columns;
     final cacheWidth = (tile * dpr).round();
-    final openable = _openableMedia();
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(12, 12, 12, 96),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -555,26 +744,78 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
         crossAxisSpacing: 2,
         mainAxisSpacing: 2,
       ),
-      itemCount: _files.length,
+      itemCount: visible.length,
       itemBuilder: (context, index) {
-        final file = _files[index];
+        final file = visible[index];
         final mediaIndex = openable.indexById[file.id];
+        final Widget tileWidget;
         if (mediaIndex == null) {
           // 打不开的类型：图标 + 文件名（先只列出来）。
-          return _HiddenTile(file: file, onLongPress: () => _delete(file));
+          tileWidget = _HiddenTile(file: file);
+        } else {
+          final media = openable.items[mediaIndex];
+          tileWidget = AlbumThumb(
+            media: media,
+            radius: AppRadius.xs,
+            cacheWidth: cacheWidth,
+            // 时长还没探测完就先别挂角标，免得显示成 00:00。
+            showVideoBadge: !file.isVideo || media.durationMs != null,
+            heroTag: 'hidden_${media.id}',
+          );
         }
-        final media = openable.items[mediaIndex];
-        return AlbumThumb(
-          media: media,
-          radius: AppRadius.xs,
-          cacheWidth: cacheWidth,
-          // 时长还没探测完就先别挂角标，免得显示成 00:00。
-          showVideoBadge: !file.isVideo || media.durationMs != null,
-          heroTag: 'hidden_${media.id}',
-          onTap: () => _open(openable.items, mediaIndex),
-          onLongPress: () => _delete(file),
+        final selected = _selected.contains(file.id);
+        return GestureDetector(
+          onTap: () =>
+              _onTapFile(file, openable.items, openable.indexById),
+          onLongPress: () => _onLongPressFile(file),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              tileWidget,
+              if (selected) ...[
+                Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.32),
+                      borderRadius: BorderRadius.circular(AppRadius.xs),
+                    ),
+                  ),
+                ),
+                const Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Icon(Icons.check_circle,
+                      size: 20, color: Colors.white),
+                ),
+              ],
+            ],
+          ),
         );
       },
+    );
+  }
+
+  /// 把一条本地文件转成 [Media]：全屏浏览和保存到相册都用它。
+  Media? _mediaForFile(HiddenFile file) {
+    if (!file.canOpen) return null;
+    return Media(
+      id: _files.indexOf(file),
+      type: file.isVideo ? 'video' : 'image',
+      thumbUrl: null,
+      url: '',
+      width: _videoSizes[file.path]?.width.round(),
+      height: _videoSizes[file.path]?.height.round(),
+      durationMs: _durations[file.path],
+      takenAt: file.addedAt,
+      createdAt: file.addedAt,
+      postId: null,
+      originalFormat: file.extension.isEmpty ? null : file.extension,
+      fileSize: file.size,
+      localPath: file.path,
+      localMotion: _motion[file.path] ?? false,
+      localThumbPath: _videoThumbPaths[file.path],
+      localPreviewPath: file.previewPath,
+      localNeedsPreview: _needsPreview[file.path],
     );
   }
 }
@@ -584,14 +825,12 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
 /// 图片/视频走 [AlbumThumb] 和相册里完全一致，这里只负责剩下的类型。
 class _HiddenTile extends StatelessWidget {
   final HiddenFile file;
-  final VoidCallback? onLongPress;
 
-  const _HiddenTile({required this.file, this.onLongPress});
+  const _HiddenTile({required this.file});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onLongPress: onLongPress,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppRadius.xs),
         child: Container(

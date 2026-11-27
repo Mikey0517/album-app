@@ -3,9 +3,11 @@ import 'dart:io';
 import 'package:album_app/core/design/theme.dart';
 import 'package:album_app/core/hidden_space/hidden_lock.dart';
 import 'package:album_app/core/hidden_space/hidden_space_store.dart';
+import 'package:album_app/features/album/album_media_filter_bar.dart';
 import 'package:album_app/features/hidden/hidden_space_page.dart';
 import 'package:album_app/features/viewer/media_viewer_page.dart';
 import 'package:album_app/widgets/album_thumb.dart';
+import 'package:album_app/widgets/selection_footer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -179,5 +181,32 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.byType(MediaViewerPage), findsOneWidget);
+  });
+
+  testWidgets('有文件时顶部有分类条，长按进入多选并出下载/删除', (tester) async {
+    final file = File('${tempDir.path}/photo.png')..writeAsBytesSync(_tinyPng);
+    HiddenSpaceStore.overrideFiles = [
+      HiddenFile(
+        id: 'photo-1',
+        name: 'photo.png',
+        path: file.path,
+        mime: 'image/png',
+        size: file.lengthSync(),
+        addedAt: DateTime(2026, 1, 1),
+      ),
+    ];
+    await HiddenLock.setPin('123456');
+    await pumpPage(tester);
+    await enterPin(tester, '123456');
+
+    expect(find.byType(AlbumMediaFilterBar), findsOneWidget);
+    expect(find.text('全部'), findsOneWidget);
+
+    await tester.longPress(find.byType(AlbumThumb));
+    await tester.pumpAndSettle();
+    expect(find.text('已选 1 项'), findsOneWidget);
+    expect(find.byType(SelectionFooter), findsOneWidget);
+    expect(find.text('下载'), findsOneWidget);
+    expect(find.text('删除'), findsOneWidget);
   });
 }

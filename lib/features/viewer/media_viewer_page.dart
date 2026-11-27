@@ -69,6 +69,9 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   bool _downloading = false;
   double? _downloadProgress;
 
+  /// 视频播放时是否已经切到沉浸式（状态栏藏起来）。
+  bool _immersive = false;
+
   Media get _current => widget.items[_index.clamp(0, widget.items.length - 1)];
 
   @override
@@ -90,8 +93,23 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   void dispose() {
     _hideTimer?.cancel();
     _pageController.dispose();
+    _setImmersive(false);
     unawaited(lockAppPortrait());
     super.dispose();
+  }
+
+  /// 视频播放时藏起状态栏（沉浸式），暂停/离开时恢复 edgeToEdge。
+  ///
+  /// 只有播放中才藏：暂停时用户要看时间／进度，状态栏留着更自然。退出浏览页
+  /// 一定恢复，不然主界面会一直顶着一条黑边。
+  void _setImmersive(bool hidden) {
+    if (_immersive == hidden) return;
+    _immersive = hidden;
+    unawaited(
+      SystemChrome.setEnabledSystemUIMode(
+        hidden ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
+      ),
+    );
   }
 
   /// 从列表点进来时：视频按视频本身的横竖屏，图片固定竖屏。
@@ -133,6 +151,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
 
   void _onPlayingChanged(bool playing) {
     if (!mounted) return;
+    _setImmersive(playing);
     setState(() {
       _playing = playing;
       if (!playing) _uiVisible = true;
@@ -160,6 +179,8 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
 
   void _onPageChanged(int index) {
     _hideTimer?.cancel();
+    // 从视频滑到图片：_playing 归零，状态栏要跟回来。
+    _setImmersive(false);
     setState(() {
       _index = index;
       _playing = false;
