@@ -14,6 +14,7 @@ import '../../core/responsive.dart';
 import '../../core/hidden_space/hidden_import_manager.dart';
 import '../../core/hidden_space/hidden_lock.dart';
 import '../../core/hidden_space/hidden_space_store.dart';
+import '../../core/local_image_preview.dart';
 import '../../core/media_picker.dart';
 import '../../core/motion_photo.dart';
 import '../../models/media.dart';
@@ -189,12 +190,36 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
     if (!mounted) return;
     setState(() => _files = files);
     for (final file in files) {
+      if (file.isImage && file.previewPath == null) {
+        unawaited(_ensurePreview(file));
+      }
       if (file.isVideo) {
         unawaited(_probeDuration(file));
         unawaited(_probeVideoThumb(file));
       } else if (file.isImage && !_motion.containsKey(file.path)) {
         unawaited(_probeMotion(file));
       }
+    }
+  }
+
+  /// HEIC/HEIF/AVIF 图片：生成 JPEG 预览并记进索引；失败就先显示占位。
+  Future<void> _ensurePreview(HiddenFile file) async {
+    if (_probing.contains(file.path)) return;
+    if (LocalImagePreview.isSafeForFlutter(file.path)) return;
+    _probing.add(file.path);
+    try {
+      final preview = await LocalImagePreview.resolve(file.path);
+      if (preview != null && preview != file.path) {
+        await HiddenSpaceStore.updatePreview(file.path, preview);
+        final index = _files.indexWhere((item) => item.path == file.path);
+        if (index >= 0 && mounted) {
+          final updated = List<HiddenFile>.of(_files);
+          updated[index] = updated[index].copyWith(previewPath: preview);
+          setState(() => _files = updated);
+        }
+      }
+    } finally {
+      _probing.remove(file.path);
     }
   }
 
@@ -281,6 +306,7 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
           localPath: file.path,
           localMotion: _motion[file.path] ?? false,
           localThumbPath: _videoThumbPaths[file.path],
+          localPreviewPath: file.previewPath,
         ),
       );
     }

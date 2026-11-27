@@ -89,10 +89,16 @@ class AlbumThumb extends StatelessWidget {
     final localPath = media.localPath;
     final Widget image;
     if (localPath != null && localPath.isNotEmpty) {
-      // 本地视频：用抽出来的封面帧（和相册里的视频缩略图一样是画面，不是占位图标）。
       final thumbPath = media.localThumbPath;
+      final preview = media.localPreviewPath;
+      // HEIC/HEIF/AVIF 还没有 JPEG 预览时不能交给 Image.file：引擎解码会 abort。
+      if (thumbPath == null && preview == null && media.localImageNeedsPreview) {
+        return _placeholder(showPlay: media.isVideo);
+      }
+      // 本地视频用抽出来的封面帧；HEIC 等用原生转好的 JPEG；其余读原文件。
+      final displayPath = thumbPath ?? preview ?? localPath;
       image = Image.file(
-        File(thumbPath != null && thumbPath.isNotEmpty ? thumbPath : localPath),
+        File(displayPath),
         fit: fit,
         cacheWidth: cacheWidth,
         errorBuilder: (_, __, ___) => _placeholder(showPlay: media.isVideo),

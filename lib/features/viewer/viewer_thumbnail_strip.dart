@@ -149,12 +149,14 @@ class _ViewerThumbnailStripState extends State<ViewerThumbnailStrip> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (isLocal)
+                    if (isLocal &&
+                        !(media.localImageNeedsPreview &&
+                            (media.localPreviewPath == null ||
+                                media.localPreviewPath!.isEmpty)))
                       Image.file(
-                        File(media.localThumbPath != null &&
-                                media.localThumbPath!.isNotEmpty
-                            ? media.localThumbPath!
-                            : localPath),
+                        File(media.localThumbPath ??
+                            media.localPreviewPath ??
+                            localPath),
                         fit: BoxFit.cover,
                         errorBuilder: (_, __, ___) => Container(
                           color: AppColors.mediaPlaceholder,

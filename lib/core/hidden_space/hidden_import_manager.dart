@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
+import '../local_image_preview.dart';
 import '../media_picker.dart';
 import 'hidden_space_store.dart';
 
@@ -105,11 +106,17 @@ class HiddenImportManager extends ChangeNotifier {
           notifyListeners();
           final copied =
               await copyHiddenSource(item.source, targetDir: targetDir);
+          // HEIC/HEIF/AVIF 先转 JPEG 预览：直接 Image.file 会让引擎 abort。
+          final preview = item.source.mime.startsWith('image/')
+              ? await LocalImagePreview.resolve(copied.path)
+              : null;
           await HiddenSpaceStore.addImported(
             path: copied.path,
             name: item.source.name,
             mime: item.source.mime,
             size: copied.size,
+            previewPath:
+                preview != null && preview != copied.path ? preview : null,
           );
           item.path = copied.path;
           item.progress = 1;

@@ -16,6 +16,10 @@ class HiddenFile {
   final int size;
   final DateTime addedAt;
 
+  /// HEIC/HEIF/AVIF 图片的安全预览图（原生解码出的 JPEG，缓存在临时目录）。
+  /// 其它格式为 null，直接显示 [path]。
+  final String? previewPath;
+
   const HiddenFile({
     required this.id,
     required this.name,
@@ -23,6 +27,7 @@ class HiddenFile {
     required this.mime,
     required this.size,
     required this.addedAt,
+    this.previewPath,
   });
 
   static const Set<String> _imageExtensions = {
@@ -68,7 +73,18 @@ class HiddenFile {
         'mime': mime,
         'size': size,
         'added_at': addedAt.toIso8601String(),
+        if (previewPath != null) 'preview_path': previewPath,
       };
+
+  HiddenFile copyWith({String? previewPath}) => HiddenFile(
+        id: id,
+        name: name,
+        path: path,
+        mime: mime,
+        size: size,
+        addedAt: addedAt,
+        previewPath: previewPath ?? this.previewPath,
+      );
 
   static HiddenFile? tryParse(Object? raw) {
     if (raw is! Map) return null;
@@ -87,6 +103,7 @@ class HiddenFile {
       mime: raw['mime'] as String? ?? '',
       size: size,
       addedAt: added,
+      previewPath: raw['preview_path'] as String?,
     );
   }
 }
@@ -181,6 +198,7 @@ class HiddenSpaceStore {
     required String name,
     required String mime,
     required int size,
+    String? previewPath,
   }) async {
     final file = HiddenFile(
       id: const Uuid().v4(),
@@ -189,6 +207,7 @@ class HiddenSpaceStore {
       mime: mime,
       size: size,
       addedAt: DateTime.now(),
+      previewPath: previewPath,
     );
     final files = await load();
     // 目录扫描可能已经把它扫进来了（先落盘再记索引）：按路径认，别重复，
@@ -203,6 +222,7 @@ class HiddenSpaceStore {
         mime: mime.isEmpty ? existing.mime : mime,
         size: size > 0 ? size : existing.size,
         addedAt: existing.addedAt,
+        previewPath: previewPath ?? existing.previewPath,
       );
       files[i] = updated;
       await saveIndex(files);
@@ -211,6 +231,19 @@ class HiddenSpaceStore {
     files.add(file);
     await saveIndex(files);
     return file;
+  }
+
+  /// 记下某张图的预览图路径（HEIC 解码出来的 JPEG）。
+  static Future<void> updatePreview(String path, String previewPath) async {
+    final files = await load();
+    var changed = false;
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].path != path) continue;
+      files[i] = files[i].copyWith(previewPath: previewPath);
+      changed = true;
+      break;
+    }
+    if (changed) await saveIndex(files);
   }
 
   /// 删除一个文件（物理文件 + 索引）。

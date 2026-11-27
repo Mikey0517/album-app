@@ -34,6 +34,10 @@ class Media {
   /// 缩略图来自服务端，本地视频靠它把格子/全屏封面补齐。
   final String? localThumbPath;
 
+  /// 本地图片的安全预览图（HEIC/HEIF/AVIF 先用原生解码成 JPEG）。
+  /// 显示永远优先用它；保存到相册仍用 [localPath] 的原文件。
+  final String? localPreviewPath;
+
   const Media({
     required this.id,
     required this.type,
@@ -55,6 +59,7 @@ class Media {
     this.localPath,
     this.localMotion = false,
     this.localThumbPath,
+    this.localPreviewPath,
   });
 
   factory Media.fromJson(Map<String, dynamic> json) {
@@ -84,6 +89,23 @@ class Media {
 
   /// 是不是本地文件（隐藏空间导入的那些）。
   bool get isLocal => localPath != null && localPath!.isNotEmpty;
+
+  /// 本地图片的扩展名。
+  String get localExtension {
+    final path = localPath;
+    if (path == null) return '';
+    final name = path.split('/').last;
+    final dot = name.lastIndexOf('.');
+    if (dot < 0 || dot == name.length - 1) return '';
+    return name.substring(dot + 1).toLowerCase();
+  }
+
+  /// HEIC/HEIF/AVIF 不能直接交给 `Image.file`（引擎解码会 abort 进程），
+  /// 必须先有 [localPreviewPath] 才能显示。
+  bool get localImageNeedsPreview =>
+      isLocal &&
+      !isVideo &&
+      const {'heic', 'heif', 'hif', 'heics', 'avif'}.contains(localExtension);
 
   bool get isVideo => type == 'video';
   bool get isImage => type == 'image';

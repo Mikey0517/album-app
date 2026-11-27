@@ -325,8 +325,16 @@ class _LivePhotoViewState extends State<LivePhotoView> {
   Widget _buildStill() {
     final localPath = widget.media.localPath;
     if (localPath != null && localPath.isNotEmpty) {
+      // HEIC/HEIF 没有 JPEG 预览时不交给 Image.file（引擎解码会 abort）。
+      if (widget.media.localImageNeedsPreview &&
+          (widget.media.localPreviewPath == null ||
+              widget.media.localPreviewPath!.isEmpty)) {
+        return const Center(
+          child: Icon(Icons.image_outlined, size: 48, color: Colors.white38),
+        );
+      }
       return Image.file(
-        File(localPath),
+        File(widget.media.localPreviewPath ?? localPath),
         fit: BoxFit.contain,
         errorBuilder: (_, __, ___) => const Center(
           child: Icon(Icons.broken_image_outlined,
