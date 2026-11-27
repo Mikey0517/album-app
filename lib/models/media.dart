@@ -110,9 +110,7 @@ class Media {
   bool get localImageNeedsPreview =>
       isLocal &&
       !isVideo &&
-      (localNeedsPreview ??
-          const {'heic', 'heif', 'hif', 'heics', 'avif'}
-              .contains(localExtension));
+      (localNeedsPreview ?? true);
 
   bool get isVideo => type == 'video';
   bool get isImage => type == 'image';

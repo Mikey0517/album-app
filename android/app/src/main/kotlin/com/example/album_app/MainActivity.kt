@@ -976,7 +976,9 @@ class MainActivity : FlutterFragmentActivity() {
                                 result.success(bytes)
                             }
                         }
-                    } catch (e: Exception) {
+                    } catch (e: Throwable) {
+                        // OOM 也是 Error：必须兜住，否则线程死掉、甚至把进程带走。
+                        Log.w("AlbumImage", "encode failed: ${e.message}", e)
                         runOnUiThread { result.error("encode_failed", e.message, null) }
                     }
                 }.start()

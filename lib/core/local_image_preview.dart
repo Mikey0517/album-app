@@ -60,12 +60,23 @@ class LocalImagePreview {
     }
   }
 
-  /// 返回可安全显示的图片路径：
-  /// - 安全格式：原路径；
-  /// - HEIC/HEIF/AVIF：生成过的 JPEG 缓存，没有就现场生成；失败返回 null。
+  /// 返回可安全显示的图片路径：**所有**本地图片都转成缩小的 JPEG 缓存。
+  ///
+  /// 不能只看格式：50MP 的原图直接给引擎解，会一次性申请几百 MB 的 Bitmap
+  /// （日志里那条 `Failed to allocate a 346861308 byte allocation`），OOM 后
+  /// 引擎的 JNI 断言直接 abort。统一走原生 `inSampleSize` 采样解码 + 缩到
+  /// 长边 [maxEdge]，内存可控，显示也够用（服务端大图预览同样是 2560）。
+  /// 失败返回 null，页面显示占位，绝不退回去解原图。
   static Future<String?> resolve(String path, {int maxEdge = 2560}) async {
     if (path.isEmpty) return null;
-    if (!await needsPreview(path)) return path;
+    try {
+      return await _resolveUnsafe(path, maxEdge);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<String?> _resolveUnsafe(String path, int maxEdge) async {
     final cached = await _cachePath(path);
     if (await cached.exists()) return cached.path;
     // 绝不能走 Dart 的 instantiateImageCodec 兜底：它还是 ImageDecoder，
@@ -73,7 +84,7 @@ class LocalImagePreview {
     final encoded = await ImageEncoder.encode(
       path,
       maxEdge: maxEdge,
-      quality: 90,
+      quality: 92,
       allowDartFallback: false,
     );
     if (encoded == null || encoded.bytes.isEmpty) return null;

@@ -32,8 +32,9 @@ void main() {
           fileSize: 1,
           localPath: path,
         );
+    // 现在所有本地图片都先走 JPEG 预览（大图直接解会 OOM abort）。
     expect(media('/x/a.heic').localImageNeedsPreview, isTrue);
-    expect(media('/x/a.jpg').localImageNeedsPreview, isFalse);
+    expect(media('/x/a.jpg').localImageNeedsPreview, isTrue);
   });
 
   testWidgets('HEIC 没预览时格子显示占位，不会去解码原文件', (tester) async {

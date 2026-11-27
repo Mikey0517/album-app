@@ -73,8 +73,11 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
   /// 正在探测时避免重复排队。
   final Set<String> _probing = {};
 
-  /// 文件头识别：这张图是不是必须先用 JPEG 预览（HEIC/HEIF/AVIF，含扩展名骗人的）。
+  /// 这张图是不是必须先用 JPEG 预览（现在所有本地图片都走预览）。
   final Map<String, bool> _needsPreview = {};
+
+  /// 预览生成串行化：几十张大图同时解码会瞬间吃掉几百 MB。
+  Future<void> _previewQueue = Future<void>.value();
 
   /// 已经刷进网格的导入条数：导入队列每完成一条就刷新一次列表。
   int _importedSeen = 0;
@@ -205,23 +208,24 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
     }
   }
 
-  /// 先认文件头：扩展名是 .jpg 也可能是 HEIC，不能只看后缀。
+  /// 本地图片一律先出 JPEG 预览：原图可能是 50MP/HEIC，直接解会 OOM abort。
   Future<void> _detectNeedsPreview(HiddenFile file) async {
-    if (_needsPreview.containsKey(file.path)) return;
-    final needs = await LocalImagePreview.needsPreview(file.path);
-    _needsPreview[file.path] = needs;
-    if (needs && file.previewPath == null) {
-      unawaited(_ensurePreview(file));
-    } else if (mounted) {
-      setState(() {});
-    }
+    if (_needsPreview[file.path] == true) return;
+    _needsPreview[file.path] = true;
+    unawaited(_enqueuePreview(file));
   }
 
-  /// HEIC/HEIF/AVIF 图片：生成 JPEG 预览并记进索引；失败就先显示占位。
+  /// 串行排队生成预览：一张解完再解下一张。
+  Future<void> _enqueuePreview(HiddenFile file) {
+    _previewQueue = _previewQueue.then((_) => _ensurePreview(file)).catchError((_) {});
+    return _previewQueue;
+  }
+
+  /// 本地图片：生成 JPEG 预览并记进索引；失败就先显示占位。
   Future<void> _ensurePreview(HiddenFile file) async {
     if (_probing.contains(file.path)) return;
-    if (file.previewPath != null) return;
-    if (_needsPreview[file.path] == false) return;
+    final existing = file.previewPath;
+    if (existing != null && File(existing).existsSync()) return;
     _probing.add(file.path);
     try {
       final preview = await LocalImagePreview.resolve(file.path);
