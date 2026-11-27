@@ -16,12 +16,11 @@ class FourFingerPullDetector extends StatefulWidget {
     super.key,
     required this.child,
     required this.onTrigger,
-    this.threshold = 140,
+    this.threshold = 80,
   });
 
   @override
-  State<FourFingerPullDetector> createState() =>
-      _FourFingerPullDetectorState();
+  State<FourFingerPullDetector> createState() => _FourFingerPullDetectorState();
 }
 
 class _FourFingerPullDetectorState extends State<FourFingerPullDetector> {
@@ -47,8 +46,9 @@ class _FourFingerPullDetectorState extends State<FourFingerPullDetector> {
     final start = _start;
     if (start == null || _fired || _pointers.length < 4) return;
     final delta = _centroid() - start;
-    // 以向下为主（斜着拉也算，横向为主就不算）。
-    if (delta.dy >= widget.threshold && delta.dy > delta.dx.abs()) {
+    // 以向下为主（斜着拉也算；纯横划、往上划不触发）。阈值不用太大：
+    // 四指一起往下带一点就够了，之前 140 在真机上常常拉不出来。
+    if (delta.dy >= widget.threshold && delta.dy > delta.dx.abs() * 0.5) {
       _fired = true;
       widget.onTrigger();
     }

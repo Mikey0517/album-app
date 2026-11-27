@@ -31,15 +31,15 @@ class PickedMediaResult {
   static const PickedMediaResult empty = PickedMediaResult(items: []);
 }
 
-/// 系统文件选择器选中的一个任意类型文件（已复制进 App 私有目录）。
-class PickedAnyFile {
-  final String path;
+/// 系统文件选择器选中的一个任意类型文件的**来源**（还没复制）。
+class HiddenSource {
+  final String uri;
   final String name;
   final String mime;
   final int size;
 
-  const PickedAnyFile({
-    required this.path,
+  const HiddenSource({
+    required this.uri,
     required this.name,
     required this.mime,
     required this.size,
@@ -48,28 +48,48 @@ class PickedAnyFile {
 
 /// 任意类型文件（不限于图片/视频）：隐藏空间导入用。
 ///
-/// 原生走 `ACTION_OPEN_DOCUMENT`（`*/*`、可多选），选完把内容复制到 [targetDir]
-/// 再返回路径——content URI 的临时授权只在当次可用，复制之后才是自己的文件。
-/// iOS 上还没有对应实现，直接抛一个可读的错误。
-Future<List<PickedAnyFile>> pickAnyFiles({required String targetDir}) async {
+/// 只返回 content URI + 名字/大小，真正的复制由 [copyHiddenFile] 一条一条做，
+/// 这样导入队列才有进度、退出页面也能继续。iOS 上还没有对应实现。
+Future<List<HiddenSource>> pickHiddenSources() async {
   if (!Platform.isAndroid) {
     throw UnsupportedError('当前系统暂不支持导入文件');
   }
   final raw = await _pickerChannel.invokeMapMethod<String, dynamic>(
     'pickHiddenFiles',
-    {'targetDir': targetDir},
   );
   final items = (raw?['items'] as List<dynamic>?) ?? const [];
   return [
     for (final item in items.whereType<Map>())
-      PickedAnyFile(
-        path: item['path'] as String? ?? '',
+      HiddenSource(
+        uri: item['uri'] as String? ?? '',
         name: item['name'] as String? ?? '',
         mime: item['mime'] as String? ?? '',
         size: (item['size'] as num?)?.toInt() ?? 0,
       ),
-  ].where((file) => file.path.isNotEmpty).toList(growable: false);
+  ].where((source) => source.uri.isNotEmpty).toList(growable: false);
 }
+
+/// 把一个来源复制进 [targetDir]（导入队列一条一条调）。
+Future<({String path, int size})> copyHiddenFile({
+  required String uri,
+  required String targetDir,
+  required String name,
+}) async {
+  final result = await _pickerChannel.invokeMapMethod<String, dynamic>(
+    'copyHiddenFile',
+    {'uri': uri, 'targetDir': targetDir, 'name': name},
+  );
+  final path = result?['path'] as String? ?? '';
+  if (path.isEmpty) throw StateError('复制失败');
+  return (path: path, size: (result?['size'] as num?)?.toInt() ?? 0);
+}
+
+/// 用 source 的展示名复制：给导入队列用的简单封装。
+Future<({String path, int size})> copyHiddenSource(
+  HiddenSource source, {
+  required String targetDir,
+}) =>
+    copyHiddenFile(uri: source.uri, targetDir: targetDir, name: source.name);
 
 /// 使用 Android 系统 Photo Picker，但不能走 image_picker 的脱敏副本：
 /// 原生端申请 ACCESS_MEDIA_LOCATION 并尽量通过 setRequireOriginal 读取原图，

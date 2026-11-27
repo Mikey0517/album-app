@@ -4,8 +4,6 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
-import '../media_picker.dart';
-
 /// 隐藏空间里的一个文件。
 ///
 /// [path] 是 App 私有目录里的副本（不是原文件），[mime] 可能为空，按扩展名
@@ -28,10 +26,25 @@ class HiddenFile {
   });
 
   static const Set<String> _imageExtensions = {
-    'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif', 'avif', 'dng',
+    'jpg',
+    'jpeg',
+    'png',
+    'gif',
+    'webp',
+    'bmp',
+    'heic',
+    'heif',
+    'avif',
+    'dng',
   };
   static const Set<String> _videoExtensions = {
-    'mp4', 'mov', 'm4v', '3gp', 'mkv', 'webm', 'avi',
+    'mp4',
+    'mov',
+    'm4v',
+    '3gp',
+    'mkv',
+    'webm',
+    'avi',
   };
 
   String get extension {
@@ -65,7 +78,8 @@ class HiddenFile {
     final size = (raw['size'] as num?)?.toInt() ?? 0;
     final added =
         DateTime.tryParse(raw['added_at'] as String? ?? '') ?? DateTime.now();
-    final name = raw['name'] as String? ?? path.split(Platform.pathSeparator).last;
+    final name =
+        raw['name'] as String? ?? path.split(Platform.pathSeparator).last;
     return HiddenFile(
       id: id,
       name: name,
@@ -89,6 +103,10 @@ class HiddenSpaceStore {
   /// 测试用：直接指定一个临时目录，跳过 path_provider。
   static Directory? overrideDirectory;
 
+  /// 测试用：直接返回这份列表，跳过真实文件 IO（widget 测试的 FakeAsync 里
+  /// 真实 IO 不会自己完成）。
+  static List<HiddenFile>? overrideFiles;
+
   static Future<Directory> directory() async {
     final overridden = overrideDirectory;
     final dir = overridden ??
@@ -105,33 +123,43 @@ class HiddenSpaceStore {
     return File('${dir.path}${Platform.pathSeparator}$indexName');
   }
 
-  /// 读索引。索引丢了就扫描目录重建（文件名就是展示名，类型按扩展名猜）。
+  /// 读索引。索引丢了/缺条目就扫描目录补齐（文件名就是展示名，类型按扩展名猜）。
+  ///
+  /// 按路径去重：导入队列是「先落盘、再记索引」，同一个文件既可能出现在目录
+  /// 扫描里，也可能已经写进索引，不能算成两条。
   static Future<List<HiddenFile>> load() async {
+    final fake = overrideFiles;
+    if (fake != null) return List<HiddenFile>.of(fake);
     final dir = await directory();
     final index = await indexFile();
+    final byPath = <String, HiddenFile>{};
+    var fromIndex = false;
     if (await index.exists()) {
       try {
         final raw = jsonDecode(await index.readAsString());
         if (raw is List) {
-          final files = raw
-              .map(HiddenFile.tryParse)
-              .whereType<HiddenFile>()
-              .where((file) => File(file.path).existsSync())
-              .toList();
-          files.sort((a, b) => b.addedAt.compareTo(a.addedAt));
-          return files;
+          fromIndex = true;
+          for (final item in raw) {
+            final file = HiddenFile.tryParse(item);
+            if (file == null) continue;
+            if (!File(file.path).existsSync()) continue;
+            byPath[file.path] = file;
+          }
         }
       } catch (_) {
-        // 索引坏了：下面按目录重建。
+        // 索引坏了：按目录重建。
       }
     }
-    final files = <HiddenFile>[];
+    var changed = !fromIndex;
     await for (final entity in dir.list()) {
       if (entity is! File || entity.path.endsWith(indexName)) continue;
-      files.add(_fromFile(entity));
+      if (byPath.containsKey(entity.path)) continue;
+      byPath[entity.path] = _fromFile(entity);
+      changed = true;
     }
-    files.sort((a, b) => b.addedAt.compareTo(a.addedAt));
-    await saveIndex(files);
+    final files = byPath.values.toList()
+      ..sort((a, b) => b.addedAt.compareTo(a.addedAt));
+    if (changed) await saveIndex(files);
     return files;
   }
 
@@ -147,27 +175,42 @@ class HiddenSpaceStore {
     }
   }
 
-  /// 拉起系统文件选择器（任意类型），把选中的文件复制进隐藏目录并写索引。
-  static Future<List<HiddenFile>> importPicked() async {
-    final dir = await directory();
-    final picked = await pickAnyFiles(targetDir: dir.path);
-    if (picked.isEmpty) return const [];
+  /// 导入队列复制完一条后调用：把它记进索引。
+  static Future<HiddenFile> addImported({
+    required String path,
+    required String name,
+    required String mime,
+    required int size,
+  }) async {
+    final file = HiddenFile(
+      id: const Uuid().v4(),
+      name: name,
+      path: path,
+      mime: mime,
+      size: size,
+      addedAt: DateTime.now(),
+    );
     final files = await load();
-    final added = <HiddenFile>[];
-    for (final item in picked) {
-      final file = HiddenFile(
-        id: const Uuid().v4(),
-        name: item.name,
-        path: item.path,
-        mime: item.mime,
-        size: item.size,
-        addedAt: DateTime.now(),
+    // 目录扫描可能已经把它扫进来了（先落盘再记索引）：按路径认，别重复，
+    // 但要补上来源给的展示名/MIME/大小（磁盘文件名前面带了 uuid）。
+    for (var i = 0; i < files.length; i++) {
+      final existing = files[i];
+      if (existing.path != path) continue;
+      final updated = HiddenFile(
+        id: existing.id,
+        name: name,
+        path: existing.path,
+        mime: mime.isEmpty ? existing.mime : mime,
+        size: size > 0 ? size : existing.size,
+        addedAt: existing.addedAt,
       );
-      files.add(file);
-      added.add(file);
+      files[i] = updated;
+      await saveIndex(files);
+      return updated;
     }
+    files.add(file);
     await saveIndex(files);
-    return added;
+    return file;
   }
 
   /// 删除一个文件（物理文件 + 索引）。
@@ -188,8 +231,9 @@ class HiddenSpaceStore {
     final name = file.uri.pathSegments.last;
     final stat = file.statSync();
     final dot = name.lastIndexOf('.');
-    final extension =
-        dot < 0 || dot == name.length - 1 ? '' : name.substring(dot + 1).toLowerCase();
+    final extension = dot < 0 || dot == name.length - 1
+        ? ''
+        : name.substring(dot + 1).toLowerCase();
     String mime = '';
     if (HiddenFile._imageExtensions.contains(extension)) {
       mime = extension == 'png' ? 'image/png' : 'image/$extension';

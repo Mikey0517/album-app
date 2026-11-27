@@ -112,7 +112,6 @@ class MainActivity : FlutterFragmentActivity() {
 
     // 隐藏空间：任意类型的文件都用系统的“打开文档”选择器，选完复制进 App 私有目录。
     private var pendingHiddenFileResult: MethodChannel.Result? = null
-    private var pendingHiddenFileDir: String? = null
     private val pickHiddenDocuments = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments()
     ) { uris -> handleHiddenFilesPicked(uris) }
@@ -190,21 +189,36 @@ class MainActivity : FlutterFragmentActivity() {
                             result.error("busy", "已有文件选择器正在打开", null)
                             return@setMethodCallHandler
                         }
-                        val targetDir = call.argument<String>("targetDir")
-                        if (targetDir.isNullOrBlank()) {
-                            result.error("bad_args", "缺少目标目录", null)
-                            return@setMethodCallHandler
-                        }
                         pendingHiddenFileResult = result
-                        pendingHiddenFileDir = targetDir
                         try {
                             // 任意类型：*/*
                             pickHiddenDocuments.launch(arrayOf("*/*"))
                         } catch (e: Exception) {
                             pendingHiddenFileResult = null
-                            pendingHiddenFileDir = null
                             result.error("picker_unavailable", "无法打开文件选择器", null)
                         }
+                    }
+                    "copyHiddenFile" -> {
+                        val uri = call.argument<String>("uri")
+                        val targetDir = call.argument<String>("targetDir")
+                        val name = call.argument<String>("name")
+                        if (uri.isNullOrBlank() || targetDir.isNullOrBlank()) {
+                            result.error("bad_args", "缺少来源或目标目录", null)
+                            return@setMethodCallHandler
+                        }
+                        Thread {
+                            try {
+                                val copied = copyHiddenSource(
+                                    Uri.parse(uri),
+                                    File(targetDir),
+                                    name ?: "file_${System.currentTimeMillis()}"
+                                )
+                                runOnUiThread { result.success(copied) }
+                            } catch (e: Exception) {
+                                Log.w("AlbumHidden", "复制文件失败: $uri", e)
+                                runOnUiThread { result.error("copy_failed", e.message, null) }
+                            }
+                        }.start()
                     }
                     else -> result.notImplemented()
                 }
@@ -227,37 +241,44 @@ class MainActivity : FlutterFragmentActivity() {
         failed: Int
     ): Map<String, Any> = mapOf("items" to items, "failed" to failed)
 
-    /** 隐藏空间的导入：把选中的任意类型文件复制进 [pendingHiddenFileDir]。 */
+    /**
+     * 隐藏空间：选择器只返回来源（uri + 名字 + 大小），真正复制由 Dart 的
+     * 导入队列一条一条调 [copyHiddenFile]——这样导入列表有进度、退出页面后
+     * 也能继续。
+     */
     private fun handleHiddenFilesPicked(uris: List<Uri>?) {
         val result = pendingHiddenFileResult ?: return
-        val targetDir = pendingHiddenFileDir
         pendingHiddenFileResult = null
-        pendingHiddenFileDir = null
-        if (uris.isNullOrEmpty() || targetDir.isNullOrBlank()) {
+        if (uris.isNullOrEmpty()) {
             result.success(mapOf("items" to emptyList<Map<String, Any>>(), "failed" to 0))
             return
         }
         Thread {
-            val dir = File(targetDir).apply { mkdirs() }
             val picked = ArrayList<Map<String, Any>>()
-            var failed = 0
             for (uri in uris) {
                 try {
-                    picked.add(copyHiddenFile(uri, dir))
+                    val name = queryDisplayName(uri) ?: "file_${System.currentTimeMillis()}"
+                    picked.add(
+                        mapOf(
+                            "uri" to uri.toString(),
+                            "name" to name,
+                            "mime" to contentResolver.getType(uri) ?: "",
+                            "size" to queryPickSize(uri)
+                        )
+                    )
                 } catch (e: Exception) {
-                    failed++
-                    Log.w("AlbumHidden", "复制文件失败: $uri", e)
+                    Log.w("AlbumHidden", "读取文件信息失败: $uri", e)
                 }
             }
             runOnUiThread {
-                result.success(mapOf("items" to picked, "failed" to failed))
+                result.success(mapOf("items" to picked, "failed" to 0))
             }
         }.start()
     }
 
-    private fun copyHiddenFile(uri: Uri, dir: File): Map<String, Any> {
-        val name = queryDisplayName(uri) ?: "file_${System.currentTimeMillis()}"
-        val mime = contentResolver.getType(uri) ?: ""
+    /** 把选择器给的 content URI 复制进目标目录，返回真实路径与大小。 */
+    private fun copyHiddenSource(uri: Uri, dir: File, name: String): Map<String, Any> {
+        dir.mkdirs()
         val safeName = name.replace(Regex("[^A-Za-z0-9._\\-\\u4e00-\\u9fa5]"), "_")
         val target = File(dir, "${UUID.randomUUID()}_$safeName")
         contentResolver.openInputStream(uri).use { input ->
@@ -266,10 +287,25 @@ class MainActivity : FlutterFragmentActivity() {
         }
         return mapOf(
             "path" to target.absolutePath,
-            "name" to name,
-            "mime" to mime,
             "size" to target.length()
         )
+    }
+
+    /** 文件大小：选择器给的 content URI 上没有 length 时退回 OpenableColumns.SIZE。 */
+    private fun queryPickSize(uri: Uri): Long {
+        return try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+                        if (index >= 0 && !cursor.isNull(index)) cursor.getLong(index) else 0L
+                    } else {
+                        0L
+                    }
+                } ?: 0L
+        } catch (_: Exception) {
+            0L
+        }
     }
 
     /** 文件选择器给的 Uri 只保证当次可读；展示名从 OpenableColumns 拿。 */

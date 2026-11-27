@@ -70,4 +70,24 @@ void main() {
       await gesture.up();
     }
   });
+
+  testWidgets('四指轻轻下拉（总共 90px）也能触发', (tester) async {
+    final triggers = await pump(tester);
+    final gestures = <TestGesture>[];
+    for (var i = 0; i < 4; i++) {
+      gestures.add(await tester.startGesture(Offset(100.0 + i * 40, 200)));
+    }
+    for (final gesture in gestures) {
+      await gesture.moveBy(const Offset(0, 45));
+    }
+    await tester.pump();
+    for (final gesture in gestures) {
+      await gesture.moveBy(const Offset(0, 45));
+    }
+    await tester.pump();
+    expect(triggers(), 1);
+    for (final gesture in gestures) {
+      await gesture.up();
+    }
+  });
 }

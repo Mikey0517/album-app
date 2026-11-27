@@ -11,13 +11,16 @@ import '../../core/design/radius.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/formatters.dart';
 import '../../core/responsive.dart';
+import '../../core/hidden_space/hidden_import_manager.dart';
 import '../../core/hidden_space/hidden_lock.dart';
 import '../../core/hidden_space/hidden_space_store.dart';
+import '../../core/media_picker.dart';
 import '../../core/motion_photo.dart';
 import '../../models/media.dart';
 import '../../widgets/album_thumb.dart';
 import '../album/album_detail_page.dart' show AlbumUploadFab;
 import '../viewer/media_viewer_page.dart';
+import 'hidden_import_status.dart';
 
 /// 隐藏空间：四指下拉进入。
 ///
@@ -47,7 +50,6 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
   bool _checking = true;
   bool _configured = false;
   bool _unlocked = false;
-  bool _busy = false;
 
   String _pin = '';
   String? _firstPin;
@@ -70,17 +72,31 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
   /// 正在探测时避免重复排队。
   final Set<String> _probing = {};
 
+  /// 已经刷进网格的导入条数：导入队列每完成一条就刷新一次列表。
+  int _importedSeen = 0;
+
   @override
   void initState() {
     super.initState();
     HiddenSpacePage.isOpen = true;
+    HiddenImportManager.instance.addListener(_onImportChanged);
     _init();
   }
 
   @override
   void dispose() {
     HiddenSpacePage.isOpen = false;
+    HiddenImportManager.instance.removeListener(_onImportChanged);
     super.dispose();
+  }
+
+  /// 导入队列有进展：完成数变了就重读文件列表（新文件出现在网格里）。
+  void _onImportChanged() {
+    if (!mounted) return;
+    final manager = HiddenImportManager.instance;
+    if (manager.addedCount == _importedSeen) return;
+    _importedSeen = manager.addedCount;
+    unawaited(_loadFiles());
   }
 
   Future<void> _init() async {
@@ -272,19 +288,15 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
   }
 
   Future<void> _importFiles() async {
-    if (_busy) return;
-    setState(() => _busy = true);
     try {
-      final added = await HiddenSpaceStore.importPicked();
-      if (!mounted) return;
-      if (added.isEmpty) return;
-      await _loadFiles();
+      final sources = await pickHiddenSources();
+      if (!mounted || sources.isEmpty) return;
+      // 排进导入队列：进度显示在页面里的「上传中 x/y」状态条上（和相册一致）。
+      await HiddenImportManager.instance.enqueue(sources);
     } on UnsupportedError catch (e) {
       if (mounted) _snack(e.message ?? '当前系统暂不支持导入文件');
     } catch (e) {
       if (mounted) _snack('导入失败：$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -427,27 +439,29 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
         elevation: 0,
         title: Text('${_files.length} 个文件', style: AppText.body),
       ),
-      body: _files.isEmpty ? _buildEmpty() : _buildGrid(),
-      // 和相册页同一个上传按钮（玻璃圆钮），导入文件就是它。
-      floatingActionButton: Stack(
-        alignment: Alignment.center,
+      body: Stack(
         children: [
-          AlbumUploadFab(
-            label: '导入文件',
-            onPressed: _busy ? () {} : _importFiles,
+          Positioned.fill(
+            child: _files.isEmpty ? _buildEmpty() : _buildGrid(),
           ),
-          if (_busy)
-            const IgnorePointer(
-              child: SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white70,
-                ),
-              ),
+          // 「上传中 x/y」状态条：只在隐藏空间里出现（退出就看不到），点开是
+          // 和相册上传列表一样的面板。
+          Positioned(
+            right: 16,
+            bottom: 16 +
+                AlbumUploadFab.diameter +
+                12 +
+                MediaQuery.paddingOf(context).bottom,
+            child: HiddenImportStatusChip(
+              onTap: () => showHiddenImportSheet(context),
             ),
+          ),
         ],
+      ),
+      // 和相册页同一个上传按钮（玻璃圆钮），导入文件就是它。
+      floatingActionButton: AlbumUploadFab(
+        label: '导入文件',
+        onPressed: _importFiles,
       ),
     );
   }
