@@ -6,6 +6,7 @@ import '../../core/app_events.dart';
 import '../../core/design/colors.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/formatters.dart';
+import '../../core/random_media_service.dart';
 import '../../models/media.dart';
 import '../../models/post.dart';
 import '../../widgets/app_bottom_tab_bar.dart';
@@ -41,6 +42,7 @@ class _FeedPageState extends State<FeedPage> {
   FeedTimeline _timeline = const FeedTimeline.empty();
   String? _floatingDate;
   bool _dateUpdateScheduled = false;
+  bool _randomLoading = false;
 
   @override
   void initState() {
@@ -185,6 +187,38 @@ class _FeedPageState extends State<FeedPage> {
     _scheduleFloatingDateUpdate();
   }
 
+  /// 随机回顾：从我有权限的相册（含朋友圈相册）里随机挑一张照片/视频，
+  /// 直接打开大屏，底部缩略图条就是那个相册的列表。
+  Future<void> _openRandom() async {
+    if (_randomLoading) return;
+    setState(() => _randomLoading = true);
+    try {
+      final pick = await RandomMediaService.pick();
+      if (!mounted) return;
+      if (pick == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('还没有可以回顾的照片或视频')),
+        );
+        return;
+      }
+      await Navigator.of(context).push(
+        MediaViewerPage.route(
+          items: pick.items,
+          initialIndex: pick.index,
+          heroPrefix: 'random_',
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ApiClient.errorText(e))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _randomLoading = false);
+    }
+  }
+
   void _openMedia(List<Media> medias, int index) {
     Navigator.of(context).push(
       MediaViewerPage.route(
@@ -218,6 +252,17 @@ class _FeedPageState extends State<FeedPage> {
           title: const Text('朋友圈'),
           centerTitle: true,
           actions: [
+            IconButton(
+              onPressed: _randomLoading ? null : _openRandom,
+              tooltip: '随机回顾',
+              icon: _randomLoading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.shuffle_rounded, size: 22),
+            ),
             IconButton(
               onPressed: _openOnThisDay,
               tooltip: '那年今日',

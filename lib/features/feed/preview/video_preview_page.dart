@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/design/colors.dart';
 import '../../../core/design/text_styles.dart';
 import '../../../core/video_orientation.dart';
+import '../../../core/viewer_immersive.dart';
 
 class VideoPreviewPage extends StatefulWidget {
   final String path;
@@ -35,6 +36,8 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
   }
 
   Future<void> _initialize() async {
+    // 预览页也是全屏播视频：打开就藏掉状态栏，退出恢复。
+    unawaited(ViewerImmersive.set(true));
     try {
       final video = VideoPlayerController.file(File(widget.path));
       _videoController = video;
@@ -83,6 +86,7 @@ class _VideoPreviewPageState extends State<VideoPreviewPage> {
 
   @override
   void dispose() {
+    unawaited(ViewerImmersive.set(false));
     _chewieController?.dispose();
     _videoController?.dispose();
     unawaited(lockAppPortrait());

@@ -58,7 +58,8 @@ class MediaViewerPage extends StatefulWidget {
   State<MediaViewerPage> createState() => _MediaViewerPageState();
 }
 
-class _MediaViewerPageState extends State<MediaViewerPage> {
+class _MediaViewerPageState extends State<MediaViewerPage>
+    with WidgetsBindingObserver {
   late final PageController _pageController;
   late int _index;
   Timer? _hideTimer;
@@ -78,6 +79,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _index = widget.items.isEmpty
         ? 0
         : widget.initialIndex.clamp(0, widget.items.length - 1).toInt();
@@ -91,7 +93,24 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   }
 
   @override
+  void didChangeMetrics() {
+    // 系统偶尔会把状态栏重新显示出来（下拉通知栏、切后台再回来、分屏拖拽）：
+    // 正在播且当前是沉浸式就再藏一次。不等下一帧，直接发。
+    if (_playing && _immersive) {
+      unawaited(ViewerImmersive.set(true));
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _playing) {
+      unawaited(ViewerImmersive.set(true));
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _hideTimer?.cancel();
     _pageController.dispose();
     _setImmersive(false);
