@@ -104,7 +104,6 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   /// 只有播放中才藏：暂停时用户要看时间／进度，状态栏留着更自然。退出浏览页
   /// 一定恢复，不然主界面会一直顶着一条黑边。
   void _setImmersive(bool hidden) {
-    debugPrint('[Viewer] immersive=$hidden (was=$_immersive)');
     if (_immersive == hidden) return;
     _immersive = hidden;
     unawaited(ViewerImmersive.set(hidden));
@@ -148,7 +147,6 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   }
 
   void _onPlayingChanged(bool playing) {
-    debugPrint('[Viewer] playing=$playing');
     if (!mounted) return;
     _setImmersive(playing);
     setState(() {

@@ -143,8 +143,8 @@ class _VideoViewState extends State<VideoView> {
 
   // ---- 左右滑动快进 / 倒退 ----
 
-  /// 每滑动多少逻辑像素对应 1 秒。8dp ≈ 1s，横屏划满一屏大约 1 分钟。
-  static const double _pxPerSecond = 8;
+  /// 横向滑动的基准宽度（屏幕宽）：划满一屏 = 整个视频时长。
+  double _seekBasisWidth = 1;
 
   Duration _clampPosition(Duration value, Duration duration) {
     if (value < Duration.zero) return Duration.zero;
@@ -164,7 +164,10 @@ class _VideoViewState extends State<VideoView> {
     final controller = _controller;
     if (controller == null || !controller.value.isInitialized) return;
     _seekTarget ??= controller.value.position;
-    final deltaMs = (details.delta.dx / _pxPerSecond * 1000).round();
+    // 按屏幕宽度比例换算：划满一屏 = 视频全长，短视频不会一划就到底。
+    final duration = controller.value.duration.inMilliseconds;
+    final basis = _seekBasisWidth <= 0 ? 1.0 : _seekBasisWidth;
+    final deltaMs = (details.delta.dx / basis * duration).round();
     _seekTarget = _clampPosition(
       _seekTarget! + Duration(milliseconds: deltaMs),
       controller.value.duration,
@@ -269,6 +272,7 @@ class _VideoViewState extends State<VideoView> {
 
   @override
   Widget build(BuildContext context) {
+    _seekBasisWidth = MediaQuery.sizeOf(context).width;
     final controller = _controller;
     final initialized = controller != null && controller.value.isInitialized;
     final thumb = widget.media.thumbUrl;
