@@ -23,6 +23,9 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -1061,12 +1064,56 @@ class MainActivity : FlutterFragmentActivity() {
     private fun registerAppControl(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "album/app")
             .setMethodCallHandler { call, result ->
-                if (call.method != "restart") {
-                    result.notImplemented()
-                    return@setMethodCallHandler
+                when (call.method) {
+                    "restart" -> restartApp(result)
+                    "setImmersive" -> setImmersive(call.argument<Boolean>("hidden") == true, result)
+                    else -> result.notImplemented()
                 }
-                restartApp(result)
             }
+    }
+
+    /**
+     * 视频全屏播放时藏掉状态栏（系统通知栏那条），恢复时显示回来。
+     *
+     * 走 [WindowInsetsController] 而不是只靠 Flutter 的 SystemChrome：
+     * HyperOS + edgeToEdge 下 Flutter 设的 systemUiVisibility 会被框架的
+     * overlay style 覆盖，实测状态栏一直 visible；直接对当前窗口
+     * hide(statusBars) 才生效。
+     */
+    private fun setImmersive(hide: Boolean, result: MethodChannel.Result) {
+        runOnUiThread {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val controller = window.insetsController
+                        ?: throw IllegalStateException("no insets controller")
+                    if (hide) {
+                        controller.systemBarsBehavior =
+                            WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                        controller.hide(WindowInsets.Type.statusBars())
+                    } else {
+                        controller.show(WindowInsets.Type.statusBars())
+                    }
+                } else {
+                    @Suppress("DEPRECATION")
+                    val view = window.decorView
+                    @Suppress("DEPRECATION")
+                    var flags = view.systemUiVisibility
+                    flags = if (hide) {
+                        flags or View.SYSTEM_UI_FLAG_FULLSCREEN or
+                            View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                    } else {
+                        flags and View.SYSTEM_UI_FLAG_FULLSCREEN.inv()
+                    }
+                    @Suppress("DEPRECATION")
+                    view.systemUiVisibility = flags
+                }
+                Log.i("AlbumApp", "setImmersive hidden=$hide")
+                result.success(true)
+            } catch (e: Exception) {
+                Log.w("AlbumApp", "setImmersive failed", e)
+                result.error("immersive_failed", e.message, null)
+            }
+        }
     }
 
     private fun restartApp(result: MethodChannel.Result) {

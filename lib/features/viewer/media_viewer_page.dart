@@ -7,6 +7,7 @@ import '../../core/api_client.dart';
 import '../../core/design/text_styles.dart';
 import '../../core/media_download_service.dart';
 import '../../core/video_orientation.dart';
+import '../../core/viewer_immersive.dart';
 import '../../models/media.dart';
 import 'image_view.dart';
 import 'media_details_page.dart';
@@ -105,11 +106,7 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
   void _setImmersive(bool hidden) {
     if (_immersive == hidden) return;
     _immersive = hidden;
-    unawaited(
-      SystemChrome.setEnabledSystemUIMode(
-        hidden ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge,
-      ),
-    );
+    unawaited(ViewerImmersive.set(hidden));
   }
 
   /// 从列表点进来时：视频按视频本身的横竖屏，图片固定竖屏。
