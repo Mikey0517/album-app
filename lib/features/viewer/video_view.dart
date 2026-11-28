@@ -202,8 +202,11 @@ class _VideoViewState extends State<VideoView> {
       setState(() => _ended = false);
     }
     if (value.isPlaying != _playing) {
-      setState(() => _playing = value.isPlaying);
-      _notifyPlaying(value.isPlaying);
+      final playing = value.isPlaying;
+      setState(() => _playing = playing);
+      // 不能走 _notifyPlaying：它看到 _playing 已经是新值会直接 return，
+      // 播放/暂停就永远通知不到外面（状态栏不隐藏、控制条不自动收起的根因）。
+      widget.onPlayingChanged(playing);
     }
     // 缓冲起止要立刻重画，不能等 250ms 的 ticker：那是"窗口内不许出现转圈"
     // 之所以会闪一下的另一半原因。
