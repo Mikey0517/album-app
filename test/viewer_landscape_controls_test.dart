@@ -162,4 +162,37 @@ void main() {
       lessThan(viewerThumbnailGapPortrait),
     );
   });
+
+  testWidgets('倍速按钮：默认 1.0x，选 2.0x 回调生效', (tester) async {
+    await _useSize(tester, _portraitSize);
+    double? changed;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          backgroundColor: Colors.black,
+          body: Align(
+            alignment: Alignment.bottomCenter,
+            child: ViewerVideoControlsLayout(
+              position: Duration.zero,
+              duration: const Duration(minutes: 1),
+              isPlaying: true,
+              onPlayPause: () {},
+              onSeek: (_) {},
+              onToggleRotation: () {},
+              speed: 1,
+              onSpeedChanged: (value) => changed = value,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('1.0x'), findsOneWidget);
+
+    await tester.tap(find.text('1.0x'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('2.0x').last);
+    await tester.pumpAndSettle();
+    expect(changed, 2.0);
+  });
 }

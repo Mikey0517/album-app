@@ -76,12 +76,20 @@ class ViewerVideoControls extends StatelessWidget {
   /// 引起的 buffering 转圈。
   final VoidCallback? onRestart;
 
+  /// 当前倍速（默认 1.0）。
+  final double speed;
+
+  /// 改倍速；null 时不显示倍速按钮。
+  final ValueChanged<double>? onSpeedChanged;
+
   const ViewerVideoControls({
     super.key,
     required this.controller,
     required this.onInteraction,
     this.onToggleRotation,
     this.onRestart,
+    this.speed = 1,
+    this.onSpeedChanged,
   });
 
   @override
@@ -114,6 +122,13 @@ class ViewerVideoControls extends StatelessWidget {
               onInteraction();
               onToggleRotation!();
             },
+      speed: speed,
+      onSpeedChanged: onSpeedChanged == null
+          ? null
+          : (value) {
+              onInteraction();
+              onSpeedChanged!(value);
+            },
     );
   }
 }
@@ -128,6 +143,8 @@ class ViewerVideoControlsLayout extends StatelessWidget {
   final ValueChanged<Duration> onSeek;
   final VoidCallback? onSeekStart;
   final VoidCallback? onToggleRotation;
+  final double speed;
+  final ValueChanged<double>? onSpeedChanged;
 
   const ViewerVideoControlsLayout({
     super.key,
@@ -138,6 +155,8 @@ class ViewerVideoControlsLayout extends StatelessWidget {
     required this.onSeek,
     this.onSeekStart,
     this.onToggleRotation,
+    this.speed = 1,
+    this.onSpeedChanged,
   });
 
   @override
@@ -231,6 +250,12 @@ class ViewerVideoControlsLayout extends StatelessWidget {
                   fontSize: landscape ? 12 : 11,
                 ),
               ),
+              if (onSpeedChanged != null)
+                _SpeedButton(
+                  speed: speed,
+                  onChanged: onSpeedChanged!,
+                  compact: landscape,
+                ),
               if (onToggleRotation != null)
                 IconButton(
                   onPressed: onToggleRotation,
@@ -246,6 +271,79 @@ class ViewerVideoControlsLayout extends StatelessWidget {
                   icon: const Icon(Icons.screen_rotation_alt),
                 ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 倍速按钮：进度条与旋转按钮之间，默认 1.0x，点开菜单选 0.5~2.0。
+class _SpeedButton extends StatelessWidget {
+  static const List<double> speeds = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+  final double speed;
+  final ValueChanged<double> onChanged;
+  final bool compact;
+
+  const _SpeedButton({
+    required this.speed,
+    required this.onChanged,
+    required this.compact,
+  });
+
+  String get _label {
+    // 1.0 / 0.5 / 2.0 显示一位小数，1.25 / 0.75 / 1.5 按原值显示。
+    final text = speed == speed.roundToDouble()
+        ? speed.toStringAsFixed(1)
+        : speed.toString();
+    return '${text}x';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<double>(
+      initialValue: speed,
+      onSelected: onChanged,
+      tooltip: '播放速度',
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 96),
+      color: const Color(0xFF1C1C1E),
+      itemBuilder: (context) => [
+        for (final value in speeds)
+          PopupMenuItem<double>(
+            value: value,
+            height: 40,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    value == value.roundToDouble()
+                        ? '${value.toStringAsFixed(1)}x'
+                        : '${value}x',
+                    style: AppText.bodySmall.copyWith(
+                      color: Colors.white,
+                      fontWeight: value == speed ? FontWeight.w600 : null,
+                    ),
+                  ),
+                ),
+                if (value == speed)
+                  const Icon(Icons.check, size: 16, color: Colors.white),
+              ],
+            ),
+          ),
+      ],
+      child: Padding(
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 6 : 8,
+          vertical: 6,
+        ),
+        child: Text(
+          _label,
+          style: AppText.caption.copyWith(
+            color: Colors.white,
+            fontSize: compact ? 11 : 12,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),

@@ -77,11 +77,15 @@ class AppSegmentedBar extends StatelessWidget {
   final int selectedIndex;
   final ValueChanged<int> onChanged;
 
+  /// 深色底（隐藏空间这类纯黑页面）：文字用浅色、选中用主题色，不铺浅渐变。
+  final bool onDark;
+
   const AppSegmentedBar({
     super.key,
     required this.items,
     required this.selectedIndex,
     required this.onChanged,
+    this.onDark = false,
   });
 
   @override
@@ -95,6 +99,7 @@ class AppSegmentedBar extends StatelessWidget {
           item: items[i],
           selected: i == selectedIndex,
           onTap: () => onChanged(i),
+          onDark: onDark,
         ),
       );
     }
@@ -182,12 +187,14 @@ class _Segment extends StatelessWidget {
   final AppSegmentedItem item;
   final bool selected;
   final VoidCallback onTap;
+  final bool onDark;
 
   const _Segment({
     super.key,
     required this.item,
     required this.selected,
     required this.onTap,
+    this.onDark = false,
   });
 
   @override
@@ -202,7 +209,28 @@ class _Segment extends StatelessWidget {
     final Color color;
     final TextStyle style;
     final TextStyle countStyle;
-    if (glassInk != null) {
+    if (onDark) {
+      // 纯黑页面：未选中浅白、选中主题色；数量跟着正文走，只降一点亮度。
+      color = selected ? AppColors.primary : Colors.white.withValues(alpha: 0.78);
+      final countColor = selected
+          ? AppColors.primary
+          : Colors.white.withValues(alpha: 0.55);
+      final halo = appTabBarHalo(color);
+      style = TextStyle(
+        fontSize: 13,
+        height: 1.2,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+        color: color,
+        shadows: halo,
+      );
+      countStyle = TextStyle(
+        fontSize: 11,
+        height: 1.2,
+        fontWeight: FontWeight.w600,
+        color: countColor,
+        shadows: halo,
+      );
+    } else if (glassInk != null) {
       // 选中段仍用主题色（本条内局部加深 [segmentedSelectedInk]），未选中段与
       // 数量用与 footer 同一档的自动墨色。
       color = selected ? segmentedSelectedInk : glassInk;

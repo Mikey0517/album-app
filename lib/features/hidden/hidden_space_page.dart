@@ -22,6 +22,7 @@ import '../../models/media.dart';
 import '../../widgets/album_thumb.dart';
 import '../../widgets/app_segmented_bar.dart';
 import '../../widgets/selection_footer.dart';
+import '../../widgets/tile_selection_overlay.dart';
 import '../album/album_detail_page.dart' show AlbumUploadFab;
 import '../album/album_media_filter.dart';
 import '../album/album_media_filter_bar.dart';
@@ -595,19 +596,32 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
               backgroundColor: Colors.black,
               foregroundColor: Colors.white,
               elevation: 0,
-              title: Text('${_files.length} 个文件', style: AppText.body),
-              // 分类条和相册完全一致（同一份 AlbumMediaFilterBar）。
+              title: Text(
+                '${_files.length} 个文件',
+                style: AppText.body.copyWith(color: Colors.white),
+              ),
+              // 分类条和相册完全一致（同一份 AlbumMediaFilterBar），只是换成
+              // 深色底的一套配色：这个页面永远是黑底，别让文字跟着系统主题
+              // 变深/变浅而看不清。
               bottom: _files.isEmpty
                   ? null
                   : PreferredSize(
                       preferredSize:
                           const Size.fromHeight(kAppSegmentedBarHeight),
-                      child: AppSegmentedBarSurface(
-                        child: AlbumMediaFilterBar(
-                          counts: AlbumMediaCounts.from(openable.items),
-                          selected: _filter,
-                          onChanged: (filter) =>
-                              setState(() => _filter = filter),
+                      child: SizedBox(
+                        height: kAppSegmentedBarHeight,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
+                          child: AlbumMediaFilterBar(
+                            counts: AlbumMediaCounts.from(openable.items),
+                            selected: _filter,
+                            onChanged: (filter) =>
+                                setState(() => _filter = filter),
+                            onDark: true,
+                          ),
                         ),
                       ),
                     ),
@@ -656,7 +670,10 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
         icon: const Icon(Icons.close),
         tooltip: '取消选择',
       ),
-      title: Text('已选 ${_selected.length} 项', style: AppText.body),
+      title: Text(
+        '已选 ${_selected.length} 项',
+        style: AppText.body.copyWith(color: Colors.white),
+      ),
       actions: [
         TextButton(
           onPressed: visible.isEmpty
@@ -772,22 +789,14 @@ class _HiddenSpacePageState extends State<HiddenSpacePage> {
             fit: StackFit.expand,
             children: [
               tileWidget,
-              if (selected) ...[
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.32),
-                      borderRadius: BorderRadius.circular(AppRadius.xs),
-                    ),
+              // 多选态的选中框/勾选圆点和相册页共用一份（TileSelectionOverlay）。
+              if (_selecting)
+                IgnorePointer(
+                  child: TileSelectionOverlay(
+                    selected: selected,
+                    radius: AppRadius.xs,
                   ),
                 ),
-                const Positioned(
-                  top: 4,
-                  right: 4,
-                  child: Icon(Icons.check_circle,
-                      size: 20, color: Colors.white),
-                ),
-              ],
             ],
           ),
         );

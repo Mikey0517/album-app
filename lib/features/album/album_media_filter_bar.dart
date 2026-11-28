@@ -33,11 +33,15 @@ class AlbumMediaFilterBar extends StatelessWidget {
   final AlbumMediaFilter selected;
   final ValueChanged<AlbumMediaFilter> onChanged;
 
+  /// 深色底（隐藏空间）：文字换浅色，不铺浅渐变。
+  final bool onDark;
+
   const AlbumMediaFilterBar({
     super.key,
     required this.counts,
     required this.selected,
     required this.onChanged,
+    this.onDark = false,
   });
 
   @override
@@ -47,6 +51,7 @@ class AlbumMediaFilterBar extends StatelessWidget {
     return AppSegmentedBar(
       selectedIndex: selected.index,
       onChanged: (index) => onChanged(AlbumMediaFilter.values[index]),
+      onDark: onDark,
       items: [
         for (final filter in AlbumMediaFilter.values)
           AppSegmentedItem(filter.label, count: counts.of(filter)),

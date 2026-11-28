@@ -31,6 +31,7 @@ import '../../widgets/app_segmented_bar.dart';
 import '../../widgets/empty_state.dart';
 import '../../widgets/loading_view.dart';
 import '../../widgets/selection_footer.dart';
+import '../../widgets/tile_selection_overlay.dart';
 import '../download/batch_download.dart';
 import '../viewer/media_viewer_page.dart';
 import 'album_media_filter.dart';
@@ -786,7 +787,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         ? _coverSelectedId == media.id
         : _selected.contains(media.id);
     final showSelection = _selecting || widget.coverPickMode;
-    final radius = BorderRadius.circular(_gridRadius);
     return Stack(
       key: tileKey,
       fit: StackFit.expand,
@@ -810,40 +810,9 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         ),
         if (showSelection)
           IgnorePointer(
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: radius,
-                border: Border.all(
-                  color: selected
-                      ? AppColors.primary
-                      : Colors.white.withValues(alpha: 0.5),
-                  width: selected ? 2.5 : 1,
-                ),
-                color: selected
-                    ? AppColors.primary.withValues(alpha: 0.14)
-                    : Colors.black.withValues(alpha: 0.04),
-              ),
-            ),
-          ),
-        if (showSelection)
-          Positioned(
-            top: 5,
-            right: 5,
-            child: IgnorePointer(
-              child: Container(
-                width: 20,
-                height: 20,
-                decoration: BoxDecoration(
-                  color: selected
-                      ? AppColors.primary
-                      : Colors.black.withValues(alpha: 0.35),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 1.5),
-                ),
-                child: selected
-                    ? const Icon(Icons.check, size: 13, color: Colors.white)
-                    : null,
-              ),
+            child: TileSelectionOverlay(
+              selected: selected,
+              radius: _gridRadius,
             ),
           ),
       ],

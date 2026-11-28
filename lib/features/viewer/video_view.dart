@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/design/text_styles.dart';
+import '../../core/formatters.dart';
 import '../../core/url_utils.dart';
 import '../../models/media.dart';
 import 'corrected_video_layer.dart';
@@ -76,6 +77,12 @@ class _VideoViewState extends State<VideoView> {
   bool _buffering = false;
   bool _suppressBuffering = false;
 
+  /// 倍速，默认 1.0。
+  double _speed = 1;
+
+  /// 左右滑动快进/倒退时的目标位置；null 表示没在拖。
+  Duration? _seekTarget;
+
   @override
   void initState() {
     super.initState();
@@ -101,6 +108,11 @@ class _VideoViewState extends State<VideoView> {
                 ));
       _controller = controller;
       await controller.initialize();
+      try {
+        await controller.setPlaybackSpeed(_speed);
+      } catch (_) {
+        // 个别解码器（或测试替身）不支持改倍速：保持 1.0 继续播。
+      }
       controller.addListener(_onValueChanged);
       if (!mounted) return;
       setState(() => _loading = false);
@@ -117,6 +129,62 @@ class _VideoViewState extends State<VideoView> {
       }
       _notifyPlaying(false);
     }
+  }
+
+  Future<void> _setSpeed(double value) async {
+    _speed = value;
+    try {
+      await _controller?.setPlaybackSpeed(value);
+    } catch (_) {
+      // 个别解码器不支持某些倍速，保持原来的播放速度即可。
+    }
+    if (mounted) setState(() {});
+  }
+
+  // ---- 左右滑动快进 / 倒退 ----
+
+  /// 每滑动多少逻辑像素对应 1 秒。8dp ≈ 1s，横屏划满一屏大约 1 分钟。
+  static const double _pxPerSecond = 8;
+
+  Duration _clampPosition(Duration value, Duration duration) {
+    if (value < Duration.zero) return Duration.zero;
+    if (duration > Duration.zero && value > duration) return duration;
+    return value;
+  }
+
+  void _onSeekDragStart(DragStartDetails details) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    _seekTarget = controller.value.position;
+    widget.onUserInteraction();
+    setState(() {});
+  }
+
+  void _onSeekDragUpdate(DragUpdateDetails details) {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+    _seekTarget ??= controller.value.position;
+    final deltaMs = (details.delta.dx / _pxPerSecond * 1000).round();
+    _seekTarget = _clampPosition(
+      _seekTarget! + Duration(milliseconds: deltaMs),
+      controller.value.duration,
+    );
+    widget.onUserInteraction();
+    setState(() {});
+  }
+
+  void _onSeekDragEnd(DragEndDetails details) {
+    final controller = _controller;
+    final target = _seekTarget;
+    _seekTarget = null;
+    if (controller == null || target == null) {
+      if (mounted) setState(() {});
+      return;
+    }
+    _suppressBufferingForSeek();
+    controller.seekTo(target);
+    widget.onUserInteraction();
+    if (mounted) setState(() {});
   }
 
   void _onValueChanged() {
@@ -215,6 +283,9 @@ class _VideoViewState extends State<VideoView> {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: widget.onToggleUi,
+      onHorizontalDragStart: _onSeekDragStart,
+      onHorizontalDragUpdate: _onSeekDragUpdate,
+      onHorizontalDragEnd: _onSeekDragEnd,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -304,6 +375,18 @@ class _VideoViewState extends State<VideoView> {
                 ),
               ),
             ),
+          if (_seekTarget != null && initialized)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: _SeekHud(
+                    target: _seekTarget!,
+                    from: controller.value.position,
+                    duration: controller.value.duration,
+                  ),
+                ),
+              ),
+            ),
           if (initialized && widget.uiVisible)
             Positioned(
               left: 0,
@@ -316,6 +399,8 @@ class _VideoViewState extends State<VideoView> {
                   onInteraction: widget.onUserInteraction,
                   onToggleRotation: widget.onToggleRotation,
                   onRestart: _suppressBufferingForSeek,
+                  speed: _speed,
+                  onSpeedChanged: _setSpeed,
                 ),
               ),
             ),
@@ -361,6 +446,60 @@ class VideoBufferingIndicator extends StatelessWidget {
           strokeWidth: 2,
           color: Colors.white70,
         ),
+      ),
+    );
+  }
+}
+
+/// 左右滑动时的提示：快进/倒退多少秒 + 目标时间。
+class _SeekHud extends StatelessWidget {
+  final Duration target;
+  final Duration from;
+  final Duration duration;
+
+  const _SeekHud({
+    required this.target,
+    required this.from,
+    required this.duration,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final deltaMs = target.inMilliseconds - from.inMilliseconds;
+    final forward = deltaMs >= 0;
+    final seconds = (deltaMs.abs() / 1000).round();
+    final label = '${forward ? '快进' : '倒退'} ${seconds}s';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                forward ? Icons.fast_forward_rounded : Icons.fast_rewind_rounded,
+                size: 18,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: AppText.caption.copyWith(color: Colors.white),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${formatDuration(target.inMilliseconds)} / '
+            '${formatDuration(duration.inMilliseconds)}',
+            style: AppText.caption.copyWith(color: Colors.white70),
+          ),
+        ],
       ),
     );
   }
